@@ -48,6 +48,11 @@ try:
 except Exception:
     pass
 
+# Helvetica (the fallback on Linux/Vercel, which has no Windows fonts) has no
+# rupee sign and prints a box, so the sign always comes from a bundled font.
+_FONT_RUPEE = "DejaVuSans-Bold"
+pdfmetrics.registerFont(TTFont(_FONT_RUPEE, str(Path(__file__).parent.parent / "static" / "assets" / "fonts" / "DejaVuSans-Bold.ttf")))
+
 
 @dataclass
 class InvoiceContext:
@@ -283,7 +288,7 @@ def generate_eee_taxi_invoice_pdf(
         item_rows.append(["", "", "", "", "", ""])
 
     n = len(item_rows)
-    item_rows.append(["", "", "", "", _p("Total", st["smb"]), _p(f"₹ {_amt(ctx.total_amount)}", st["smbr"])])
+    item_rows.append(["", "", "", "", _p("Total", st["smb"]), _p(f'<font name="{_FONT_RUPEE}">₹</font> {_amt(ctx.total_amount)}', st["smbr"])])
 
     sc = [
         ("BOX",(0,0),(-1,-1),0.5,colors.black),
