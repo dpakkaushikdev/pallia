@@ -1025,7 +1025,7 @@
           <thead><tr>
             <th style="width:36px;"><input type="checkbox" id="txAll" aria-label="Select all" onchange="txToggleAll(this.checked)"></th>
             <th>Invoice no.</th><th>Date</th><th>Client</th><th>Car</th><th>Booking</th>
-            <th style="text-align:right;">Amount (₹)</th><th>Status</th>
+            <th style="text-align:right;">Amount (₹)</th><th>Created by</th><th>Status</th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -3506,6 +3506,7 @@ function txRender() {
       <td class="inv">${rcEsc(i.car_no)}</td>
       <td>${i.booking_type === "rental" ? "Rental" : "Point to point"}</td>
       <td class="num">${i.total ? txMoney(i.total) : "—"}</td>
+      <td>${i.created_by ? rcEsc(i.created_by) : '<span class="meta">—</span>'}</td>
       <td>${txStatus(i)}</td>
     </tr>`).join("");
   $("#txTable tbody").innerHTML = rows;

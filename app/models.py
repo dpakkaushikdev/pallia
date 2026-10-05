@@ -238,6 +238,8 @@ class EeeTaxiBatch(Base):
     total_rows: Mapped[int] = mapped_column(Integer, default=0)
     csv_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sign_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)   # "usb" | "dummy"
+    # Name (or email) of the user who uploaded the CSV; empty on older batches.
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Everything needed to rebuild any row's invoice in a later request. The
     # browser drives generation one invoice at a time, and each request may

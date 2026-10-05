@@ -109,6 +109,8 @@ def _migrate_existing_db() -> None:
             existing = {c["name"] for c in inspector.get_columns("eee_taxi_batches")}
             if "sign_mode" not in existing:
                 conn.execute(text("ALTER TABLE eee_taxi_batches ADD COLUMN sign_mode VARCHAR(16)"))
+            if "created_by" not in existing:
+                conn.execute(text("ALTER TABLE eee_taxi_batches ADD COLUMN created_by VARCHAR(255)"))
             if "csv_data" not in existing:
                 conn.execute(text(f"ALTER TABLE eee_taxi_batches ADD COLUMN csv_data {binary_type}"))
             if "calc_csv_data" not in existing:

@@ -41,6 +41,7 @@ def _item(i: ExportItem) -> dict:
         "car_no": i.car_no,
         "route_no": i.route_no,
         "booking_type": i.booking_type,
+        "created_by": i.created_by,
         "total": f"{i.total:.2f}" if i.total is not None else None,
         "exported_at": i.exported_at.isoformat() + "Z" if i.exported_at else None,
         "problem": i.problem,
@@ -57,7 +58,7 @@ def preview(
 ) -> dict:
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "The From date is after the To date.")
-    items = find_export_items(db, date_from, date_to, include_exported)
+    items = find_export_items(db, date_from, date_to, include_exported, newest_first=True)
     return {"invoices": [_item(i) for i in items]}
 
 

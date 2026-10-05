@@ -44,6 +44,8 @@ class ExportItem:
     booking_type: str
     total: Optional[Decimal]
     exported_at: Optional[datetime]
+    created_by: str = ""
+    batch_created_at: Optional[datetime] = None
     problem: str = ""
     voucher: Optional[TallyVoucher] = None
 
@@ -66,6 +68,14 @@ def _description(row: EeeTaxiRow, rates: RateCard) -> tuple[str, ...]:
         if fr.night_charge:
             lines.append(f"Night Charges ({rates.night_label}=  {_n(fr.night_charge)})")
     return tuple(lines)
+
+
+def row_total(row: EeeTaxiRow) -> Decimal:
+    """Invoice total as printed: the CSV total, or fare + toll + GST when it has none."""
+    if row.total_amount:
+        return row.total_amount
+    base = row.tax_base + row.parking
+    return base + sum(compute_tax(base, is_local(row.client_gstin)))
 
 
 def voucher_for_row(
@@ -125,8 +135,15 @@ def _items_for_batch(batch: EeeTaxiBatch, invoices: list[EeeTaxiInvoice],
             route_no=row.route_no if row else "",
             booking_type=inv.booking_type or (row.booking_type if row else ""),
             exported_at=inv.tally_exported_at,
+            created_by=batch.created_by or "",
+            batch_created_at=batch.created_at,
             **kw,
         )
+
+    if not batch.csv_data:
+        problem = ("Made by an older version of the app that did not keep the uploaded CSV, so the car "
+                   "and amounts cannot be rebuilt. Generate this batch again to export it.")
+        return [item(inv, None, total=None, problem=problem) for inv in invoices]
 
     try:
         rates = batch_rates(batch)
@@ -145,7 +162,7 @@ def _items_for_batch(batch: EeeTaxiBatch, invoices: list[EeeTaxiInvoice],
             v = voucher_for_row(row, inv.invoice_no, batch.invoice_date, rates, cost_centres)
             out.append(item(inv, row, total=v.total, voucher=v))
         except ExportProblem as exc:
-            out.append(item(inv, row, total=None, problem=str(exc)))
+            out.append(item(inv, row, total=row_total(row), problem=str(exc)))
     return out
 
 
@@ -155,8 +172,9 @@ def find_export_items(
     date_to: Optional[date] = None,
     include_exported: bool = False,
     invoice_ids: Optional[list[str]] = None,
+    newest_first: bool = False,
 ) -> list[ExportItem]:
-    """Finished (signed) invoices in the date range, oldest invoice number first."""
+    """Finished (signed) invoices in the date range, oldest invoice first unless *newest_first*."""
     q = (
         db.query(EeeTaxiInvoice)
         .join(EeeTaxiBatch, EeeTaxiInvoice.batch_id == EeeTaxiBatch.id)
@@ -179,7 +197,8 @@ def find_export_items(
     items: list[ExportItem] = []
     for batch_id, invoices in by_batch.items():
         items += _items_for_batch(db.get(EeeTaxiBatch, batch_id), invoices, cost_centres)
-    return sorted(items, key=lambda i: (i.invoice_date, i.invoice_no))
+    return sorted(items, key=lambda i: (i.invoice_date, i.batch_created_at or datetime.min, i.invoice_no),
+                  reverse=newest_first)
 
 
 def mark_exported(db: Session, invoice_ids: list[str], when: Optional[datetime] = None) -> None:

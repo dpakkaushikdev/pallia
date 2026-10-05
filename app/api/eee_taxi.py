@@ -13,7 +13,7 @@ from loguru import logger
 from app.config import settings
 from app.database import SessionLocal
 from app.services.auth import require_permission
-from app.models import EeeTaxiBatch, EeeTaxiBatchStatus, EeeTaxiInvoice, EeeTaxiInvoiceStatus
+from app.models import EeeTaxiBatch, EeeTaxiBatchStatus, EeeTaxiInvoice, EeeTaxiInvoiceStatus, User
 from app.services.eee_taxi_csv import parse_eee_taxi_csv
 from app.services.eee_taxi_fare_check import STATUS_OK, apply_card_fares, check_p2p_fares
 from app.services.eee_taxi_pipeline import (
@@ -121,6 +121,7 @@ async def start_batch(
     sign_mode: str = Form("usb"),
     calc_csv: Optional[UploadFile] = File(None),
     use_card_fare_rows: str = Form(""),
+    user: User = Depends(require_permission("eee_taxi")),
 ):
     """Upload trip CSV (and optional modified calculated CSV) and create a batch.
 
@@ -181,6 +182,7 @@ async def start_batch(
             total_rows=len(rows),
             csv_filename=csv_file.filename,
             sign_mode=sign_mode,
+            created_by=user.full_name or user.email,
             # Stored so any later request can rebuild any row on its own.
             csv_data=csv_bytes,
             calc_csv_data=calc_bytes,
