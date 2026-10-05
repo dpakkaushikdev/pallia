@@ -110,3 +110,15 @@ def test_special_characters_are_escaped():
 def test_several_vouchers_in_one_file():
     root = _parse(render_tally_xml([_voucher(), _voucher(invoice_no="DL/HO/26-27/1386")]))
     assert [v.findtext("VOUCHERNUMBER") for v in root.iter("VOUCHER")] == ["DL/HO/26-27/1385", "DL/HO/26-27/1386"]
+
+
+def test_header_and_tax_rate_tags_match_the_tally_sample():
+    [v] = _parse(render_tally_xml([_voucher()])).iter("VOUCHER")
+    assert v.findtext("VATDEALERTYPE") == "Regular"
+    assert v.findtext("VCHSTATUSVOUCHERTYPE") == "Sales"
+    assert v.findtext("VOUCHERTYPEORIGNAME") == "Sales"
+    rates = {e.findtext("LEDGERNAME"): e.findtext("RATEOFINVOICETAX.LIST/RATEOFINVOICETAX")
+             for e in v.iter("LEDGERENTRIES.LIST")}
+    # Tally puts the 18% rate on the toll and tax lines, not on the party or rental line.
+    assert rates[DEFAULT_LEDGERS.toll] == "18" and rates[DEFAULT_LEDGERS.igst] == "18"
+    assert rates[DEFAULT_LEDGERS.sales_interstate] is None

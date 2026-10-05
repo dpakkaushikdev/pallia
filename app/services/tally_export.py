@@ -144,8 +144,12 @@ def _rate_details() -> str:
     )
 
 
+_INVOICE_TAX_RATE = "<RATEOFINVOICETAX.LIST TYPE=\"Number\"><RATEOFINVOICETAX>18</RATEOFINVOICETAX></RATEOFINVOICETAX.LIST>"
+
+
 def _income_entry(v: TallyVoucher, ledger: str, hsn: str, amount: Decimal,
-                  ledgers: TallyLedgers, description: tuple[str, ...] = ()) -> str:
+                  ledgers: TallyLedgers, description: tuple[str, ...] = (),
+                  invoice_tax_rate: bool = False) -> str:
     amt = _amt(amount)
     udf = ""
     if description:
@@ -157,6 +161,7 @@ def _income_entry(v: TallyVoucher, ledger: str, hsn: str, amount: Decimal,
         )
     return (
         "<LEDGERENTRIES.LIST>"
+        + (_INVOICE_TAX_RATE if invoice_tax_rate else "")
         + _tag("LEDGERNAME", ledger)
         + _tag("GSTOVRDNTAXABILITY", "Taxable")
         + _tag("GSTSOURCETYPE", "Ledger")
@@ -187,6 +192,7 @@ def _tax_entry(ledger: str, amount: Decimal) -> str:
     amt = _amt(amount)
     return (
         "<LEDGERENTRIES.LIST>"
+        + _INVOICE_TAX_RATE
         + _tag("LEDGERNAME", ledger)
         + _tag("ISDEEMEDPOSITIVE", "No")
         + _tag("ISPARTYLEDGER", "No")
@@ -207,7 +213,7 @@ def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
 
     entries = [_party_entry(v), _income_entry(v, sales_ledger, sales_hsn, v.fare, ledgers, v.description)]
     if v.toll:
-        entries.append(_income_entry(v, ledgers.toll, ledgers.hsn_toll, v.toll, ledgers))
+        entries.append(_income_entry(v, ledgers.toll, ledgers.hsn_toll, v.toll, ledgers, invoice_tax_rate=True))
     if v.is_local:
         entries += [_tax_entry(ledgers.cgst, v.cgst), _tax_entry(ledgers.sgst, v.sgst)]
     else:
@@ -224,6 +230,7 @@ def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
         + _tag("EFFECTIVEDATE", _d(v.invoice_date))
         + _tag("BILLOFLADINGDATE", _d(v.trip_date))
         + _tag("GSTREGISTRATIONTYPE", "Regular")
+        + _tag("VATDEALERTYPE", "Regular")
         + _tag("STATENAME", state)
         + _tag("COUNTRYOFRESIDENCE", "India")
         + _tag("PARTYGSTIN", p.gstin)
@@ -249,11 +256,13 @@ def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
         + _tag("BASICBASEPARTYNAME", p.entity_name)
         + _tag("NUMBERINGSTYLE", "Manual")
         + _tag("PERSISTEDVIEW", "Invoice Voucher View")
+        + _tag("VCHSTATUSVOUCHERTYPE", ledgers.voucher_type)
         + _tag("VCHSTATUSTAXUNIT", ledgers.gst_registration)
         + _tag("BASICSHIPVESSELNO", v.car_no)
         + _tag("BASICDUEDATEOFPYMT", ledgers.payment_terms)
         + _tag("NARRATION", v.route_no)
         + _tag("VCHENTRYMODE", "Accounting Invoice")
+        + _tag("VOUCHERTYPEORIGNAME", ledgers.voucher_type)
         + _tag("ISINVOICE", "Yes")
         + "<INVOICEORDERLIST.LIST>"
         + _tag("BASICORDERDATE", _d(v.trip_date))
