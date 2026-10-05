@@ -196,28 +196,35 @@ To wipe state and start fresh: `Remove-Item data\app.db` (and optionally `Remove
 
 ## Hosting: GitHub, Supabase, Vercel
 
-All tokens live only in `.env` (gitignored). **Never print, echo, commit or paste a token value**, and never write one into this file, git config, a URL saved in a remote, or a log. Read it from `.env` into a shell variable for the one command that needs it. Pushing code is standing-approved (see **Push after every code change** below). Anything else that deploys or changes production data still needs the user to ask.
+All tokens live only in `.env` (gitignored). Some lines have spaces around `=` (e.g. `VERCEL_TOKEN = ...`), so always read a key with the `envget` helper below, never `grep '^KEY='`. **Never print, echo, commit or paste a token value**, and never write one into this file, git config, a URL saved in a remote, or a log. Read it from `.env` into a shell variable for the one command that needs it. Never `cat`/`sed`/`grep` lines of `.env` to the output: short values such as the DB password show up even when long ones are masked. List key names only: `grep -oE '^[A-Za-z_][A-Za-z0-9_]*\s*=' .env`. Pushing code is standing-approved (see **Push after every code change** below). Anything else that deploys or changes production data still needs the user to ask.
 
-**Push after every code change (standing instruction from the user).** When a code change is done and its tests pass, commit it right away (conventional message, see Conventions) and push `main` to the `pallia` remote using the command below. Don't wait to be asked. Don't push if tests that passed before your change now fail; fix them first. Never stage `.env`, `build/`, `data/` or `logs/`.
+**Push after every code change (standing instruction from the user).** When a code change is done and its tests pass, commit it right away (conventional message, see Conventions) and push `main` to the `pallia` remote using the command below. Don't wait to be asked. A push to `pallia/main` **deploys to production on Vercel**. After pushing, check that the deployment for your commit reaches `READY` (command below) and tell the user if it fails. Don't push if tests that passed before your change now fail; fix them first. Never stage `.env`, `build/`, `data/` or `logs/`.
 
 | Service  | Where                                                                 | `.env` keys                                                        |
 |----------|-----------------------------------------------------------------------|--------------------------------------------------------------------|
 | GitHub   | https://github.com/dpakkaushikdev/pallia (git remote `pallia`)         | `GITHUB_PALLIA_TOKEN`                                              |
 | Supabase | https://supabase.com/dashboard/project/gwbaysnqswoiqhfqcial           | `SUPABASE_DB_URL`, `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_ANALYTICS_TABLE` |
-| Vercel   | https://vercel.com/dpakkaushikdev (config: `vercel.json`, region `bom1`) | none yet; add `VERCEL_TOKEN` to use the CLI                      |
+| Vercel   | https://vercel.com/dpakkaushikdev, project `pallia-eee-billing` (`prj_OqoD2E43o0zOo9Vl9Q6BlK1PgWFG`), live at https://pallia-eee-billing.vercel.app | `VERCEL_TOKEN` |
 
 **GitHub.** `pallia` is the repo the app is deployed from; `origin` (`dpakkaushik/freight-billing-automation`) is the original source repo. `gh` is not installed, so use `git` and the REST API. Push without storing the token anywhere (Git Bash):
 
 ```bash
-TOKEN=$(grep -E '^GITHUB_PALLIA_TOKEN=' .env | cut -d= -f2-)
+envget() { grep -E "^$1\s*=" .env | head -1 | sed -E 's/^[^=]*=\s*//' | tr -d '\r" '; }
+TOKEN=$(envget GITHUB_PALLIA_TOKEN)
 AUTH=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
 git -c credential.helper= -c "http.https://github.com/.extraheader=Authorization: Basic $AUTH" push pallia main
 # REST API: curl -H "Authorization: Bearer $TOKEN" https://api.github.com/repos/dpakkaushikdev/pallia
 ```
 
-**Supabase.** When `SUPABASE_DB_URL` is set it replaces `DATABASE_URL` (`app/config.py::sqlalchemy_database_url`). So **`run.py` on this PC reads and writes the live production database**, not `data/app.db`. For read-only checks use the app's engine (`from app.database import engine`). There is no Alembic: new columns are added by the `ALTER TABLE` checks in `app/database.py`, which run at startup. Every new model column needs one there, or Postgres will be missing it. `tests/conftest.py` blanks the Supabase keys so tests never touch production. Keep it that way. `scripts/migrate_sqlite_to_supabase.py` copies an old SQLite DB into Supabase. Ask before writing or deleting production rows.
+**Supabase.** When `SUPABASE_DB_URL` is set it replaces `DATABASE_URL` (`app/config.py::sqlalchemy_database_url`). So `run.py` on this PC uses that Supabase database, not `data/app.db`. **Caution (5 Oct 2026):** the `.env` value points to project `gwbaysnqswoiqhfqcial`, but the live Vercel app uses a *different* database. It had 109+ invoices and newer batches, while this one has 76 and nothing after 2 Oct. Vercel's `SUPABASE_DB_URL` is a sensitive env var and can't be read back. Until the user copies the live value into `.env`, nothing you query or change locally reaches the live app. For read-only checks use the app's engine (`from app.database import engine`). There is no Alembic: new columns are added by the `ALTER TABLE` checks in `app/database.py`, which run at startup. Every new model column needs one there, or Postgres will be missing it. `tests/conftest.py` blanks the Supabase keys so tests never touch production. Keep it that way. `scripts/migrate_sqlite_to_supabase.py` copies an old SQLite DB into Supabase. Ask before writing or deleting production rows.
 
-**Vercel.** The app runs there as a serverless FastAPI function. Two consequences: no background threads (the browser drives generation one invoice per request), and the disk is per-instance and temporary. That is why PDFs, uploaded CSVs and rate snapshots are stored in the database. Runtime secrets (`SUPABASE_DB_URL`, `AUTH_JWT_SECRET`, ...) are set in the Vercel project settings, not read from this `.env`. No Vercel token or CLI is set up yet. To use one, add `VERCEL_TOKEN` to `.env` and run `npx vercel ... --token "$VERCEL_TOKEN"`. Check in the Vercel dashboard whether deploys are triggered by pushes to `pallia`/`main` before assuming a push deploys.
+**Vercel.** The app runs there as a serverless FastAPI function. Two consequences: no background threads (the browser drives generation one invoice per request), and the disk is per-instance and temporary. That is why PDFs, uploaded CSVs and rate snapshots are stored in the database. Runtime secrets (`SUPABASE_DB_URL`, `AUTH_JWT_SECRET`, ...) are set in the Vercel project settings, not read from this `.env`. The project is Git-linked to `dpakkaushikdev/pallia` with production branch `main`, so every push to `pallia/main` deploys. The Vercel CLI isn't installed; use the REST API (or `npx vercel ... --token "$VT"`):
+
+```bash
+VT=$(envget VERCEL_TOKEN)   # envget from the GitHub block above
+# Latest deployments: state (BUILDING / READY / ERROR), commit sha, url
+curl -s -H "Authorization: Bearer $VT" "https://api.vercel.com/v6/deployments?projectId=prj_OqoD2E43o0zOo9Vl9Q6BlK1PgWFG&limit=3"
+```
 
 ---
 
