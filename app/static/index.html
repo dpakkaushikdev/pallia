@@ -488,6 +488,11 @@
     .tx-problem { color: var(--err); font-size: 12.5px; }
     .tx-done { color: var(--ok); font-size: 12.5px; }
     @media (max-width: 760px) { #txTable { display: block; overflow-x: auto; } }
+    #eetReviewTable td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    #eetReviewTable td.inv { font-family: var(--font-mono); font-size: 12.5px; }
+    #eetReviewTable tr.removed td { opacity: .45; text-decoration: line-through; }
+    #eetReviewTable tr.removed td:last-child { opacity: 1; text-decoration: none; }
+    #eetReviewTable tr.warn td:first-child { box-shadow: inset 3px 0 0 var(--err); }
 
     /* ── Dashboard welcome strip ── */
     .welcome-strip {
@@ -872,7 +877,8 @@
         <div class="card-title" style="margin-bottom:14px;">Step 1 — Upload Trip CSV</div>
         <div class="field-group">
           <label class="field">Trip CSV</label>
-          <input type="file" id="eetCsvFile" accept=".csv" style="width:100%;" />
+          <input type="file" id="eetCsvFile" accept=".csv" style="width:100%;"
+                 onchange="document.getElementById('eetPhase1Error').textContent = ''" />
         </div>
         <button class="btn" style="width:100%;margin-top:16px;" onclick="eetUploadAndCalculate()">
           Upload &amp; Calculate
@@ -904,7 +910,7 @@
                 <span style="font-size:10px;font-weight:400;color:var(--text-dim);">(optional)</span>
               </label>
               <input type="file" id="eetModifiedCsvFile" accept=".csv"
-                     style="width:100%;margin-top:4px;" />
+                     style="width:100%;margin-top:4px;" onchange="eetLoadPreview()" />
               <div style="font-size:11px;color:var(--text-dim);margin-top:3px;">
                 Edit Calc_Trip_Fare in downloaded file, re-upload here to override
               </div>
@@ -912,14 +918,14 @@
 
             <div class="field-group">
               <label class="field">Invoice Date</label>
-              <input type="date" id="eetInvDate" style="width:100%;" />
+              <input type="date" id="eetInvDate" style="width:100%;" onchange="eetUpdateReviewTotals()" />
             </div>
 
             <div class="field-group" style="margin-top:12px;">
               <label class="field">Starting Invoice Suffix</label>
               <input type="number" id="eetStartSuffix" min="1" max="9999" value="1"
-                     style="width:100%;" placeholder="e.g. 317" />
-              <div style="font-size:11px;color:var(--text-dim);margin-top:3px;">
+                     style="width:100%;" placeholder="e.g. 1388" oninput="eetUpdateReviewTotals()" />
+              <div id="eetNumberRange" style="font-size:11px;color:var(--text-dim);margin-top:3px;">
                 First invoice will be DL/HO/YY-YY/XXXX
               </div>
             </div>
@@ -950,8 +956,8 @@
               </div>
             </div>
 
-            <button class="btn" style="width:100%;margin-top:18px;" onclick="eetProceed()">
-              Proceed — Generate &amp; Sign All Invoices
+            <button class="btn" id="eetProceedBtn" style="width:100%;margin-top:18px;" onclick="eetProceed()">
+              Confirm &amp; Generate Invoices
             </button>
             <button class="btn secondary" style="width:100%;margin-top:8px;font-size:12px;"
                     onclick="eetReset()">
@@ -970,7 +976,7 @@
             <div style="display:flex;justify-content:space-between;align-items:center;
                         margin-bottom:10px;">
               <div id="eetBatchSummary" style="font-size:13px;color:var(--text-dim);">
-                Fill in the settings and click Proceed to generate invoices.
+                Check each trip below. Remove any that are wrong, then click Confirm &amp; Generate.
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;">
                 <button id="eetDownloadP2pBtn" class="btn secondary sm"
@@ -981,6 +987,7 @@
                         style="display:none;" onclick="eetDownloadAll()">All ZIP</button>
               </div>
             </div>
+            <div id="eetReview"></div>
             <div id="eetInvoiceList" style="display:flex;flex-direction:column;gap:8px;"></div>
           </div>
         </div>
@@ -1025,7 +1032,7 @@
           <thead><tr>
             <th style="width:36px;"><input type="checkbox" id="txAll" aria-label="Select all" onchange="txToggleAll(this.checked)"></th>
             <th>Invoice no.</th><th>Date</th><th>Client</th><th>Car</th><th>Booking</th>
-            <th style="text-align:right;">Amount (₹)</th><th>Created by</th><th>Status</th>
+            <th style="text-align:right;">Amount (₹)</th><th>Created by</th><th>Status</th><th id="txAdminHead"></th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -2751,6 +2758,10 @@ function eetReset() {
   document.getElementById("eetBatchMeta").style.display = "none";
   document.getElementById("eetFareCheck").innerHTML = "";
   _eetFareIssues = [];
+  _eetReviewRows = [];
+  _eetExcluded = new Set();
+  document.getElementById("eetReview").innerHTML = "";
+  eetUpdateReviewTotals();
   ["eetDownloadAllBtn","eetDownloadP2pBtn","eetDownloadRentalBtn"].forEach(id => {
     document.getElementById(id).style.display = "none";
   });
@@ -2807,6 +2818,8 @@ function eetUploadAndCalculate() {
         document.getElementById("eetPhase1").style.display = "none";
         document.getElementById("eetPhase2").style.display = "";
         eetRunFareCheck(_eetCsvFile);
+        _eetExcluded = new Set();
+        eetLoadPreview();
       });
     })
     .catch(e => {
@@ -2828,6 +2841,13 @@ async function eetProceed() {
   if (!invDate)               { alert("Please select an invoice date."); return; }
   if (!suffix || +suffix < 1) { alert("Please enter a valid starting suffix."); return; }
   if (signMode === "usb" && !pin) { alert("Please enter the DSC PIN for USB signing."); return; }
+
+  const kept = eetKeptRows();
+  if (!_eetReviewRows.length) { alert("The trip check has not loaded yet. Wait a moment and try again."); return; }
+  if (!kept.length) { alert("Every trip is removed. Undo at least one."); return; }
+  const firstNo = eetInvoiceNo(+suffix), lastNo = eetInvoiceNo(+suffix + kept.length - 1);
+  const removedNote = _eetExcluded.size ? `\n${_eetExcluded.size} removed trip(s) will not be invoiced.` : "";
+  if (!confirm(`Generate ${kept.length} invoice(s), numbered ${firstNo} to ${lastNo}?${removedNote}`)) return;
 
   // USB signing runs in this browser through the local helper, so make sure
   // it is reachable before the server starts generating anything.
@@ -2853,11 +2873,13 @@ async function eetProceed() {
     fd.append("calc_csv", reviewInput.files[0]);
   }
   fd.append("use_card_fare_rows", eetChosenCardFareRows());
+  fd.append("exclude_rows", [..._eetExcluded].join(","));
 
   fetch("/api/eee-taxi/batch", { method: "POST", body: fd, headers: authHeaders() })
     .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.detail || "Error")))
     .then(d => {
       _eetBatchId = d.batch_id;
+      document.getElementById("eetReview").innerHTML = "";
       const parts = ["Total: " + d.total_rows + " rows"];
       if (d.p2p_count)    parts.push("P2P: " + d.p2p_count);
       if (d.rental_count) parts.push("Rental: " + d.rental_count);
@@ -2867,7 +2889,10 @@ async function eetProceed() {
       _eetPollTimer = setInterval(eetPollBatch, 2000);
       eetDriveBatch();
     })
-    .catch(e => { alert("Failed to start batch: " + e); });
+    .catch(e => {
+      document.getElementById("eetBatchSummary").textContent = "Not started — see the message.";
+      alert("Failed to start batch: " + e);
+    });
 }
 
 function eetPollBatch() {
@@ -2946,7 +2971,7 @@ function eetRenderInvoices(invoices) {
          </div>
          <div style="font-size:11px;color:var(--text-dim);white-space:nowrap;
                      overflow:hidden;text-overflow:ellipsis;">
-           ${inv.entity_name || inv.client_gstin || ""}
+           ${inv.route_no ? rcEsc(inv.route_no) + " · " : ""}${inv.entity_name || inv.client_gstin || ""}
          </div>
          ${errHtml}
        </div>
@@ -3508,7 +3533,9 @@ function txRender() {
       <td class="num">${i.total ? txMoney(i.total) : "—"}</td>
       <td>${i.created_by ? rcEsc(i.created_by) : '<span class="meta">—</span>'}</td>
       <td>${txStatus(i)}</td>
+      ${isAdmin() ? `<td><button class="btn secondary sm" onclick="txDelete('${rcEsc(i.id)}')">Delete</button></td>` : ""}
     </tr>`).join("");
+  $("#txAdminHead").classList.toggle("hidden", !isAdmin());
   $("#txTable tbody").innerHTML = rows;
   $("#txTable").classList.toggle("hidden", !_tx.items.length);
   $("#txEmpty").classList.toggle("hidden", _tx.items.length > 0);
@@ -3865,7 +3892,112 @@ function eetRenderFareCheck(data) {
       </div>
     </div>`;
   const all = $("#eetCardPickAll");
-  if (all) all.onchange = () => $$(".eet-card-pick").forEach(c => { c.checked = all.checked; });
+  if (all) all.onchange = () => { $$(".eet-card-pick").forEach(c => { c.checked = all.checked; }); eetLoadPreview(); };
+  $$(".eet-card-pick").forEach(c => { c.onchange = eetLoadPreview; });
+}
+
+// ── EEE-Taxi review: check trips before they get invoice numbers ──────────
+// Numbers are given only to the trips kept here, one after another, so a
+// removed trip never leaves a gap in the DL/HO series.
+let _eetReviewRows = [];
+let _eetExcluded = new Set();
+
+function eetFinancialYear(isoDate) {
+  const d = isoDate ? new Date(isoDate + "T00:00:00") : new Date();
+  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  return `${String(y).slice(2)}-${String(y + 1).slice(2)}`;
+}
+function eetInvoiceNo(n) { return `DL/HO/${eetFinancialYear($("#eetInvDate").value)}/${String(n).padStart(4, "0")}`; }
+function eetKeptRows() { return _eetReviewRows.filter(r => !_eetExcluded.has(r.row_index)); }
+
+async function eetLoadPreview() {
+  if (!_eetCsvFile) return;
+  const box = $("#eetReview");
+  box.innerHTML = `<div class="meta" style="margin-bottom:10px;">Checking trips…</div>`;
+  const fd = new FormData();
+  fd.append("csv_file", _eetCsvFile);
+  const mod = $("#eetModifiedCsvFile");
+  if (mod && mod.files.length) fd.append("calc_csv", mod.files[0]);
+  fd.append("use_card_fare_rows", eetChosenCardFareRows());
+  try {
+    const data = await api("/api/eee-taxi/preview", { method: "POST", body: fd });
+    _eetReviewRows = data.rows;
+    const known = new Set(_eetReviewRows.map(r => r.row_index));
+    _eetExcluded = new Set([..._eetExcluded].filter(i => known.has(i)));
+    eetRenderReview();
+  } catch (e) {
+    _eetReviewRows = [];
+    box.innerHTML = `<div class="extraction-note err" style="display:block;white-space:pre-line;">Could not check the trips: ${rcEsc(e.message)}</div>`;
+    eetUpdateReviewTotals();
+  }
+}
+
+function eetRenderReview() {
+  const rows = _eetReviewRows.map(r => {
+    const out = _eetExcluded.has(r.row_index);
+    const warn = r.warnings.length
+      ? `<div class="tx-problem" style="font-family:inherit;font-size:11.5px;margin-top:3px;white-space:normal;">${r.warnings.map(rcEsc).join("<br>")}</div>` : "";
+    return `<tr class="${out ? "removed" : ""} ${r.warnings.length ? "warn" : ""}">
+      <td class="inv">${rcEsc(r.route_no || "—")}${warn}</td>
+      <td>${rcEsc(new Date(r.trip_date + "T00:00:00").toLocaleDateString("en-IN"))}</td>
+      <td>${rcEsc(r.guest_name)}<div class="meta" style="font-size:11px;">${rcEsc(r.entity_name)}</div></td>
+      <td>${r.booking_type === "rental" ? "Rental" : "P2P"}</td>
+      <td class="inv">${rcEsc(r.car_no)}</td>
+      <td class="num">${txMoney(r.fare)}</td>
+      <td class="num">${txMoney(r.toll)}</td>
+      <td class="num">${txMoney(r.gst)}</td>
+      <td class="num"><b>${txMoney(r.total)}</b></td>
+      <td><button class="btn secondary sm" onclick="eetToggleRow(${r.row_index})">${out ? "Undo" : "Remove"}</button></td>
+    </tr>`;
+  }).join("");
+  const warned = _eetReviewRows.filter(r => r.warnings.length).length;
+  $("#eetReview").innerHTML = `<div class="card" style="padding:14px 16px;margin-bottom:12px;">
+      <div class="card-title" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <span>Review trips before numbering</span><span class="meta" id="eetReviewTotals"></span>
+      </div>
+      ${warned ? `<p class="tx-problem" style="margin:-6px 0 10px;">${warned} trip(s) have something to check (shown in red). Remove them, or fix the CSV and upload it again.</p>` : ""}
+      <div style="overflow:auto;"><table class="data-table" id="eetReviewTable"><thead><tr>
+        <th>DS no / Route No</th><th>Date</th><th>Guest / Client</th><th>Type</th><th>Car</th>
+        <th style="text-align:right;">Fare (₹)</th><th style="text-align:right;">Toll (₹)</th>
+        <th style="text-align:right;">GST (₹)</th><th style="text-align:right;">Total (₹)</th><th></th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
+    </div>`;
+  eetUpdateReviewTotals();
+}
+
+function eetToggleRow(rowIndex) {
+  if (_eetExcluded.has(rowIndex)) _eetExcluded.delete(rowIndex); else _eetExcluded.add(rowIndex);
+  eetRenderReview();
+}
+
+function eetUpdateReviewTotals() {
+  const kept = eetKeptRows();
+  const sum = kept.reduce((s, r) => s + Number(r.total), 0);
+  const totals = $("#eetReviewTotals");
+  if (totals) totals.textContent = `${kept.length} of ${_eetReviewRows.length} trips kept · ₹${txMoney(sum)}`;
+  const start = parseInt($("#eetStartSuffix").value, 10);
+  const range = $("#eetNumberRange");
+  if (range) range.textContent = kept.length && start > 0
+    ? `Invoices ${eetInvoiceNo(start)} to ${eetInvoiceNo(start + kept.length - 1)}`
+    : "First invoice will be DL/HO/YY-YY/XXXX";
+  const btn = $("#eetProceedBtn");
+  if (btn) btn.textContent = kept.length
+    ? `Confirm & Generate ${kept.length} Invoice${kept.length === 1 ? "" : "s"}` : "Confirm & Generate Invoices";
+}
+
+async function txDelete(id) {
+  const i = _tx.items.find(x => x.id === id);
+  if (!i) return;
+  let msg = `Delete invoice ${i.invoice_no}? Its PDF is removed too. This cannot be undone.`;
+  if (i.exported_at) msg += "\n\nIt was already exported to Tally, so delete it in Tally as well.";
+  if (!confirm(msg)) return;
+  try {
+    await api(`/api/eee-taxi/tally/invoices/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await txLoad();
+    txShowMsg(`Deleted ${i.invoice_no}.`, true);
+  } catch (e) {
+    txShowMsg("Could not delete: " + e.message, false);
+  }
 }
 
 function eetChosenCardFareRows() {

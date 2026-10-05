@@ -14,7 +14,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.services.auth import require_permission
 from app.models import EeeTaxiBatch, EeeTaxiBatchStatus, EeeTaxiInvoice, EeeTaxiInvoiceStatus, User
-from app.services.eee_taxi_csv import parse_eee_taxi_csv
+from app.services.eee_taxi_csv import financial_year, format_invoice_no, parse_eee_taxi_csv
 from app.services.eee_taxi_fare_check import STATUS_OK, apply_card_fares, check_p2p_fares
 from app.services.eee_taxi_pipeline import (
     build_zip,
@@ -26,6 +26,7 @@ from app.services.eee_taxi_pipeline import (
     unsigned_pdf_bytes,
 )
 from app.services.eee_taxi_rates import get_rate_card, rate_card_to_dict
+from app.services.eee_taxi_review import review_rows
 from app.services.eee_taxi_rental_calc import (
     apply_fare_overrides,
     generate_full_calc_csv,
@@ -111,47 +112,18 @@ def _parse_row_list(value: str) -> set[int]:
         raise HTTPException(status_code=400, detail="use_card_fare_rows must be a comma-separated list of row numbers.") from exc
 
 
-# ── Start batch ───────────────────────────────────────────────────────────────
+# ── Review + start batch ──────────────────────────────────────────────────────
 
-@router.post("/batch")
-async def start_batch(
-    csv_file: UploadFile,
-    invoice_date: str = Form(...),
-    start_suffix: int = Form(...),
-    sign_mode: str = Form("usb"),
-    calc_csv: Optional[UploadFile] = File(None),
-    use_card_fare_rows: str = Form(""),
-    user: User = Depends(require_permission("eee_taxi")),
-):
-    """Upload trip CSV (and optional modified calculated CSV) and create a batch.
-
-    This only records the batch and its rows. The browser then calls
-    generate-next once per invoice, because work started in a background
-    thread stops as soon as a serverless instance is suspended. USB signing
-    also happens in the browser through the local signing helper, so the DSC
-    PIN is never sent to this server.
-    """
-    csv_bytes = await csv_file.read()
-    with SessionLocal() as db:
-        rates = get_rate_card(db)   # one snapshot for the whole batch
-
+async def _prepared_rows(csv_bytes: bytes, calc_csv: Optional[UploadFile], use_card_fare_rows: str,
+                         rates) -> tuple[list, Optional[bytes], set[int]]:
+    """Parsed rows with card fares and re-uploaded Calc_Trip_Fare edits applied."""
     try:
         _, rows = parse_eee_taxi_csv(csv_bytes, rates)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"CSV parse error: {exc}") from exc
-
     if not rows:
         raise HTTPException(status_code=400, detail="No valid data rows found in CSV.")
 
-    if sign_mode not in ("usb", "dummy"):
-        raise HTTPException(status_code=400, detail=f"Invalid sign_mode: {sign_mode!r}.")
-
-    try:
-        inv_date = date.fromisoformat(invoice_date)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid invoice_date: {invoice_date!r}")
-
-    # ── Apply fare overrides from re-uploaded calculated CSV (if provided) ─────
     overrides: dict = {}
     calc_bytes: bytes | None = None
     if calc_csv is not None:
@@ -167,14 +139,76 @@ async def start_batch(
     if card_rows:
         rows = apply_card_fares(rows, card_rows, rates)
         logger.info("Rate-card fare applied to {} P2P rows", len(card_rows))
-    rows = apply_fare_overrides(rows, overrides, rates)
+    return apply_fare_overrides(rows, overrides, rates), calc_bytes, card_rows
 
-    p2p_count    = sum(1 for r in rows if r.booking_type == "p2p")
-    rental_count = sum(1 for r in rows if r.booking_type == "rental")
 
-    batch_id = uuid.uuid4().hex
-
+@router.post("/preview")
+async def preview_batch(
+    csv_file: UploadFile,
+    calc_csv: Optional[UploadFile] = File(None),
+    use_card_fare_rows: str = Form(""),
+):
+    """Fare, toll, GST and total per trip, with warnings, before any invoice number is given."""
+    csv_bytes = await csv_file.read()
     with SessionLocal() as db:
+        rates = get_rate_card(db)
+        rows, _, _ = await _prepared_rows(csv_bytes, calc_csv, use_card_fare_rows, rates)
+        return {"rows": [r.to_dict() for r in review_rows(db, rows)]}
+
+
+def _taken_numbers(db, numbers: list[str]) -> list[str]:
+    taken = db.query(EeeTaxiInvoice.invoice_no).filter(EeeTaxiInvoice.invoice_no.in_(numbers)).all()
+    return sorted(n for (n,) in taken)
+
+
+@router.post("/batch")
+async def start_batch(
+    csv_file: UploadFile,
+    invoice_date: str = Form(...),
+    start_suffix: int = Form(...),
+    sign_mode: str = Form("usb"),
+    calc_csv: Optional[UploadFile] = File(None),
+    use_card_fare_rows: str = Form(""),
+    exclude_rows: str = Form(""),
+    user: User = Depends(require_permission("eee_taxi")),
+):
+    """Create a batch from the trips kept on the review screen.
+
+    Removed trips (exclude_rows) get no invoice, and the kept ones are numbered
+    one after another from start_suffix, so there is no gap. This only records
+    the batch; the browser then calls generate-next once per invoice, because
+    work started in a background thread stops as soon as a serverless instance
+    is suspended. USB signing happens in the browser through the local signing
+    helper, so the DSC PIN is never sent to this server.
+    """
+    if sign_mode not in ("usb", "dummy"):
+        raise HTTPException(status_code=400, detail=f"Invalid sign_mode: {sign_mode!r}.")
+    try:
+        inv_date = date.fromisoformat(invoice_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid invoice_date: {invoice_date!r}")
+
+    csv_bytes = await csv_file.read()
+    with SessionLocal() as db:
+        rates = get_rate_card(db)   # one snapshot for the whole batch
+        rows, calc_bytes, card_rows = await _prepared_rows(csv_bytes, calc_csv, use_card_fare_rows, rates)
+        excluded = _parse_row_list(exclude_rows)
+        rows = [r for r in rows if r.row_index not in excluded]
+        if not rows:
+            raise HTTPException(status_code=400, detail="Every trip was removed; nothing to invoice.")
+
+        fy = financial_year(inv_date)
+        numbers = [format_invoice_no(fy, start_suffix + i) for i in range(len(rows))]
+        taken = _taken_numbers(db, numbers)
+        if taken:
+            raise HTTPException(
+                status_code=409,
+                detail=(f"These invoice numbers already exist: {', '.join(taken[:10])}"
+                        f"{' ...' if len(taken) > 10 else ''}. Use a higher starting number, or ask an "
+                        "admin to delete the old invoices on Tally Export first."),
+            )
+
+        batch_id = uuid.uuid4().hex
         batch = EeeTaxiBatch(
             id=batch_id,
             invoice_date=inv_date,
@@ -192,26 +226,31 @@ async def start_batch(
         db.add(batch)
         db.flush()
 
-        for row in rows:
+        for seq, row in enumerate(rows):
             db.add(EeeTaxiInvoice(
                 batch_id=batch_id,
                 row_index=row.row_index,
+                seq=seq,
+                route_no=row.route_no.strip() or None,
                 entity_name=row.entity_name,
                 client_gstin=row.client_gstin,
                 booking_type=row.booking_type,
             ))
         db.commit()
 
+    p2p_count    = sum(1 for r in rows if r.booking_type == "p2p")
+    rental_count = sum(1 for r in rows if r.booking_type == "rental")
     logger.info(
-        "EEE-Taxi batch {} created: {} rows ({} p2p, {} rental), suffix starts at {}",
-        batch_id, len(rows), p2p_count, rental_count, start_suffix,
+        "EEE-Taxi batch {} created by {}: {} rows ({} p2p, {} rental, {} removed), numbers {} .. {}",
+        batch_id, user.email, len(rows), p2p_count, rental_count, len(excluded), numbers[0], numbers[-1],
     )
-
     return {
         "batch_id":     batch_id,
         "total_rows":   len(rows),
         "p2p_count":    p2p_count,
         "rental_count": rental_count,
+        "first_invoice": numbers[0],
+        "last_invoice":  numbers[-1],
     }
 
 
@@ -268,6 +307,7 @@ def get_batch(batch_id: str):
                 {
                     "id":             inv.id,
                     "row_index":      inv.row_index,
+                    "route_no":       inv.route_no,
                     "invoice_no":     inv.invoice_no,
                     "entity_name":    inv.entity_name,
                     "client_gstin":   inv.client_gstin,

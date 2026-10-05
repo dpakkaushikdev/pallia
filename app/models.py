@@ -268,6 +268,10 @@ class EeeTaxiInvoice(Base):
         ForeignKey("eee_taxi_batches.id", ondelete="CASCADE"), index=True
     )
     row_index: Mapped[int] = mapped_column(Integer)
+    # Position among the trips kept after review; numbering uses it so removed
+    # trips leave no gap. Empty on batches made before the review step.
+    seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    route_no: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     invoice_no: Mapped[str | None] = mapped_column(String(32), nullable=True)
     entity_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     client_gstin: Mapped[str | None] = mapped_column(String(20), nullable=True)

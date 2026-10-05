@@ -18,8 +18,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import User
-from app.services.auth import require_permission
-from app.services.eee_taxi_tally import ExportItem, find_export_items, mark_exported
+from app.services.auth import require_admin, require_permission
+from app.services.eee_taxi_tally import ExportItem, delete_invoice, find_export_items, mark_exported
 from app.services.tally_export import render_tally_xml
 
 router = APIRouter(prefix="/api/eee-taxi/tally", tags=["eee-taxi"])
@@ -86,3 +86,15 @@ def export(body: ExportIn, user: User = Depends(_eee_user), db: Session = Depend
         media_type="application/xml",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.delete("/invoices/{invoice_id}")
+def delete(invoice_id: str, admin: User = Depends(require_admin), db: Session = Depends(get_db)) -> dict:
+    """Admin only: remove a wrong or duplicate invoice so it never reaches Tally."""
+    try:
+        inv = delete_invoice(db, invoice_id)
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    logger.warning("EEE-Taxi invoice {} ({}) deleted by {}; exported to Tally: {}",
+                   inv.invoice_no, invoice_id, admin.email, inv.tally_exported_at is not None)
+    return {"deleted": invoice_id}

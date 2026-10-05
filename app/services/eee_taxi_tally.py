@@ -201,6 +201,22 @@ def find_export_items(
                   reverse=newest_first)
 
 
+def delete_invoice(db: Session, invoice_id: str) -> EeeTaxiInvoice:
+    """Remove one invoice (and its batch once the batch has no invoices left)."""
+    inv = db.get(EeeTaxiInvoice, invoice_id)
+    if inv is None:
+        raise LookupError("Invoice not found.")
+    batch_id = inv.batch_id
+    db.delete(inv)
+    db.flush()
+    if not db.query(EeeTaxiInvoice).filter(EeeTaxiInvoice.batch_id == batch_id).count():
+        batch = db.get(EeeTaxiBatch, batch_id)
+        if batch is not None:
+            db.delete(batch)
+    db.commit()
+    return inv
+
+
 def mark_exported(db: Session, invoice_ids: list[str], when: Optional[datetime] = None) -> None:
     when = when or datetime.utcnow()
     db.query(EeeTaxiInvoice).filter(EeeTaxiInvoice.id.in_(invoice_ids)).update(

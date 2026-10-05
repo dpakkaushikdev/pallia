@@ -128,6 +128,10 @@ def _migrate_existing_db() -> None:
                 conn.execute(text(f"ALTER TABLE eee_taxi_invoices ADD COLUMN signed_pdf_data {binary_type}"))
             if "sig_box" not in existing:
                 conn.execute(text(f"ALTER TABLE eee_taxi_invoices ADD COLUMN sig_box {json_type}"))
+            if "seq" not in existing:
+                conn.execute(text("ALTER TABLE eee_taxi_invoices ADD COLUMN seq INTEGER"))
+            if "route_no" not in existing:
+                conn.execute(text("ALTER TABLE eee_taxi_invoices ADD COLUMN route_no VARCHAR(64)"))
             if "tally_exported_at" not in existing:
                 datetime_type = DateTime().compile(dialect=engine.dialect)
                 conn.execute(text(f"ALTER TABLE eee_taxi_invoices ADD COLUMN tally_exported_at {datetime_type}"))

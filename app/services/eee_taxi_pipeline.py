@@ -242,7 +242,7 @@ def generate_next_invoice(batch_id: str, db: Session) -> dict:
     sign_mode  = batch.sign_mode or "usb"
     invoice_no = format_invoice_no(
         financial_year(batch.invoice_date),
-        batch.start_suffix + inv_rec.row_index,
+        batch.start_suffix + (inv_rec.seq if inv_rec.seq is not None else inv_rec.row_index),
     )
     inv_rec.invoice_no = invoice_no
     inv_rec.status     = EeeTaxiInvoiceStatus.GENERATING
