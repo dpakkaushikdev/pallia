@@ -14,9 +14,9 @@ from app.services.ey_clients import SELLER_ADDRESS, SELLER_GSTIN, ey_is_local, e
 COMPANY = "EEE-TAXI MOBILITY SOLUTIONS PRIVATE LIMITED"
 
 
-def generate_ey_pdf(row, invoice_no, invoice_date, description, output_path: Path):
+def generate_ey_pdf(row, invoice_no, invoice_date, description, output_path: Path, client_master=None):
     """Description contains the actual fare calculation, shared with Tally."""
-    buyer = lookup_ey_client(row.client_gstin)
+    buyer = lookup_ey_client(row.client_gstin, client_master)
     local = ey_is_local(row.client_gstin)
     cgst, sgst, igst = ey_tax(row.tax_base + row.parking, local)
     total = row.tax_base + row.parking + cgst + sgst + igst

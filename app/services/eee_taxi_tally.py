@@ -27,6 +27,7 @@ from app.services.eee_taxi_rental_calc import calculate_rental_fare
 from app.services.tally_export import TallyVoucher
 from app.services.eee_taxi_profiles import row_client, row_is_local, row_tax
 from app.services.ey_fares import fare_description
+from app.services.eee_taxi_client_master import restore_client_master
 
 _TOLERANCE = Decimal("0.01")
 
@@ -89,10 +90,11 @@ def voucher_for_row(
     invoice_date: date,
     rates: RateCard,
     cost_centres: dict[str, str],
+    client_master=None,
 ) -> TallyVoucher:
     """The Tally voucher for one invoice; raises ExportProblem when Tally would reject it."""
     try:
-        party = row_client(row)
+        party = row_client(row, client_master)
     except UnknownClientError as exc:
         raise ExportProblem(str(exc)) from exc
 
@@ -159,6 +161,7 @@ def _items_for_batch(batch: EeeTaxiBatch, invoices: list[EeeTaxiInvoice],
     try:
         rates = batch_rates(batch)
         rows = {r.row_index: r for r in batch_rows(batch, rates)}
+        client_master = restore_client_master(batch.client_master_snapshot, batch.client_profile or "pwc")
     except Exception as exc:  # a batch whose stored CSV no longer parses
         logger.warning("Tally export: batch {} could not be rebuilt: {}", batch.id, exc)
         return [item(inv, None, total=None, problem=f"The batch could not be read: {exc}") for inv in invoices]
@@ -170,7 +173,7 @@ def _items_for_batch(batch: EeeTaxiBatch, invoices: list[EeeTaxiInvoice],
             out.append(item(inv, row, total=None, problem="This invoice is no longer in its batch's CSV."))
             continue
         try:
-            v = voucher_for_row(row, inv.invoice_no, batch.invoice_date, rates, cost_centres)
+            v = voucher_for_row(row, inv.invoice_no, batch.invoice_date, rates, cost_centres, client_master)
             out.append(item(inv, row, total=v.total, voucher=v))
         except ExportProblem as exc:
             out.append(item(inv, row, total=row_total(row), problem=str(exc)))

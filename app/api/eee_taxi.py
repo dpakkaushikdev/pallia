@@ -26,7 +26,8 @@ from app.services.eee_taxi_pipeline import (
     unsigned_pdf_bytes,
 )
 from app.services.eee_taxi_rates import get_rate_card, rate_card_to_dict
-from app.services.eee_taxi_profiles import rates_for_client, parse_trips, snapshot_rates, invoice_number
+from app.services.eee_taxi_profiles import rates_for_client, parse_trips, snapshot_rates, invoice_number, client_master_for
+from app.services.eee_taxi_client_master import snapshot_client_master
 from app.services.ey_rates import EyRateCard
 from app.services.ey_fares import generate_ey_calc_csv, parse_ey_overrides, apply_ey_fares
 from app.services.eee_taxi_review import review_rows
@@ -57,8 +58,9 @@ async def calculate_fares(csv_file: UploadFile, client_profile: Literal["pwc", "
     csv_bytes = await csv_file.read()
     with SessionLocal() as db:
         rates = rates_for_client(db, client_profile)
+        client_master = client_master_for(db, client_profile)
     try:
-        original_headers, rows = parse_trips(csv_bytes, rates)
+        original_headers, rows = parse_trips(csv_bytes, rates, client_master)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -97,8 +99,9 @@ async def fare_check(csv_file: UploadFile):
     csv_bytes = await csv_file.read()
     with SessionLocal() as db:
         rates = get_rate_card(db)
+        client_master = client_master_for(db, "pwc")
     try:
-        _, rows = parse_trips(csv_bytes, rates)
+        _, rows = parse_trips(csv_bytes, rates, client_master)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     checks = check_p2p_fares(rows, rates)
@@ -119,10 +122,10 @@ def _parse_row_list(value: str) -> set[int]:
 # ── Review + start batch ──────────────────────────────────────────────────────
 
 async def _prepared_rows(csv_bytes: bytes, calc_csv: Optional[UploadFile], use_card_fare_rows: str,
-                         rates) -> tuple[list, Optional[bytes], set[int]]:
+                         rates, client_master) -> tuple[list, Optional[bytes], set[int]]:
     """Parsed rows with card fares and re-uploaded Calc_Trip_Fare edits applied."""
     try:
-        _, rows = parse_trips(csv_bytes, rates)
+        _, rows = parse_trips(csv_bytes, rates, client_master)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"CSV parse error: {exc}") from exc
     if not rows:
@@ -167,8 +170,9 @@ async def preview_batch(
     csv_bytes = await csv_file.read()
     with SessionLocal() as db:
         rates = rates_for_client(db, client_profile)
-        rows, _, _ = await _prepared_rows(csv_bytes, calc_csv, use_card_fare_rows, rates)
-        return {"rows": [r.to_dict() for r in review_rows(db, rows)]}
+        client_master = client_master_for(db, client_profile)
+        rows, _, _ = await _prepared_rows(csv_bytes, calc_csv, use_card_fare_rows, rates, client_master)
+        return {"rows": [r.to_dict() for r in review_rows(db, rows, client_master)]}
 
 
 def _taken_numbers(db, numbers: list[str]) -> list[str]:
@@ -207,7 +211,8 @@ async def start_batch(
     csv_bytes = await csv_file.read()
     with SessionLocal() as db:
         rates = rates_for_client(db, client_profile)   # one snapshot for the whole batch
-        rows, calc_bytes, card_rows = await _prepared_rows(csv_bytes, calc_csv, use_card_fare_rows, rates)
+        client_master = client_master_for(db, client_profile)
+        rows, calc_bytes, card_rows = await _prepared_rows(csv_bytes, calc_csv, use_card_fare_rows, rates, client_master)
         excluded = _parse_row_list(exclude_rows)
         rows = [r for r in rows if r.row_index not in excluded]
         if not rows:
@@ -239,6 +244,7 @@ async def start_batch(
             calc_csv_data=calc_bytes,
             card_fare_rows=sorted(card_rows),
             rates_snapshot=snapshot_rates(rates),
+            client_master_snapshot=snapshot_client_master(client_master),
         )
         db.add(batch)
         db.flush()

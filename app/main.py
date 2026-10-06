@@ -25,6 +25,7 @@ from app.api import auth as auth_api
 from app.api import dashboard as dashboard_api
 from app.api import eee_taxi as eee_taxi_api
 from app.api import eee_taxi_cost_centres as eee_taxi_cost_centres_api
+from app.api import eee_taxi_clients as eee_taxi_clients_api
 from app.api import eee_taxi_rates as eee_taxi_rates_api
 from app.api import eee_taxi_tally as eee_taxi_tally_api
 from app.api import ey_rates as ey_rates_api
@@ -62,6 +63,7 @@ app.include_router(eee_taxi_api.router)
 app.include_router(eee_taxi_rates_api.router)
 app.include_router(ey_rates_api.router)
 app.include_router(eee_taxi_cost_centres_api.router)
+app.include_router(eee_taxi_clients_api.router)
 app.include_router(eee_taxi_tally_api.router)
 
 

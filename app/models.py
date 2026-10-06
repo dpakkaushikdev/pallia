@@ -18,7 +18,7 @@ import enum
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -250,6 +250,7 @@ class EeeTaxiBatch(Base):
     calc_csv_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     card_fare_rows: Mapped[list | None] = mapped_column(JSON, nullable=True)
     rates_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    client_master_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
     invoices: Mapped[list["EeeTaxiInvoice"]] = relationship(
@@ -333,5 +334,19 @@ class EeeTaxiCostCentre(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     vehicle_no: Mapped[str] = mapped_column(String(20), unique=True, index=True)
     cost_centre: Mapped[str] = mapped_column(String(100))
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class EeeTaxiClient(Base):
+    """One buyer entity/GSTIN/address, separated by the PWC or EY profile."""
+    __tablename__ = "eee_taxi_clients"
+    __table_args__ = (UniqueConstraint("client_profile", "gstin", name="uq_eee_taxi_client_profile_gstin"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    client_profile: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    gstin: Mapped[str] = mapped_column(String(15), nullable=False)
+    entity_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    address: Mapped[str] = mapped_column(String(600), nullable=False)
     updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

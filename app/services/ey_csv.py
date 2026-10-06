@@ -31,7 +31,7 @@ def clock_minutes(value: str) -> int:
     return h * 60 + m
 
 
-def parse_ey_csv(content: bytes, rates: EyRateCard):
+def parse_ey_csv(content: bytes, rates: EyRateCard, client_master=None):
     records = list(csv.reader(io.StringIO(content.decode("utf-8-sig"))))
     header_index = next((i for i, cells in enumerate(records) if any(c.strip() for c in cells)), None)
     if header_index is None:
@@ -70,5 +70,5 @@ def parse_ey_csv(content: bytes, rates: EyRateCard):
                     raise ValueError("Package must be a whole-number fare or P2P.")
         except (ValueError, InvalidOperation) as exc:
             raise ValueError(f"EY CSV row {number}: {exc or 'invalid numeric value'}") from exc
-    original, rows = parse_eee_taxi_csv(content, rates, client_master=EY_CLIENTS)
+    original, rows = parse_eee_taxi_csv(content, rates, client_master=client_master or EY_CLIENTS)
     return original, [replace(row, client_profile="ey", total_amount=Decimal("0")) for row in rows]

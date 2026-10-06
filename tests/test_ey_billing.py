@@ -19,6 +19,7 @@ from app.database import SessionLocal
 from app.main import app
 from app.models import EeeTaxiBatch, EeeTaxiInvoice, EeeTaxiCostCentre, EeeTaxiRateCard, User, UserRole
 from app.services.auth import get_password_hash
+from app.services.eee_taxi_clients import CLIENT_MASTER
 from app.services.eee_taxi_csv import REQUIRED_HEADERS, parse_eee_taxi_csv
 from app.services.eee_taxi_rates import DEFAULT_RATE_CARD, get_rate_card, set_edit_password_hash
 from app.services.eee_taxi_pipeline import batch_rates, batch_rows
@@ -96,7 +97,7 @@ def test_invalid_ey_input_is_rejected(changes):
 
 
 def test_client_profiles_cannot_be_mixed():
-    with pytest.raises(ValueError, match="company list"):
+    with pytest.raises(ValueError, match="selected client master"):
         parse_eee_taxi_csv(ey_csv(), DEFAULT_RATE_CARD)
     with pytest.raises(ValueError, match="Eng Code"):
         parse_ey_csv(ey_csv().replace(b"Eng Code", b"Another Code"), EyRateCard())
@@ -171,6 +172,24 @@ def test_ey_master_password_and_pwc_isolation(ey_client):
         assert get_ey_rates(db).p2p_per_km == 25
     anonymous = TestClient(app)
     assert anonymous.get(url).status_code == 401
+
+
+def test_client_masters_include_workbook_ey_registrations_and_save_separately(ey_client):
+    with SessionLocal() as db:
+        set_edit_password_hash(db, get_password_hash("masters123"))
+    ey_url = "/api/eee-taxi/clients?client_profile=ey"
+    pwc_url = "/api/eee-taxi/clients?client_profile=pwc"
+    ey = ey_client.get(ey_url).json()
+    assert len(ey["rows"]) == 84
+    expected = {"19AAEFE1763C1ZP", "29AAEFE1763C2ZN", "07AAEFE1763C1ZU", "27AAEFE1763C1ZS", "06AACCP8967E1Z5"}
+    assert expected <= {row["gstin"] for row in ey["rows"]}
+    assert all(row["entity_name"] and row["address"] and row["state_name"] for row in ey["rows"])
+
+    updated = [dict(gstin=r["gstin"], entity_name=r["entity_name"], address=r["address"]) for r in ey["rows"]]
+    response = ey_client.put(ey_url, json={"edit_password": "masters123", "rows": updated})
+    assert response.status_code == 200, response.text
+    assert len(ey_client.get(ey_url).json()["rows"]) == 84
+    assert len(ey_client.get(pwc_url).json()["rows"]) == len(CLIENT_MASTER)
 
 
 def test_ey_full_flow_pdf_xml_snapshot_and_separate_listing(ey_client):

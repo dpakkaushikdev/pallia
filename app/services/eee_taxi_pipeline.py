@@ -46,6 +46,7 @@ from app.services.eee_taxi_rental_calc import (
 )
 from app.services.eee_taxi_signer import _find_signature_box, sign_eee_taxi_pdf_dummy
 from app.services.eee_taxi_profiles import restore_rates, invoice_number
+from app.services.eee_taxi_client_master import restore_client_master
 from app.services.ey_rates import EyRateCard
 from app.services.ey_csv import parse_ey_csv
 from app.services.ey_fares import apply_ey_fares, parse_ey_overrides, fare_description
@@ -134,11 +135,13 @@ def batch_rows(batch: EeeTaxiBatch, rates: RateCard) -> list[EeeTaxiRow]:
         raise RuntimeError("Batch has no stored CSV; it cannot be generated.")
 
     if isinstance(rates, EyRateCard):
-        _, rows = parse_ey_csv(bytes(batch.csv_data), rates)
+        clients = restore_client_master(batch.client_master_snapshot, batch.client_profile or "pwc")
+        _, rows = parse_ey_csv(bytes(batch.csv_data), rates, clients)
         overrides = parse_ey_overrides(bytes(batch.calc_csv_data), rows) if batch.calc_csv_data else {}
         return apply_ey_fares(rows, rates, overrides)
 
-    _, rows = parse_eee_taxi_csv(bytes(batch.csv_data), rates)
+    clients = restore_client_master(batch.client_master_snapshot, batch.client_profile or "pwc")
+    _, rows = parse_eee_taxi_csv(bytes(batch.csv_data), rates, client_master=clients)
 
     card_rows = set(batch.card_fare_rows or [])
     if card_rows:
@@ -157,15 +160,16 @@ def build_invoice_pdf(
     invoice_date: date,
     rates: RateCard,
     output_dir: Path,
+    client_master=None,
 ) -> tuple[Path, tuple[float, float, float, float]]:
     """Render one invoice PDF and return its path and signature box."""
     if row.client_profile == "ey":
         path = output_dir / (invoice_no.replace("/", "-") + ".pdf")
-        generate_ey_pdf(row, invoice_no, invoice_date, fare_description(row, rates), path)
+        generate_ey_pdf(row, invoice_no, invoice_date, fare_description(row, rates), path, client_master)
         return path, _find_signature_box(path)
     client_gstin = row.client_gstin.strip().upper()
     try:
-        buyer = lookup_client(client_gstin)
+        buyer = lookup_client(client_gstin, client_master)
     except UnknownClientError as exc:
         raise RuntimeError(str(exc)) from exc
 
@@ -275,6 +279,7 @@ def generate_next_invoice(batch_id: str, db: Session) -> dict:
 
         pdf_path, sig_box = build_invoice_pdf(
             row, invoice_no, batch.invoice_date, rates, output_dir,
+            restore_client_master(batch.client_master_snapshot, batch.client_profile or "pwc"),
         )
 
         inv_rec.booking_type = row.booking_type

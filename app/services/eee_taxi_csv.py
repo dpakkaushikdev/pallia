@@ -168,7 +168,7 @@ def _entity_error(entity_name: str, gstin: str, client_master=None) -> str:
         return "Entity Gst is blank"
     record = (CLIENT_MASTER if client_master is None else client_master).get(gstin)
     if record is None:
-        return f"Entity Gst {gstin} is not in the company list"
+        return f"Entity Gst {gstin} is not in the selected client master; add it in EEE-Taxi -> Masters -> Client entities"
     if record.entity_name.lower().strip() != entity_name.lower().strip():
         return f"Entity Gst {gstin} belongs to {record.entity_name}, not {entity_name!r}"
     return ""

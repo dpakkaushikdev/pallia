@@ -1,8 +1,4 @@
-"""Client master lookup for EEE-Taxi invoicing.
-
-Maps client GSTIN -> entity name, address, and GST state details.
-Add new entries to CLIENT_MASTER when a new GSTIN appears in the CSV.
-"""
+"""PWC buyer defaults and shared GST state helpers for EEE-Taxi billing."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -133,7 +129,7 @@ def lookup_client_by_name(entity_name: str, drop_zone: str = "") -> ClientRecord
     if not records:
         raise UnknownClientError(
             f"Unknown entity: {entity_name!r}. "
-            "Add its GSTIN to app/services/eee_taxi_clients.py CLIENT_MASTER."
+            "Add it in EEE-Taxi -> Masters -> Client entities."
         )
     if len(records) == 1:
         return records[0]
@@ -145,14 +141,15 @@ def lookup_client_by_name(entity_name: str, drop_zone: str = "") -> ClientRecord
     return records[0]
 
 
-def lookup_client(gstin: str) -> ClientRecord:
+def lookup_client(gstin: str, client_master=None) -> ClientRecord:
     gstin = gstin.strip().upper()
-    if gstin not in CLIENT_MASTER:
+    master = client_master or CLIENT_MASTER
+    if gstin not in master:
         raise UnknownClientError(
             f"Unknown GSTIN: {gstin}. "
-            "Add it to app/services/eee_taxi_clients.py CLIENT_MASTER."
+            "Add it in EEE-Taxi -> Masters -> Client entities."
         )
-    return CLIENT_MASTER[gstin]
+    return master[gstin]
 
 
 def is_local(client_gstin: str) -> bool:

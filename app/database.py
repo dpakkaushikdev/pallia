@@ -121,6 +121,8 @@ def _migrate_existing_db() -> None:
                 conn.execute(text(f"ALTER TABLE eee_taxi_batches ADD COLUMN card_fare_rows {json_type}"))
             if "rates_snapshot" not in existing:
                 conn.execute(text(f"ALTER TABLE eee_taxi_batches ADD COLUMN rates_snapshot {json_type}"))
+            if "client_master_snapshot" not in existing:
+                conn.execute(text(f"ALTER TABLE eee_taxi_batches ADD COLUMN client_master_snapshot {json_type}"))
             conn.commit()
         if "eee_taxi_invoices" in inspector.get_table_names():
             existing = {c["name"] for c in inspector.get_columns("eee_taxi_invoices")}

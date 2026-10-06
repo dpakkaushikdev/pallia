@@ -1057,6 +1057,7 @@
       <div class="seg" role="tablist" aria-label="Masters">
         <button class="seg-btn active" role="tab" aria-selected="true" data-mst="rates" onclick="mstShow('rates')">PWC rate card</button>
         <button class="seg-btn" role="tab" aria-selected="false" data-mst="ey" onclick="mstShow('ey')">EY rate card</button>
+        <button class="seg-btn" role="tab" aria-selected="false" data-mst="clients" onclick="mstShow('clients')">Client entities</button>
         <button class="seg-btn" role="tab" aria-selected="false" data-mst="cc" onclick="mstShow('cc')">Cost centres</button>
       </div>
 
@@ -1163,6 +1164,30 @@
         <div class="card"><div class="card-title">EY Tally company and ledgers</div>
           <p class="meta">Haryana GSTIN 06AANCA3858Q1ZW. GST: 5% interstate or 2.5% CGST + 2.5% SGST locally. Enter the exact Haryana company name and check ledger names against Tally before the first XML export. Vehicle cost centres use the shared Cost centres master.</p>
           <div class="grid-3" id="eyTallyFields"></div>
+        </div>
+      </section>
+      <section id="mstClients" class="hidden">
+        <div class="sec-hd">
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <label class="field" for="cmProfile" style="margin:0;">Client profile</label>
+            <select id="cmProfile" onchange="cmLoad()" style="width:180px;"><option value="pwc">PWC</option><option value="ey">EY</option></select>
+            <span class="meta" id="cmMeta">Loading...</span>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn sm" id="cmEdit" onclick="cmStartEdit()">Edit client entities</button>
+            <button class="btn ghost sm hidden" id="cmAdd" onclick="cmAddRow()">+ Add entity</button>
+            <button class="btn secondary sm hidden" id="cmCancel" onclick="cmCancelEdit()">Cancel</button>
+            <button class="btn sm hidden" id="cmSave" onclick="cmReview()">Review &amp; save</button>
+          </div>
+        </div>
+        <div class="meta" style="margin:0 0 12px;">Invoice entity name, GSTIN and address must match the selected company registration. State is read from the first two GSTIN digits. Changes apply to new batches; existing batches keep their saved buyer details.</div>
+        <div id="cmMsg" class="hidden" style="margin-bottom:16px;"></div>
+        <div class="card">
+          <table class="data-table" id="cmTable">
+            <thead><tr><th style="width:230px;">GSTIN</th><th style="width:320px;">Entity name</th><th>Invoice address</th><th style="width:150px;">State from GSTIN</th><th style="width:56px;"></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div id="cmEmpty" class="placeholder hidden">No client entities are saved for this profile.</div>
         </div>
       </section>
       <section id="mstCc" class="hidden">
@@ -1646,7 +1671,7 @@ function switchTab(tabId) {
   if (tabId === "dashboard") refreshDashboard();
   if (tabId === "api-dashboard") initApiDashboard();
   if (tabId === "admin") refreshUsers();
-  if (tabId === "eee-rates") { rcLoad(); ccLoad(); eyLoad(); }
+  if (tabId === "eee-rates") { rcLoad(); ccLoad(); eyLoad(); cmLoad(); }
   if (tabId === "eee-tally") txLoad();
 }
 
@@ -3258,6 +3283,7 @@ function mstShow(which) {
   $("#mstRates").classList.toggle("hidden", which !== "rates");
   $("#mstCc").classList.toggle("hidden", which !== "cc");
   $("#mstEy").classList.toggle("hidden", which !== "ey");
+  $("#mstClients").classList.toggle("hidden", which !== "clients");
 }
 
 const RC_LABELS = {
@@ -4057,6 +4083,129 @@ async function txDelete(id) {
 
 function eetChosenCardFareRows() {
   return [...$$(".eet-card-pick")].filter(c => c.checked).map(c => c.value).join(",");
+}
+
+// Buyer entity masters are separate for PWC and EY and share the masters password.
+let _cm = { saved: [], editing: false, password: null };
+const CM_STATES = {"01":"Jammu and Kashmir","02":"Himachal Pradesh","03":"Punjab","04":"Chandigarh","05":"Uttarakhand","06":"Haryana","07":"Delhi","08":"Rajasthan","09":"Uttar Pradesh","10":"Bihar","11":"Sikkim","12":"Arunachal Pradesh","13":"Nagaland","14":"Manipur","15":"Mizoram","16":"Tripura","17":"Meghalaya","18":"Assam","19":"West Bengal","20":"Jharkhand","21":"Odisha","22":"Chhattisgarh","23":"Madhya Pradesh","24":"Gujarat","25":"Daman and Diu","26":"Dadra and Nagar Haveli","27":"Maharashtra","28":"Andhra Pradesh","29":"Karnataka","30":"Goa","31":"Lakshadweep","32":"Kerala","33":"Tamil Nadu","34":"Puducherry","35":"Andaman and Nicobar Islands","36":"Telangana","37":"Andhra Pradesh","38":"Ladakh"};
+function cmProfile() { return $("#cmProfile").value; }
+function cmShowMsg(text, ok = false) {
+  if (!text) { $("#cmMsg").className = "hidden"; return; }
+  $("#cmMsg").className = "extraction-note " + (ok ? "ok" : "err");
+  $("#cmMsg").textContent = text;
+}
+function cmRow(r = {}) {
+  const gstin = r.gstin || "";
+  const state = r.state_name || CM_STATES[gstin.slice(0, 2)] || (gstin.length >= 2 ? "Unknown state code" : "");
+  return `<tr>
+    <td><input data-cm="gstin" maxlength="15" value="${rcEsc(gstin)}" aria-label="GSTIN" oninput="cmUpdateState(this)"></td>
+    <td><input data-cm="entity_name" maxlength="255" value="${rcEsc(r.entity_name || "")}" aria-label="Entity name"></td>
+    <td><input data-cm="address" maxlength="600" value="${rcEsc(r.address || "")}" aria-label="Invoice address"></td>
+    <td class="meta" data-cm-state>${rcEsc(state)}</td>
+    <td><button class="btn danger xs cm-edit-only" title="Remove entity" onclick="this.closest('tr').remove();cmApplyMode()">×</button></td>
+  </tr>`;
+}
+function cmUpdateState(input) {
+  const gstin = input.value.trim().toUpperCase();
+  input.value = gstin;
+  input.closest("tr").querySelector("[data-cm-state]").textContent = CM_STATES[gstin.slice(0, 2)] || (gstin.length >= 2 ? "Unknown state code" : "");
+}
+function cmFill(rows) {
+  $("#cmTable tbody").innerHTML = rows.map(cmRow).join("");
+  $("#cmEmpty").classList.toggle("hidden", rows.length > 0);
+  $("#cmTable").classList.toggle("hidden", rows.length === 0);
+  cmApplyMode();
+}
+function cmApplyMode() {
+  const editing = _cm.editing;
+  $("#cmProfile").disabled = editing;
+  $("#cmEdit").classList.toggle("hidden", editing);
+  $("#cmEdit").disabled = !_cm.saved.length;
+  $("#cmAdd").classList.toggle("hidden", !editing);
+  $("#cmCancel").classList.toggle("hidden", !editing);
+  $("#cmSave").classList.toggle("hidden", !editing);
+  $$("#cmTable input").forEach(input => { input.disabled = !editing; });
+  $$("#cmTable .cm-edit-only").forEach(button => button.classList.toggle("hidden", !editing));
+}
+function cmMetaText(data) {
+  const n = data.rows.length;
+  const label = `${n} entity ${n === 1 ? "registration" : "registrations"}`;
+  return data.updated_at ? `${label} · last changed by ${data.updated_by} on ${new Date(data.updated_at).toLocaleString("en-IN")}` : label;
+}
+async function cmLoad() {
+  _cm = { saved: [], editing: false, password: null };
+  $("#cmMsg").className = "hidden";
+  try {
+    const data = await api(`/api/eee-taxi/clients?client_profile=${encodeURIComponent(cmProfile())}`);
+    _cm.saved = data.rows;
+    _mstHasPassword = data.has_edit_password;
+    cmFill(data.rows);
+    $("#cmMeta").textContent = cmMetaText(data);
+  } catch (e) {
+    $("#cmMeta").textContent = "";
+    cmShowMsg("Could not load client entities: " + e.message);
+  }
+}
+function cmStartEdit() {
+  cmShowMsg("");
+  mstUnlock(password => { _cm.password = password; _cm.editing = true; cmApplyMode(); });
+}
+function cmCancelEdit() {
+  _cm.editing = false;
+  _cm.password = null;
+  cmFill(_cm.saved);
+  cmShowMsg("Edits discarded. The client master is locked again.", true);
+}
+function cmAddRow() {
+  $("#cmTable tbody").insertAdjacentHTML("afterbegin", cmRow());
+  cmApplyMode();
+  $("#cmTable tbody tr:first-child [data-cm=gstin]").focus();
+}
+function cmCollect() {
+  const rows = [], seen = new Set();
+  for (const tr of $$("#cmTable tbody tr")) {
+    const fields = Object.fromEntries([...tr.querySelectorAll("[data-cm]")].map(el => [el.dataset.cm, el.value.trim()]));
+    for (const el of tr.querySelectorAll("[data-cm]")) el.classList.remove("invalid");
+    if (!fields.gstin && !fields.entity_name && !fields.address) continue;
+    const fail = (key, message) => { const el = tr.querySelector(`[data-cm="${key}"]`); el.classList.add("invalid"); el.focus(); cmShowMsg(message); return null; };
+    fields.gstin = fields.gstin.toUpperCase();
+    if (!/^\d{2}[A-Z0-9]{13}$/.test(fields.gstin)) return fail("gstin", "Enter a valid 15-character GSTIN.");
+    if (!fields.entity_name) return fail("entity_name", "Enter the legal entity name.");
+    if (!fields.address) return fail("address", "Enter the full invoice address.");
+    if (seen.has(fields.gstin)) return fail("gstin", `GSTIN ${fields.gstin} is listed more than once.`);
+    seen.add(fields.gstin);
+    rows.push(fields);
+  }
+  if (!rows.length) { cmShowMsg("Keep at least one entity in the client master."); return null; }
+  return rows.sort((a, b) => a.gstin.localeCompare(b.gstin));
+}
+function cmReview() {
+  const rows = cmCollect();
+  if (!rows) return;
+  const before = new Map(_cm.saved.map(r => [r.gstin, r]));
+  const after = new Map(rows.map(r => [r.gstin, r]));
+  const changes = [];
+  for (const [gstin, row] of after) {
+    if (!before.has(gstin)) changes.push(`Added ${gstin}: ${row.entity_name}`);
+    else if (before.get(gstin).entity_name !== row.entity_name || before.get(gstin).address !== row.address) changes.push(`Changed ${gstin}: ${row.entity_name}`);
+  }
+  for (const [gstin, row] of before) if (!after.has(gstin)) changes.push(`Removed ${gstin}: ${row.entity_name}`);
+  if (!changes.length) { cmShowMsg("No changes to save.", true); return; }
+  rcModal({ title: `Save ${changes.length} client master change${changes.length === 1 ? "" : "s"}`,
+    sub: `${cmProfile().toUpperCase()} entries will be used for new batches.`,
+    bodyHtml: `<ul style="margin:6px 0 0 18px;max-height:300px;overflow:auto;font-size:13.5px;line-height:1.8;">${changes.map(x => `<li>${rcEsc(x)}</li>`).join("")}</ul>`,
+    okText: "Save client master",
+    onOk: async () => {
+      const url = `/api/eee-taxi/clients?client_profile=${encodeURIComponent(cmProfile())}`;
+      const data = await api(url, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({edit_password: _cm.password, rows})});
+      _cm.saved = data.rows;
+      _cm.editing = false;
+      _cm.password = null;
+      cmFill(data.rows);
+      $("#cmMeta").textContent = cmMetaText(data);
+      cmShowMsg(`Saved ${changes.length} change${changes.length === 1 ? "" : "s"}.`, true);
+    }
+  });
 }
 
 // EY has independent rate fields and persistence; the masters password is shared.

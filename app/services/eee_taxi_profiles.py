@@ -6,6 +6,7 @@ from app.services.eee_taxi_rates import DEFAULT_RATE_CARD, _from_json, get_rate_
 from app.services.ey_clients import ey_is_local, ey_tax, lookup_ey_client
 from app.services.ey_csv import parse_ey_csv
 from app.services.ey_rates import EyRateCard, get_ey_rates
+from app.services.eee_taxi_client_master import get_client_master
 
 
 def rates_for_client(db, profile="pwc"):
@@ -22,16 +23,22 @@ def restore_rates(batch):
     return _from_json(batch.rates_snapshot) if batch.rates_snapshot else DEFAULT_RATE_CARD
 
 
-def parse_trips(content, rates):
-    return parse_ey_csv(content, rates) if isinstance(rates, EyRateCard) else parse_eee_taxi_csv(content, rates)
+def parse_trips(content, rates, client_master=None):
+    return (parse_ey_csv(content, rates, client_master) if isinstance(rates, EyRateCard)
+            else parse_eee_taxi_csv(content, rates, client_master=client_master))
+
+
+def client_master_for(db, profile="pwc"):
+    return get_client_master(db, profile)
 
 
 def invoice_number(fy, suffix, profile="pwc"):
     return f"HR/HO/{fy}/{suffix:04d}" if profile == "ey" else format_invoice_no(fy, suffix)
 
 
-def row_client(row):
-    return lookup_ey_client(row.client_gstin) if row.client_profile == "ey" else lookup_client(row.client_gstin)
+def row_client(row, client_master=None):
+    return (lookup_ey_client(row.client_gstin, client_master) if row.client_profile == "ey"
+            else lookup_client(row.client_gstin, client_master))
 
 
 def row_is_local(row):

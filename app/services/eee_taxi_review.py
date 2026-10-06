@@ -69,7 +69,7 @@ def _invoiced_routes(db: Session, route_nos: set[str]) -> dict[str, str]:
 
 
 def _row_warnings(row: EeeTaxiRow, total: Decimal, repeats: Counter, invoiced: dict[str, str],
-                  cost_centres: set[str]) -> list[str]:
+                  cost_centres: set[str], client_master=None) -> list[str]:
     warnings: list[str] = []
     route = row.route_no.strip()
     if not route:
@@ -79,7 +79,7 @@ def _row_warnings(row: EeeTaxiRow, total: Decimal, repeats: Counter, invoiced: d
     if route in invoiced:
         warnings.append(f"Already invoiced as {invoiced[route]}.")
     try:
-        row_client(row)
+        row_client(row, client_master)
     except UnknownClientError:
         warnings.append(f"Unknown client GSTIN {row.client_gstin}; the invoice cannot be made.")
     if not row.car_no.strip():
@@ -98,7 +98,7 @@ def _row_warnings(row: EeeTaxiRow, total: Decimal, repeats: Counter, invoiced: d
     return warnings
 
 
-def review_rows(db: Session, rows: list[EeeTaxiRow]) -> list[ReviewRow]:
+def review_rows(db: Session, rows: list[EeeTaxiRow], client_master=None) -> list[ReviewRow]:
     """The breakdown and warnings shown for each trip before numbering."""
     repeats = Counter(r.route_no.strip() for r in rows if r.route_no.strip())
     invoiced = _invoiced_routes(db, set(repeats))
@@ -120,7 +120,7 @@ def review_rows(db: Session, rows: list[EeeTaxiRow]) -> list[ReviewRow]:
             toll=row.parking,
             gst=total - base,
             total=total,
-            warnings=tuple(_row_warnings(row, total, repeats, invoiced, cost_centres)),
+            warnings=tuple(_row_warnings(row, total, repeats, invoiced, cost_centres, client_master)),
             eng_code=row.eng_code,
         ))
     return out
