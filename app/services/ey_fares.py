@@ -25,13 +25,23 @@ class EyFare:
 
 def calculate_ey_fare(row, rates: EyRateCard) -> EyFare:
     minutes = duration_minutes(row.trip_duration_str)
+    start = clock_minutes(row.pickup_time_str)
+    end = start + minutes
+    night = ZERO
+    for day in range(-1, end // 1440 + 1):
+        night_start = day * 1440 + rates.night_start_hour * 60
+        night_end = day * 1440 + rates.night_end_hour * 60
+        if night_end < night_start:
+            night_end += 1440
+        if max(start, night_start) < min(end, night_end):
+            night = rates.night_charge
+            break
     if row.booking_type == "p2p":
         charged = max(0, minutes - rates.p2p_grace_minutes)
         time_charge = charged * rates.p2p_per_minute
         km_charge = row.total_kms * rates.p2p_per_km
-        # Night supplements never apply to EY P2P.
-        fare = max(rates.p2p_minimum, time_charge + km_charge).quantize(Decimal("0.01"))
-        return EyFare(ZERO, charged, time_charge, row.total_kms, km_charge, ZERO, fare)
+        fare = (max(rates.p2p_minimum, time_charge + km_charge) + night).quantize(Decimal("0.01"))
+        return EyFare(ZERO, charged, time_charge, row.total_kms, km_charge, night, fare)
     package = next((p for p in rates.packages if p.fare == row.package), None)
     if package is None:
         raise ValueError(f"Unknown EY rental package: {row.package}")
@@ -48,17 +58,6 @@ def calculate_ey_fare(row, rates: EyRateCard) -> EyFare:
     extra_kms = Decimal(max(0, int(row.billing_kms) - package.kms))
     time_charge = extra_minutes * rates.extra_minute_rate
     km_charge = extra_kms * rates.extra_km_rate
-    start = clock_minutes(row.pickup_time_str)
-    end = start + minutes
-    night = ZERO
-    for day in range(-1, end // 1440 + 1):
-        night_start = day * 1440 + rates.night_start_hour * 60
-        night_end = day * 1440 + rates.night_end_hour * 60
-        if night_end < night_start:
-            night_end += 1440
-        if max(start, night_start) < min(end, night_end):
-            night = rates.night_charge
-            break
     fare = (Decimal(package.fare) + time_charge + km_charge + night).quantize(Decimal("0.01"))
     return EyFare(Decimal(package.fare), extra_minutes, time_charge, extra_kms, km_charge, night, fare,
                   f"{package.hours}/{package.kms}")
@@ -69,7 +68,8 @@ def fare_description(row, rates):
     if row.booking_type == "p2p":
         lines = ["POINT TO POINT", f"Billable minutes after {rates.p2p_grace_minutes} min grace: {result.charged_minutes} x {rates.p2p_per_minute} = {result.time_charge:.2f}",
                  f"Total Kms {row.total_kms} x {rates.p2p_per_km} = {result.km_charge:.2f}",
-                 f"Minimum fare: {rates.p2p_minimum:.2f}"]
+                 f"Minimum fare: {rates.p2p_minimum:.2f}",
+                 f"Night Charge ({rates.night_start_hour:02d}:00-{rates.night_end_hour:02d}:00) = {result.night:.2f}"]
     else:
         lines = [f"Rental ({result.package_label} = {result.base:.2f})",
                  f"Extra minutes after {rates.rental_grace_minutes} min grace: {result.charged_minutes} x {rates.extra_minute_rate} = {result.time_charge:.2f}",
@@ -86,8 +86,9 @@ def apply_ey_fares(rows, rates, overrides=None):
     result = []
     for row in rows:
         fare = overrides.get(row.row_index, calculate_ey_fare(row, rates).fare)
-        if row.booking_type == "p2p" and fare < rates.p2p_minimum:
-            raise ValueError(f"EY row {row.row_index + 2}: fare cannot be below the P2P minimum {rates.p2p_minimum}.")
+        minimum = rates.p2p_minimum + calculate_ey_fare(row, rates).night if row.booking_type == "p2p" else ZERO
+        if row.booking_type == "p2p" and fare < minimum:
+            raise ValueError(f"EY row {row.row_index + 2}: fare cannot be below the P2P minimum plus night charge {minimum}.")
         result.append(replace(row, trip_fare=fare, tax_base=fare, total_amount=ZERO))
     return result
 

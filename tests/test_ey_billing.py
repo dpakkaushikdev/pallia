@@ -63,9 +63,11 @@ def test_p2p_formula_minimum_and_grace(duration, kms, expected):
     assert result.night == 0
 
 
-def test_p2p_never_has_night_charge():
-    result = calculate_ey_fare(row(**{"Pick up Time": "23:00", "Drop Time": "01:00", "Trip Duration": "2:00"}), EyRateCard())
-    assert result.night == 0
+@pytest.mark.parametrize("pickup,duration,night,fare", [("22:00", "1:00", 0, "322"), ("23:00", "2:00", 250, "617.50"), ("04:30", "1:00", 250, "572")])
+def test_p2p_night_charge_applies_when_trip_overlaps_night_window(pickup, duration, night, fare):
+    result = calculate_ey_fare(row(**{"Pick up Time": pickup, "Trip Duration": duration}), EyRateCard())
+    assert result.night == night
+    assert result.fare == Decimal(fare)
 
 
 @pytest.mark.parametrize("pkg,duration,kms,label,fare", [
@@ -129,6 +131,13 @@ def test_calculated_csv_roundtrip_keeps_toll_separate():
     assert adjusted.total_amount == 0
     with pytest.raises(ValueError, match="minimum"):
         apply_ey_fares(rows, rates, {0: Decimal("277.50")})
+
+
+def test_p2p_override_cannot_remove_night_charge():
+    rates = EyRateCard()
+    rows = [row(**{"Pick up Time": "23:00", "Trip Duration": "2:00"})]
+    with pytest.raises(ValueError, match="minimum plus night charge"):
+        apply_ey_fares(rows, rates, {0: Decimal("571.99")})
 
 
 def test_ey_local_and_interstate_tax():
