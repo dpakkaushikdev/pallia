@@ -180,7 +180,7 @@ async def preview_batch(
         rates = rates_for_client(db, client_profile)
         client_master = client_master_for(db, client_profile)
         rows, _, _ = await _prepared_rows(csv_bytes, calc_csv, use_card_fare_rows, rates, client_master)
-        return {"rows": [r.to_dict() for r in review_rows(db, rows, client_master)]}
+        return {"rows": [r.to_dict() for r in review_rows(db, rows, client_master, client_profile)]}
 
 
 def _taken_numbers(db, numbers: list[str]) -> list[str]:

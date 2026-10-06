@@ -12,7 +12,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from app.models import EeeTaxiInvoice
+from app.models import EeeTaxiBatch, EeeTaxiInvoice, EeeTaxiInvoiceStatus
 from app.services.eee_taxi_clients import UnknownClientError, is_local, lookup_client
 from app.services.eee_taxi_cost_centres import get_cost_centre_state, normalize_vehicle_no
 from app.services.eee_taxi_csv import EeeTaxiRow
@@ -56,13 +56,16 @@ class ReviewRow:
         }
 
 
-def _invoiced_routes(db: Session, route_nos: set[str]) -> dict[str, str]:
+def _invoiced_routes(db: Session, route_nos: set[str], client_profile: str) -> dict[str, str]:
     """Route no -> invoice number, for trips already invoiced in an earlier batch."""
     if not route_nos:
         return {}
     found = (
         db.query(EeeTaxiInvoice.route_no, EeeTaxiInvoice.invoice_no)
-        .filter(EeeTaxiInvoice.route_no.in_(route_nos), EeeTaxiInvoice.invoice_no.isnot(None))
+        .join(EeeTaxiBatch, EeeTaxiInvoice.batch_id == EeeTaxiBatch.id)
+        .filter(EeeTaxiInvoice.route_no.in_(route_nos), EeeTaxiInvoice.invoice_no.isnot(None),
+                EeeTaxiBatch.client_profile == client_profile,
+                EeeTaxiInvoice.status != EeeTaxiInvoiceStatus.FAILED)
         .all()
     )
     return {route: number for route, number in found}
@@ -98,10 +101,10 @@ def _row_warnings(row: EeeTaxiRow, total: Decimal, repeats: Counter, invoiced: d
     return warnings
 
 
-def review_rows(db: Session, rows: list[EeeTaxiRow], client_master=None) -> list[ReviewRow]:
+def review_rows(db: Session, rows: list[EeeTaxiRow], client_master=None, client_profile: str = "pwc") -> list[ReviewRow]:
     """The breakdown and warnings shown for each trip before numbering."""
     repeats = Counter(r.route_no.strip() for r in rows if r.route_no.strip())
-    invoiced = _invoiced_routes(db, set(repeats))
+    invoiced = _invoiced_routes(db, set(repeats), client_profile)
     cost_centres = {c.vehicle_no for c in get_cost_centre_state(db).rows}
     out: list[ReviewRow] = []
     for row in rows:

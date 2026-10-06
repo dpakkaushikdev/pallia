@@ -235,6 +235,10 @@ def test_ey_full_flow_pdf_xml_snapshot_and_separate_listing(ey_client):
     gen = client.post(f"/api/eee-taxi/batch/{batch_id}/generate-next")
     assert gen.json()["generated"]["status"] == "done", gen.text
     invoice_id = gen.json()["generated"]["id"]
+    history = client.get("/api/eee-taxi/tally/history?client_profile=ey").json()
+    history_item = next(i for i in history["invoices"] if i["id"] == invoice_id)
+    assert history_item["status"] == "done" and history_item["total"] == "369.60"
+    assert history_item["batch_id"] == batch_id
     pdf = client.get(f"/api/eee-taxi/batch/{batch_id}/invoice/{invoice_id}/download")
     reader = PdfReader(io.BytesIO(pdf.content))
     assert len(reader.pages) == 1
@@ -264,3 +268,25 @@ def test_ey_profile_is_detected_from_company_name_even_without_form_choice(ey_cl
     calculated = ey_client.post("/api/eee-taxi/calculate", files=files)
     assert calculated.status_code == 200, calculated.text
     assert calculated.headers["X-Client-Profile"] == "ey"
+
+
+def test_invoice_history_includes_pending_invoices_and_filters_by_client_and_creation_date(ey_client):
+    files = {"csv_file": ("ey.csv", ey_csv(), "text/csv")}
+    start = ey_client.post("/api/eee-taxi/batch", files=files,
+                           data={"invoice_date": "2026-05-08", "start_suffix": 157, "sign_mode": "dummy"})
+    assert start.status_code == 200, start.text
+    history = ey_client.get("/api/eee-taxi/tally/history?client_profile=ey").json()
+    assert history["count"] == 1
+    item = history["invoices"][0]
+    assert item["status"] == "pending"
+    assert item["invoice_no"] is None
+    assert item["route_no"] == "220426-NCR-0418"
+    assert item["guest_name"] == "Armaan Goel"
+    assert item["total"] == "369.60"
+    assert ey_client.get("/api/eee-taxi/tally/history?client_profile=pwc").json()["count"] == 0
+    created_date = item["created_at"][:10]
+    filtered = ey_client.get(f"/api/eee-taxi/tally/history?created_from={created_date}&created_to={created_date}")
+    assert filtered.json()["count"] == 1
+    deleted = ey_client.delete(f"/api/eee-taxi/tally/invoices/{item['id']}")
+    assert deleted.status_code == 200
+    assert ey_client.get("/api/eee-taxi/tally/history?client_profile=ey").json()["count"] == 0

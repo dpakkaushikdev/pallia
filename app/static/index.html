@@ -1007,6 +1007,33 @@
       </div>
     </div>
 
+    <div class="tab-pane" id="pane-eee-history">
+      <div class="page-hd">
+        <div>
+          <h1>EEE-Taxi — Invoice History</h1>
+          <div class="meta">All invoice records, including pending, failed, signed and Tally-exported invoices.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="tx-filters">
+          <div><label class="field" for="histClient">Client</label><select id="histClient" onchange="historyLoad()"><option value="">All clients</option><option value="pwc">PWC</option><option value="ey">EY</option></select></div>
+          <div><label class="field" for="histFrom">Created from</label><input type="date" id="histFrom"></div>
+          <div><label class="field" for="histTo">to</label><input type="date" id="histTo"></div>
+          <button class="btn secondary sm" onclick="historyLoad()">Show invoices</button>
+        </div>
+        <div class="meta" style="margin-top:10px;">Deleting an invoice removes its record and saved PDF from this app. It cannot remove a voucher already imported into Tally.</div>
+      </div>
+      <div id="histMsg" class="hidden" style="margin-bottom:16px;"></div>
+      <div class="card" style="overflow:auto;">
+        <div class="sec-hd" style="margin-bottom:12px;"><div class="meta" id="histSummary">Loading…</div></div>
+        <table class="data-table" id="histTable">
+          <thead><tr><th>Created</th><th>Client</th><th>Invoice no.</th><th>Invoice date</th><th>Route / Guest</th><th>Entity</th><th>Car</th><th>Type</th><th>Amount (₹)</th><th>Status</th><th>Created by</th><th>Tally export</th><th>PDF</th><th id="histAdminHead"></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="histEmpty" class="placeholder hidden">No invoice records match these filters.</div>
+      </div>
+    </div>
+
     <!-- ───── EEE-TAXI: TALLY EXPORT TAB ───── -->
     <div class="tab-pane" id="pane-eee-tally">
       <div class="page-hd">
@@ -1615,6 +1642,7 @@ function buildSidebar() {
   const eeeSubs = [
     { id: "eee-billing",    label: "Billing",    icon: _ico('<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>') },
     { id: "eee-operations", label: "Operations", icon: _ico('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>') },
+    { id: "eee-history",    label: "Invoice History", icon: _ico('<path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 5 6.3L3 8"/><path d="M12 7v5l4 2"/>') },
     { id: "eee-tally",      label: "Tally Export", icon: _ico('<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>') },
     { id: "eee-rates",      label: "Masters",    icon: _ico('<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>') },
   ];
@@ -1637,6 +1665,7 @@ function buildSidebar() {
 const EEE_SUB_DEFS = [
   { id: "eee-billing",    label: "EEE-Taxi — Billing" },
   { id: "eee-operations", label: "EEE-Taxi — Operations" },
+  { id: "eee-history",    label: "EEE-Taxi — Invoice History" },
   { id: "eee-tally",      label: "EEE-Taxi — Tally Export" },
   { id: "eee-rates",      label: "EEE-Taxi — Masters" },
 ];
@@ -1668,6 +1697,7 @@ function switchTab(tabId) {
   if (tabId === "api-dashboard") initApiDashboard();
   if (tabId === "admin") refreshUsers();
   if (tabId === "eee-rates") { rcLoad(); ccLoad(); eyLoad(); cmLoad(); }
+  if (tabId === "eee-history") historyLoad();
   if (tabId === "eee-tally") txLoad();
 }
 
@@ -3680,6 +3710,77 @@ async function txExport() {
 }
 
 // ── EEE-Taxi cost centres (Masters page) ──────────────────────────
+// EEE-Taxi invoice history
+let _historyInvoices = [];
+
+function historyShowMsg(text, ok) {
+  const el = $("#histMsg");
+  el.className = "extraction-note " + (ok ? "ok" : "err");
+  el.textContent = text;
+}
+
+function historyMoney(value) {
+  return value == null ? "—" : Number(value).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function historyRender() {
+  const statusLabels = { pending: "Pending", generating: "Generating", awaiting_signature: "Awaiting signature", done: "Signed / complete", failed: "Failed" };
+  const rows = _historyInvoices.map(i => `<tr>
+    <td>${i.created_at ? rcEsc(new Date(i.created_at).toLocaleString("en-IN")) : "—"}</td>
+    <td>${rcEsc((i.client_profile || "pwc").toUpperCase())}</td>
+    <td class="inv">${rcEsc(i.invoice_no || "Not assigned")}</td>
+    <td>${i.invoice_date ? rcEsc(new Date(i.invoice_date + "T00:00:00").toLocaleDateString("en-IN")) : "—"}</td>
+    <td>${rcEsc(i.route_no || "—")}${i.guest_name ? `<div class="meta">${rcEsc(i.guest_name)}</div>` : ""}</td>
+    <td>${rcEsc(i.entity_name || "—")}</td>
+    <td class="inv">${rcEsc(i.car_no || "—")}</td>
+    <td>${i.booking_type === "rental" ? "Rental" : i.booking_type === "p2p" ? "Point to point" : "—"}</td>
+    <td class="num">${historyMoney(i.total)}</td>
+    <td>${rcEsc(statusLabels[i.status] || i.status || "Unknown")}${i.error_message ? `<div class="tx-problem">${rcEsc(i.error_message)}</div>` : ""}</td>
+    <td>${rcEsc(i.created_by || "—")}</td>
+    <td>${i.exported_at ? `Exported ${rcEsc(new Date(i.exported_at).toLocaleString("en-IN"))}` : "Not exported"}</td>
+    <td>${i.status === "done" ? `<button class="btn secondary sm" onclick="downloadWithAuth('/api/eee-taxi/batch/${encodeURIComponent(i.batch_id)}/invoice/${encodeURIComponent(i.id)}/download', '${rcEsc(i.invoice_no || "invoice.pdf")}')">Download</button>` : "—"}</td>
+    ${isAdmin() ? `<td><button class="btn secondary sm" onclick="historyDelete('${rcEsc(i.id)}')">Delete</button></td>` : ""}
+  </tr>`).join("");
+  $("#histAdminHead").classList.toggle("hidden", !isAdmin());
+  $("#histTable tbody").innerHTML = rows;
+  $("#histTable").classList.toggle("hidden", !_historyInvoices.length);
+  $("#histEmpty").classList.toggle("hidden", _historyInvoices.length > 0);
+  $("#histSummary").textContent = `${_historyInvoices.length} invoice record${_historyInvoices.length === 1 ? "" : "s"}`;
+}
+
+async function historyLoad() {
+  if (!$("#histClient")) return;
+  $("#histMsg").className = "hidden";
+  $("#histSummary").textContent = "Loading…";
+  const params = new URLSearchParams();
+  if ($("#histClient").value) params.set("client_profile", $("#histClient").value);
+  if ($("#histFrom").value) params.set("created_from", $("#histFrom").value);
+  if ($("#histTo").value) params.set("created_to", $("#histTo").value);
+  try {
+    const data = await api(`/api/eee-taxi/tally/history?${params}`);
+    _historyInvoices = data.invoices || [];
+    historyRender();
+  } catch (e) {
+    _historyInvoices = [];
+    historyRender();
+    historyShowMsg("Could not load invoice history: " + e.message, false);
+  }
+}
+
+async function historyDelete(id) {
+  const item = _historyInvoices.find(i => i.id === id);
+  if (!item) return;
+  const tallyNote = item.exported_at ? " This app cannot delete a voucher already imported into Tally." : "";
+  if (!confirm(`Delete ${item.invoice_no || "this invoice record"}? Its saved PDF and app record will be removed. This cannot be undone.${tallyNote}`)) return;
+  try {
+    await api(`/api/eee-taxi/tally/invoices/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await historyLoad();
+    historyShowMsg(`Deleted ${item.invoice_no || "invoice record"}.`, true);
+  } catch (e) {
+    historyShowMsg("Could not delete invoice: " + e.message, false);
+  }
+}
+
 let _cc = { saved: [], password: null, editing: false };
 
 function ccShowMsg(text, ok) {
