@@ -44,6 +44,7 @@ class ExportIn(BaseModel):
 def _item(i: ExportItem) -> dict:
     return {
         "id": i.invoice_id,
+        "batch_id": i.batch_id,
         "client_profile": i.client_profile,
         "invoice_no": i.invoice_no,
         "invoice_date": i.invoice_date.isoformat(),
@@ -78,6 +79,7 @@ def invoice_history(
     client_profile: Optional[Literal["pwc", "ey"]] = Query(None),
     created_from: Optional[date] = Query(None),
     created_to: Optional[date] = Query(None),
+    page: int = Query(1, ge=1),
     _: User = Depends(_eee_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -93,7 +95,9 @@ def invoice_history(
         query = query.filter(EeeTaxiBatch.created_at >= _local_day_utc(created_from))
     if created_to:
         query = query.filter(EeeTaxiBatch.created_at < _local_day_utc(created_to + timedelta(days=1)))
-    records = query.order_by(EeeTaxiBatch.created_at.desc(), EeeTaxiInvoice.invoice_no.desc()).all()
+    count = query.count()
+    records = (query.order_by(EeeTaxiBatch.created_at.desc(), EeeTaxiInvoice.invoice_no.desc())
+               .offset((page - 1) * 50).limit(50).all())
 
     rows_by_batch: dict[str, dict] = {}
     failed_batches: set[str] = set()
@@ -131,7 +135,8 @@ def invoice_history(
             "error_message": invoice.error_message or "",
             "exported_at": invoice.tally_exported_at.isoformat() if invoice.tally_exported_at else None,
         })
-    return {"invoices": items, "count": len(items)}
+    return {"invoices": items, "count": count, "page": page, "page_size": 50,
+            "pages": (count + 49) // 50}
 
 
 @router.post("/export")

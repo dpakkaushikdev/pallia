@@ -39,6 +39,7 @@ class ExportProblem(ValueError):
 @dataclass(frozen=True)
 class ExportItem:
     invoice_id: str
+    batch_id: str
     invoice_no: str
     invoice_date: date
     entity_name: str
@@ -140,6 +141,7 @@ def _items_for_batch(batch: EeeTaxiBatch, invoices: list[EeeTaxiInvoice],
     def item(inv: EeeTaxiInvoice, row: Optional[EeeTaxiRow], **kw) -> ExportItem:
         return ExportItem(
             invoice_id=inv.id,
+            batch_id=batch.id,
             client_profile=batch.client_profile or "pwc",
             invoice_no=inv.invoice_no or "",
             invoice_date=batch.invoice_date,

@@ -1016,10 +1016,10 @@
       </div>
       <div class="card">
         <div class="tx-filters">
-          <div><label class="field" for="histClient">Client</label><select id="histClient" onchange="historyLoad()"><option value="">All clients</option><option value="pwc">PWC</option><option value="ey">EY</option></select></div>
+          <div><label class="field" for="histClient">Client</label><select id="histClient" onchange="historyLoad(true)"><option value="">All clients</option><option value="pwc">PWC</option><option value="ey">EY</option></select></div>
           <div><label class="field" for="histFrom">Created from</label><input type="date" id="histFrom"></div>
           <div><label class="field" for="histTo">to</label><input type="date" id="histTo"></div>
-          <button class="btn secondary sm" onclick="historyLoad()">Show invoices</button>
+          <button class="btn secondary sm" onclick="historyLoad(true)">Show invoices</button>
         </div>
         <div class="meta" style="margin-top:10px;">Deleting an invoice removes its record and saved PDF from this app. It cannot remove a voucher already imported into Tally.</div>
       </div>
@@ -1031,6 +1031,11 @@
           <tbody></tbody>
         </table>
         <div id="histEmpty" class="placeholder hidden">No invoice records match these filters.</div>
+        <div id="histPager" class="sec-hd" style="margin-top:12px;">
+          <button class="btn secondary sm" id="histPrev" onclick="historyPage(-1)">Previous</button>
+          <span class="meta" id="histPageLabel"></span>
+          <button class="btn secondary sm" id="histNext" onclick="historyPage(1)">Next</button>
+        </div>
       </div>
     </div>
 
@@ -1039,7 +1044,7 @@
       <div class="page-hd">
         <div>
           <h1>EEE-Taxi — Tally Export</h1>
-          <div class="meta">Download signed invoices as an XML file for Tally: Gateway of Tally → Import → Transactions.</div>
+          <div class="meta">Select CSV batches to download their signed invoices together as an XML file for Tally: Gateway of Tally → Import → Transactions.</div>
         </div>
       </div>
       <div class="card">
@@ -1059,9 +1064,9 @@
         </div>
         <table class="data-table" id="txTable">
           <thead><tr>
-            <th style="width:36px;"><input type="checkbox" id="txAll" aria-label="Select all" onchange="txToggleAll(this.checked)"></th>
-            <th>Invoice no.</th><th>Date</th><th>Client</th><th>Car</th><th>Booking</th>
-            <th style="text-align:right;">Amount (₹)</th><th>Created by</th><th>Status</th><th id="txAdminHead"></th>
+            <th style="width:36px;"><input type="checkbox" id="txAll" aria-label="Select all batches" onchange="txToggleAll(this.checked)"></th>
+            <th>CSV batch</th><th>Invoice date</th><th>Client</th><th>Invoices</th>
+            <th style="text-align:right;">Amount (₹)</th><th>Created by</th><th>Status</th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -3635,40 +3640,61 @@ function txStatus(i) {
   return `<span class="meta">Ready</span>`;
 }
 
+function txGroups() {
+  const groups = new Map();
+  for (const item of _tx.items) {
+    if (!groups.has(item.batch_id)) groups.set(item.batch_id, []);
+    groups.get(item.batch_id).push(item);
+  }
+  return [...groups.entries()].map(([id, items]) => ({ id, items: items.sort((a, b) => (a.invoice_no || "").localeCompare(b.invoice_no || "")) }));
+}
+
 function txRender() {
-  const rows = _tx.items.map(i => `<tr class="${i.problem ? "blocked" : ""}">
-      <td><input type="checkbox" data-id="${rcEsc(i.id)}" ${i.problem ? "disabled" : "checked"} onchange="txUpdate()"
-           aria-label="Select ${rcEsc(i.invoice_no)}"></td>
-      <td class="inv">${rcEsc(i.invoice_no)}</td>
-      <td>${rcEsc(new Date(i.invoice_date).toLocaleDateString("en-IN"))}</td>
-      <td>${rcEsc(i.entity_name)}</td>
-      <td class="inv">${rcEsc(i.car_no)}</td>
-      <td>${i.booking_type === "rental" ? "Rental" : "Point to point"}</td>
-      <td class="num">${i.total ? txMoney(i.total) : "—"}</td>
-      <td>${i.created_by ? rcEsc(i.created_by) : '<span class="meta">—</span>'}</td>
-      <td>${txStatus(i)}</td>
-      ${isAdmin() ? `<td><button class="btn secondary sm" onclick="txDelete('${rcEsc(i.id)}')">Delete</button></td>` : ""}
-    </tr>`).join("");
-  $("#txAdminHead").classList.toggle("hidden", !isAdmin());
+  const groups = txGroups();
+  const rows = groups.map(({id, items}) => {
+    const blocked = items.some(i => i.problem);
+    const exported = items.every(i => i.exported_at);
+    const first = items[0].invoice_no;
+    const last = items[items.length - 1].invoice_no;
+    const range = first === last ? first : `${first} - ${last}`;
+    const total = items.reduce((sum, i) => sum + Number(i.total || 0), 0);
+    const errors = [...new Set(items.filter(i => i.problem).map(i => i.problem))];
+    const status = blocked ? `<span class="tx-problem">${rcEsc(errors.join("; "))}</span>` :
+      exported ? `<span class="tx-done">Exported before</span>` : `<span class="meta">Ready</span>`;
+    const date = items[0].invoice_date;
+    const client = (items[0].client_profile || "pwc").toUpperCase();
+    const creator = items[0].created_by || "-";
+    return `<tr class="${blocked ? "blocked" : ""}">
+      <td><input type="checkbox" data-batch="${rcEsc(id)}" ${blocked ? "disabled" : "checked"} onchange="txUpdate()" aria-label="Select batch ${rcEsc(range)}"></td>
+      <td class="inv">${rcEsc(range)}</td>
+      <td>${date ? rcEsc(new Date(date).toLocaleDateString("en-IN")) : "-"}</td>
+      <td>${rcEsc(client)}</td>
+      <td>${items.length}</td>
+      <td class="num">${txMoney(total)}</td>
+      <td>${rcEsc(creator)}</td><td>${status}</td>
+    </tr>`;
+  }).join("");
   $("#txTable tbody").innerHTML = rows;
-  $("#txTable").classList.toggle("hidden", !_tx.items.length);
-  $("#txEmpty").classList.toggle("hidden", _tx.items.length > 0);
+  $("#txTable").classList.toggle("hidden", !groups.length);
+  $("#txEmpty").classList.toggle("hidden", groups.length > 0);
   txUpdate();
 }
 
 function txSelected() {
-  const ids = new Set([...$$("#txTable tbody input:checked")].map(c => c.dataset.id));
-  return _tx.items.filter(i => ids.has(i.id));
+  const batches = new Set([...$$("#txTable tbody input:checked")].map(c => c.dataset.batch));
+  return _tx.items.filter(i => batches.has(i.batch_id));
 }
 
 function txUpdate() {
   const sel = txSelected();
-  const total = sel.reduce((s, i) => s + Number(i.total), 0);
+  const groups = txGroups();
+  const selectedGroups = new Set(sel.map(i => i.batch_id)).size;
+  const total = sel.reduce((s, i) => s + Number(i.total || 0), 0);
   const blocked = _tx.items.filter(i => i.problem).length;
   const reexport = sel.filter(i => i.exported_at).length;
-  let text = `${sel.length} of ${_tx.items.length} invoice${_tx.items.length === 1 ? "" : "s"} selected · ₹${txMoney(total)}`;
-  if (blocked) text += ` · ${blocked} need fixing first`;
-  if (reexport) text += ` · ${reexport} already exported before`;
+  let text = `${selectedGroups} of ${groups.length} batch${groups.length === 1 ? "" : "es"} selected (${sel.length} invoices) | INR ${txMoney(total)}`;
+  if (blocked) text += ` | ${blocked} invoices need fixing first`;
+  if (reexport) text += ` | ${reexport} already exported before`;
   $("#txSummary").textContent = text;
   $("#txDownload").disabled = sel.length === 0;
   const boxes = [...$$("#txTable tbody input:not(:disabled)")];
@@ -3737,6 +3763,8 @@ async function txExport() {
 // ── EEE-Taxi cost centres (Masters page) ──────────────────────────
 // EEE-Taxi invoice history
 let _historyInvoices = [];
+let _historyPage = 1;
+let _historyPages = 1;
 
 function historyShowMsg(text, ok) {
   const el = $("#histMsg");
@@ -3770,26 +3798,40 @@ function historyRender() {
   $("#histTable tbody").innerHTML = rows;
   $("#histTable").classList.toggle("hidden", !_historyInvoices.length);
   $("#histEmpty").classList.toggle("hidden", _historyInvoices.length > 0);
-  $("#histSummary").textContent = `${_historyInvoices.length} invoice record${_historyInvoices.length === 1 ? "" : "s"}`;
+  $("#histSummary").textContent = `${_historyInvoices.length} invoice record${_historyInvoices.length === 1 ? "" : "s"} on this page`;
+  $("#histPageLabel").textContent = `Page ${_historyPage} of ${_historyPages}`;
+  $("#histPrev").disabled = _historyPage <= 1;
+  $("#histNext").disabled = _historyPage >= _historyPages;
+  $("#histPager").classList.toggle("hidden", _historyPages <= 1);
 }
 
-async function historyLoad() {
+async function historyLoad(resetPage = false) {
   if (!$("#histClient")) return;
+  if (resetPage) _historyPage = 1;
   $("#histMsg").className = "hidden";
   $("#histSummary").textContent = "Loading…";
   const params = new URLSearchParams();
   if ($("#histClient").value) params.set("client_profile", $("#histClient").value);
   if ($("#histFrom").value) params.set("created_from", $("#histFrom").value);
   if ($("#histTo").value) params.set("created_to", $("#histTo").value);
+  params.set("page", String(_historyPage));
   try {
     const data = await api(`/api/eee-taxi/tally/history?${params}`);
     _historyInvoices = data.invoices || [];
+    _historyPages = data.pages || 1;
     historyRender();
   } catch (e) {
     _historyInvoices = [];
     historyRender();
     historyShowMsg("Could not load invoice history: " + e.message, false);
   }
+}
+
+function historyPage(delta) {
+  const next = _historyPage + delta;
+  if (next < 1 || next > _historyPages) return;
+  _historyPage = next;
+  historyLoad();
 }
 
 async function historyDelete(id) {
@@ -3799,6 +3841,7 @@ async function historyDelete(id) {
   if (!confirm(`Delete ${item.invoice_no || "this invoice record"}? Its saved PDF and app record will be removed. This cannot be undone.${tallyNote}`)) return;
   try {
     await api(`/api/eee-taxi/tally/invoices/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (_historyInvoices.length === 1 && _historyPage > 1) _historyPage--;
     await historyLoad();
     historyShowMsg(`Deleted ${item.invoice_no || "invoice record"}.`, true);
   } catch (e) {

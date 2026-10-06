@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, inspect, text
 from app import database
 from app.database import SessionLocal
 from app.main import app
-from app.models import EeeTaxiBatch, EeeTaxiInvoice, EeeTaxiCostCentre, EeeTaxiRateCard, User, UserRole
+from app.models import EeeTaxiBatch, EeeTaxiInvoice, EeeTaxiInvoiceStatus, EeeTaxiCostCentre, EeeTaxiRateCard, User, UserRole
 from app.services.auth import get_password_hash
 from app.services.eee_taxi_clients import CLIENT_MASTER
 from app.services.eee_taxi_csv import REQUIRED_HEADERS, parse_eee_taxi_csv
@@ -276,6 +276,8 @@ def test_ey_full_flow_pdf_xml_snapshot_and_separate_listing(ey_client):
     assert "07AANCA3858Q1ZU" not in text_pdf
     assert client.get("/api/eee-taxi/tally/preview?client_profile=pwc").json()["invoices"] == []
     assert len(client.get("/api/eee-taxi/tally/preview?client_profile=ey").json()["invoices"]) == 1
+    tally_preview = client.get("/api/eee-taxi/tally/preview?client_profile=ey").json()["invoices"][0]
+    assert tally_preview["batch_id"] == batch_id
     response = client.post("/api/eee-taxi/tally/export", json={"invoice_ids": [invoice_id]})
     assert response.status_code == 200, response.text
     xml = ET.fromstring(response.content.decode("utf-16"))
@@ -305,6 +307,7 @@ def test_invoice_history_includes_pending_invoices_and_filters_by_client_and_cre
     assert start.status_code == 200, start.text
     history = ey_client.get("/api/eee-taxi/tally/history?client_profile=ey").json()
     assert history["count"] == 1
+    assert (history["page"], history["page_size"], history["pages"]) == (1, 50, 1)
     item = history["invoices"][0]
     assert item["status"] == "pending"
     assert item["invoice_no"] is None
@@ -318,6 +321,27 @@ def test_invoice_history_includes_pending_invoices_and_filters_by_client_and_cre
     deleted = ey_client.delete(f"/api/eee-taxi/tally/invoices/{item['id']}")
     assert deleted.status_code == 200
     assert ey_client.get("/api/eee-taxi/tally/history?client_profile=ey").json()["count"] == 0
+
+
+def test_invoice_history_fetches_only_50_records_per_page(ey_client):
+    started = ey_client.post(
+        "/api/eee-taxi/batch", files={"csv_file": ("ey.csv", ey_csv(), "text/csv")},
+        data={"invoice_date": "2026-05-08", "start_suffix": 157, "sign_mode": "dummy"},
+    )
+    assert started.status_code == 200, started.text
+    with SessionLocal() as db:
+        batch = db.get(EeeTaxiBatch, started.json()["batch_id"])
+        db.add_all([
+            EeeTaxiInvoice(batch_id=batch.id, row_index=index, invoice_no=f"HR/HO/26-27/{index:04d}",
+                           status=EeeTaxiInvoiceStatus.PENDING)
+            for index in range(1, 51)
+        ])
+        db.commit()
+
+    first = ey_client.get("/api/eee-taxi/tally/history?page=1").json()
+    second = ey_client.get("/api/eee-taxi/tally/history?page=2").json()
+    assert first["count"] == 51 and len(first["invoices"]) == 50 and first["pages"] == 2
+    assert second["count"] == 51 and len(second["invoices"]) == 1 and second["page"] == 2
 
 
 def test_batch_requires_a_valid_starting_invoice_suffix(ey_client):
