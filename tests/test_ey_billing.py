@@ -299,3 +299,14 @@ def test_invoice_history_includes_pending_invoices_and_filters_by_client_and_cre
     deleted = ey_client.delete(f"/api/eee-taxi/tally/invoices/{item['id']}")
     assert deleted.status_code == 200
     assert ey_client.get("/api/eee-taxi/tally/history?client_profile=ey").json()["count"] == 0
+
+
+def test_batch_requires_a_valid_starting_invoice_suffix(ey_client):
+    files = {"csv_file": ("ey.csv", ey_csv(), "text/csv")}
+    missing = ey_client.post("/api/eee-taxi/batch", files=files,
+                             data={"invoice_date": "2026-05-08", "sign_mode": "dummy"})
+    assert missing.status_code == 422
+    for suffix in (0, 10000):
+        response = ey_client.post("/api/eee-taxi/batch", files=files,
+                                  data={"invoice_date": "2026-05-08", "start_suffix": suffix, "sign_mode": "dummy"})
+        assert response.status_code == 422

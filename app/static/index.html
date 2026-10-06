@@ -924,8 +924,8 @@
 
             <div class="field-group" style="margin-top:12px;">
               <label class="field">Starting Invoice Suffix</label>
-              <input type="number" id="eetStartSuffix" min="1" max="9999" value="1"
-                     style="width:100%;" placeholder="e.g. 1388" oninput="eetUpdateReviewTotals()" />
+              <input type="number" id="eetStartSuffix" min="1" max="9999" step="1" required
+                     style="width:100%;" placeholder="Enter starting invoice suffix" oninput="eetUpdateReviewTotals()" />
               <div id="eetNumberRange" style="font-size:11px;color:var(--text-dim);margin-top:3px;">
                 First invoice will be DL/HO/YY-YY/XXXX
               </div>
@@ -957,7 +957,7 @@
               </div>
             </div>
 
-            <button class="btn" id="eetProceedBtn" style="width:100%;margin-top:18px;" onclick="eetProceed()">
+            <button class="btn" id="eetProceedBtn" disabled style="width:100%;margin-top:18px;" onclick="eetProceed()">
               Confirm &amp; Generate Invoices
             </button>
             <button class="btn secondary" style="width:100%;margin-top:8px;font-size:12px;"
@@ -2927,13 +2927,17 @@ async function eetProceed() {
   const pin         = document.getElementById("eetPin").value;
 
   if (!invDate)               { alert("Please select an invoice date."); return; }
-  if (!suffix || +suffix < 1) { alert("Please enter a valid starting suffix."); return; }
+  const startSuffix = Number(suffix);
+  if (!suffix || !Number.isInteger(startSuffix) || startSuffix < 1 || startSuffix > 9999) {
+    alert("Please enter a starting invoice suffix from 1 to 9999."); return;
+  }
   if (signMode === "usb" && !pin) { alert("Please enter the DSC PIN for USB signing."); return; }
 
   const kept = eetKeptRows();
   if (!_eetReviewRows.length) { alert("The trip check has not loaded yet. Wait a moment and try again."); return; }
   if (!kept.length) { alert("Every trip is removed. Undo at least one."); return; }
-  const firstNo = eetInvoiceNo(+suffix), lastNo = eetInvoiceNo(+suffix + kept.length - 1);
+  if (startSuffix + kept.length - 1 > 9999) { alert("The invoice range cannot go above suffix 9999."); return; }
+  const firstNo = eetInvoiceNo(startSuffix), lastNo = eetInvoiceNo(startSuffix + kept.length - 1);
   const removedNote = _eetExcluded.size ? `\n${_eetExcluded.size} removed trip(s) will not be invoiced.` : "";
   if (!confirm(`Generate ${kept.length} invoice(s), numbered ${firstNo} to ${lastNo}?${removedNote}`)) return;
 
@@ -4161,12 +4165,18 @@ function eetUpdateReviewTotals() {
   const sum = kept.reduce((s, r) => s + Number(r.total), 0);
   const totals = $("#eetReviewTotals");
   if (totals) totals.textContent = `${kept.length} of ${_eetReviewRows.length} trips kept · ₹${txMoney(sum)}`;
-  const start = parseInt($("#eetStartSuffix").value, 10);
+  const suffixText = $("#eetStartSuffix").value.trim();
+  const start = Number(suffixText);
+  const validSuffix = !!suffixText && Number.isInteger(start) && start >= 1 && start <= 9999;
+  const validRange = validSuffix && start + kept.length - 1 <= 9999;
   const range = $("#eetNumberRange");
-  if (range) range.textContent = kept.length && start > 0
-    ? `Invoices ${eetInvoiceNo(start)} to ${eetInvoiceNo(start + kept.length - 1)}`
-    : `First invoice will be ${_eetProfile === "ey" ? "HR" : "DL"}/HO/YY-YY/XXXX`;
+  if (range) range.textContent = !validSuffix
+    ? "Enter a starting invoice suffix from 1 to 9999 to continue."
+    : !validRange
+      ? "This batch would exceed invoice suffix 9999. Enter a lower starting number."
+      : kept.length ? `Invoices ${eetInvoiceNo(start)} to ${eetInvoiceNo(start + kept.length - 1)}` : "Remove no trips to generate.";
   const btn = $("#eetProceedBtn");
+  if (btn) btn.disabled = !kept.length || !validRange;
   if (btn) btn.textContent = kept.length
     ? `Confirm & Generate ${kept.length} Invoice${kept.length === 1 ? "" : "s"}` : "Confirm & Generate Invoices";
 }

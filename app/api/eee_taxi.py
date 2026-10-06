@@ -192,7 +192,7 @@ def _taken_numbers(db, numbers: list[str]) -> list[str]:
 async def start_batch(
     csv_file: UploadFile,
     invoice_date: str = Form(...),
-    start_suffix: int = Form(...),
+    start_suffix: int = Form(..., ge=1, le=9999),
     sign_mode: str = Form("usb"),
     calc_csv: Optional[UploadFile] = File(None),
     use_card_fare_rows: str = Form(""),
@@ -228,6 +228,8 @@ async def start_batch(
         rows = [r for r in rows if r.row_index not in excluded]
         if not rows:
             raise HTTPException(status_code=400, detail="Every trip was removed; nothing to invoice.")
+        if start_suffix + len(rows) - 1 > 9999:
+            raise HTTPException(status_code=400, detail="The invoice range cannot go above suffix 9999.")
 
         fy = financial_year(inv_date)
         numbers = [invoice_number(fy, start_suffix + i, client_profile) for i in range(len(rows))]
