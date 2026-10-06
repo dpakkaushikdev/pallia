@@ -1090,6 +1090,7 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <span id="rcLockedActions" class="hidden">
             <button class="btn sm" onclick="rcStartEdit()">&#128274; Edit rates</button>
+            <button class="btn secondary sm" id="rcResetPasswordBtn" onclick="rcResetPassword()">Forgot password? Reset</button>
           </span>
           <span id="rcEditActions" class="hidden" style="display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn secondary sm" onclick="rcChangePassword()">Change password</button>
@@ -3361,6 +3362,7 @@ function rcApplyMode() {
   const editing = _rc.editing;
   $("#rcReadOnly").classList.add("hidden");
   $("#rcLockedActions").classList.toggle("hidden", editing);
+  $("#rcResetPasswordBtn").classList.toggle("hidden", editing || !isAdmin());
   $("#rcEditActions").classList.toggle("hidden", !editing);
   $("#rcEditBanner").classList.toggle("hidden", !editing);
   $$("#mstRates input").forEach(inp => { inp.disabled = !editing; });
@@ -3546,6 +3548,25 @@ function rcChangePassword() {
       });
       _rc.password = v.p1;
       rcShowMsg("Edit password changed.", true);
+    },
+  });
+}
+
+function rcResetPassword() {
+  rcModal({
+    title: "Reset Masters edit password",
+    sub: "Admin recovery for a forgotten password. This changes only the shared edit password, not any master data.",
+    fields: [{ id: "p1", label: "New edit password" }, { id: "p2", label: "Repeat new password" }],
+    okText: "Reset password",
+    onOk: async v => {
+      if (v.p1.length < 6) throw new Error("Use at least 6 characters.");
+      if (v.p1 !== v.p2) throw new Error("The two new passwords do not match.");
+      await api("/api/eee-taxi/rates/password/reset", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ new_password: v.p1 }),
+      });
+      _mstHasPassword = true;
+      rcShowMsg("Edit password reset. Use the new password when you unlock any Masters section.", true);
     },
   });
 }

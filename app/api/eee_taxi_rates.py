@@ -16,6 +16,7 @@ from app.database import get_db
 from app.models import User
 from app.services.auth import (
     get_password_hash,
+    require_admin,
     require_permission,
     verify_password,
 )
@@ -94,6 +95,14 @@ def set_password(body: PasswordIn, user: User = Depends(_eee_user), db: Session 
         check_edit_password(db, body.current_password, user)
     set_edit_password_hash(db, get_password_hash(body.new_password))
     logger.info("Masters edit password set by {}", user.email)
+    return {"ok": True}
+
+
+@router.post("/password/reset")
+def reset_password(body: PasswordIn, admin: User = Depends(require_admin), db: Session = Depends(get_db)) -> dict:
+    """Admin recovery path when the shared Masters edit password is forgotten."""
+    set_edit_password_hash(db, get_password_hash(body.new_password))
+    logger.warning("Masters edit password reset by admin {}", admin.email)
     return {"ok": True}
 
 

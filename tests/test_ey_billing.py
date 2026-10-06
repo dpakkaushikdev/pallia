@@ -215,6 +215,15 @@ def test_client_masters_include_workbook_ey_registrations_and_save_separately(ey
     assert len(ey_client.get(pwc_url).json()["rows"]) == len(CLIENT_MASTER)
 
 
+def test_admin_can_reset_forgotten_masters_edit_password(ey_client):
+    with SessionLocal() as db:
+        set_edit_password_hash(db, get_password_hash("old-edit-password"))
+    reset = ey_client.post("/api/eee-taxi/rates/password/reset", json={"new_password": "new-edit-password"})
+    assert reset.status_code == 200, reset.text
+    assert ey_client.post("/api/eee-taxi/rates/unlock", json={"password": "old-edit-password"}).status_code == 403
+    assert ey_client.post("/api/eee-taxi/rates/unlock", json={"password": "new-edit-password"}).status_code == 200
+
+
 def test_ey_full_flow_pdf_xml_snapshot_and_separate_listing(ey_client):
     client = ey_client
     files = {"csv_file": ("ey.csv", ey_csv(), "text/csv")}
