@@ -96,6 +96,8 @@ class EeeTaxiRow:
     raw_values: tuple = ()  # all original CSV cell values in column order
     pickup_zone: str = ""   # "Pickup Zone" column; matched to rate-card route fares
     drop_zone: str = ""     # "Drop Zone" column
+    eng_code: str = ""      # EY buyer's order number
+    client_profile: str = "pwc"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -158,13 +160,13 @@ def _header_mismatch_message(missing: list[str], raw_headers: list[str]) -> str:
     )
 
 
-def _entity_error(entity_name: str, gstin: str) -> str:
+def _entity_error(entity_name: str, gstin: str, client_master=None) -> str:
     """Empty string if Entity / Entity Gst are valid, else what is wrong."""
     if not entity_name:
         return "Entity is blank"
     if not gstin:
         return "Entity Gst is blank"
-    record = CLIENT_MASTER.get(gstin)
+    record = (CLIENT_MASTER if client_master is None else client_master).get(gstin)
     if record is None:
         return f"Entity Gst {gstin} is not in the company list"
     if record.entity_name.lower().strip() != entity_name.lower().strip():
@@ -175,7 +177,7 @@ def _entity_error(entity_name: str, gstin: str) -> str:
 # ── Main parser ───────────────────────────────────────────────────────────────
 
 def parse_eee_taxi_csv(
-    file_bytes: bytes, rates: RateCard,
+    file_bytes: bytes, rates: RateCard, *, client_master=None,
 ) -> tuple[list[str], list[EeeTaxiRow]]:
     """Parse CSV bytes → (original_headers, rows).
 
@@ -230,7 +232,7 @@ def parse_eee_taxi_csv(
         drop_zone    = col("drop zone")
         label        = f"Row {sheet_row} ({col('guest name') or 'no guest name'})"
 
-        entity_problem = _entity_error(entity_name, client_gstin)
+        entity_problem = _entity_error(entity_name, client_gstin, client_master)
         if entity_problem:
             row_errors.append(f"{label}: {entity_problem}")
             continue
@@ -292,6 +294,7 @@ def parse_eee_taxi_csv(
             raw_values=tuple(raw),
             pickup_zone=col("pickup zone"),
             drop_zone=drop_zone,
+            eng_code=col("eng code"),
         ))
         idx += 1
 

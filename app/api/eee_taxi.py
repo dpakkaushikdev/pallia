@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -26,6 +26,9 @@ from app.services.eee_taxi_pipeline import (
     unsigned_pdf_bytes,
 )
 from app.services.eee_taxi_rates import get_rate_card, rate_card_to_dict
+from app.services.eee_taxi_profiles import rates_for_client, parse_trips, snapshot_rates, invoice_number
+from app.services.ey_rates import EyRateCard
+from app.services.ey_fares import generate_ey_calc_csv, parse_ey_overrides, apply_ey_fares
 from app.services.eee_taxi_review import review_rows
 from app.services.eee_taxi_rental_calc import (
     apply_fare_overrides,
@@ -43,7 +46,7 @@ router = APIRouter(
 # ── Calculate fares for all rows ─────────────────────────────────────────────
 
 @router.post("/calculate")
-async def calculate_fares(csv_file: UploadFile):
+async def calculate_fares(csv_file: UploadFile, client_profile: Literal["pwc", "ey"] = Form("pwc")):
     """Parse CSV, calculate all fares (P2P + rental), return enriched CSV.
 
     Response headers carry row counts:
@@ -53,9 +56,9 @@ async def calculate_fares(csv_file: UploadFile):
     """
     csv_bytes = await csv_file.read()
     with SessionLocal() as db:
-        rates = get_rate_card(db)
+        rates = rates_for_client(db, client_profile)
     try:
-        original_headers, rows = parse_eee_taxi_csv(csv_bytes, rates)
+        original_headers, rows = parse_trips(csv_bytes, rates)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -63,7 +66,8 @@ async def calculate_fares(csv_file: UploadFile):
         raise HTTPException(status_code=400, detail="No valid data rows found in CSV.")
 
     try:
-        calc_bytes = generate_full_calc_csv(rows, original_headers, rates)
+        calc_bytes = (generate_ey_calc_csv(rows, original_headers, rates) if client_profile == "ey"
+                      else generate_full_calc_csv(rows, original_headers, rates))
     except Exception as exc:
         logger.exception("generate_full_calc_csv failed")
         raise HTTPException(status_code=500, detail=f"Fare calculation failed: {exc}") from exc
@@ -94,7 +98,7 @@ async def fare_check(csv_file: UploadFile):
     with SessionLocal() as db:
         rates = get_rate_card(db)
     try:
-        _, rows = parse_eee_taxi_csv(csv_bytes, rates)
+        _, rows = parse_trips(csv_bytes, rates)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     checks = check_p2p_fares(rows, rates)
@@ -118,11 +122,21 @@ async def _prepared_rows(csv_bytes: bytes, calc_csv: Optional[UploadFile], use_c
                          rates) -> tuple[list, Optional[bytes], set[int]]:
     """Parsed rows with card fares and re-uploaded Calc_Trip_Fare edits applied."""
     try:
-        _, rows = parse_eee_taxi_csv(csv_bytes, rates)
+        _, rows = parse_trips(csv_bytes, rates)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"CSV parse error: {exc}") from exc
     if not rows:
         raise HTTPException(status_code=400, detail="No valid data rows found in CSV.")
+
+    if isinstance(rates, EyRateCard):
+        if use_card_fare_rows.strip():
+            raise HTTPException(400, "PWC route-card overrides cannot be applied to EY.")
+        calc_bytes = await calc_csv.read() if calc_csv is not None else None
+        try:
+            overrides = parse_ey_overrides(calc_bytes, rows) if calc_bytes else {}
+            return apply_ey_fares(rows, rates, overrides), calc_bytes, set()
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     overrides: dict = {}
     calc_bytes: bytes | None = None
@@ -147,11 +161,12 @@ async def preview_batch(
     csv_file: UploadFile,
     calc_csv: Optional[UploadFile] = File(None),
     use_card_fare_rows: str = Form(""),
+    client_profile: Literal["pwc", "ey"] = Form("pwc"),
 ):
     """Fare, toll, GST and total per trip, with warnings, before any invoice number is given."""
     csv_bytes = await csv_file.read()
     with SessionLocal() as db:
-        rates = get_rate_card(db)
+        rates = rates_for_client(db, client_profile)
         rows, _, _ = await _prepared_rows(csv_bytes, calc_csv, use_card_fare_rows, rates)
         return {"rows": [r.to_dict() for r in review_rows(db, rows)]}
 
@@ -170,6 +185,7 @@ async def start_batch(
     calc_csv: Optional[UploadFile] = File(None),
     use_card_fare_rows: str = Form(""),
     exclude_rows: str = Form(""),
+    client_profile: Literal["pwc", "ey"] = Form("pwc"),
     user: User = Depends(require_permission("eee_taxi")),
 ):
     """Create a batch from the trips kept on the review screen.
@@ -190,7 +206,7 @@ async def start_batch(
 
     csv_bytes = await csv_file.read()
     with SessionLocal() as db:
-        rates = get_rate_card(db)   # one snapshot for the whole batch
+        rates = rates_for_client(db, client_profile)   # one snapshot for the whole batch
         rows, calc_bytes, card_rows = await _prepared_rows(csv_bytes, calc_csv, use_card_fare_rows, rates)
         excluded = _parse_row_list(exclude_rows)
         rows = [r for r in rows if r.row_index not in excluded]
@@ -198,7 +214,7 @@ async def start_batch(
             raise HTTPException(status_code=400, detail="Every trip was removed; nothing to invoice.")
 
         fy = financial_year(inv_date)
-        numbers = [format_invoice_no(fy, start_suffix + i) for i in range(len(rows))]
+        numbers = [invoice_number(fy, start_suffix + i, client_profile) for i in range(len(rows))]
         taken = _taken_numbers(db, numbers)
         if taken:
             raise HTTPException(
@@ -211,6 +227,7 @@ async def start_batch(
         batch_id = uuid.uuid4().hex
         batch = EeeTaxiBatch(
             id=batch_id,
+            client_profile=client_profile,
             invoice_date=inv_date,
             start_suffix=start_suffix,
             total_rows=len(rows),
@@ -221,7 +238,7 @@ async def start_batch(
             csv_data=csv_bytes,
             calc_csv_data=calc_bytes,
             card_fare_rows=sorted(card_rows),
-            rates_snapshot=rate_card_to_dict(rates),
+            rates_snapshot=snapshot_rates(rates),
         )
         db.add(batch)
         db.flush()
@@ -295,6 +312,7 @@ def get_batch(batch_id: str):
 
         return {
             "batch_id":    batch_id,
+            "client_profile": batch.client_profile,
             "status":      batch.status,
             "sign_mode":   batch.sign_mode or "usb",
             "total_rows":  batch.total_rows,

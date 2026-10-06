@@ -107,6 +107,8 @@ def _migrate_existing_db() -> None:
         json_type = JSON().compile(dialect=engine.dialect)
         if "eee_taxi_batches" in inspector.get_table_names():
             existing = {c["name"] for c in inspector.get_columns("eee_taxi_batches")}
+            if "client_profile" not in existing:
+                conn.execute(text("ALTER TABLE eee_taxi_batches ADD COLUMN client_profile VARCHAR(16) NOT NULL DEFAULT 'pwc'"))
             if "sign_mode" not in existing:
                 conn.execute(text("ALTER TABLE eee_taxi_batches ADD COLUMN sign_mode VARCHAR(16)"))
             if "created_by" not in existing:

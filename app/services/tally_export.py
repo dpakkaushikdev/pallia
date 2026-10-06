@@ -45,6 +45,7 @@ class TallyLedgers:
     hsn_toll: str = "996601"
     cost_category: str = "Primary Cost Category"
     payment_terms: str = "30 Days"
+    gst_rate: Decimal = Decimal("18")
 
 
 DEFAULT_LEDGERS = TallyLedgers()
@@ -66,6 +67,11 @@ class TallyVoucher:
     igst: Decimal
     cost_centre: str
     description: tuple[str, ...] = ()
+    buyer_order_no: str | None = None
+    other_references: str = ""
+    dispatch_doc_no: str = ""
+    dispatched_through: str = ""
+    destination: str = ""
 
     @property
     def total(self) -> Decimal:
@@ -131,9 +137,9 @@ def _party_entry(v: TallyVoucher) -> str:
     )
 
 
-def _rate_details() -> str:
+def _rate_details(gst_rate: Decimal = Decimal("18")) -> str:
     # Tally lists all three heads on every taxable line; place of supply picks the tax.
-    rates = (("CGST", "9"), ("SGST/UTGST", "9"), ("IGST", "18"))
+    rates = (("CGST", str(gst_rate / 2)), ("SGST/UTGST", str(gst_rate / 2)), ("IGST", str(gst_rate)))
     return "".join(
         "<RATEDETAILS.LIST>"
         + _tag("GSTRATEDUTYHEAD", head)
@@ -145,6 +151,10 @@ def _rate_details() -> str:
 
 
 _INVOICE_TAX_RATE = "<RATEOFINVOICETAX.LIST TYPE=\"Number\"><RATEOFINVOICETAX>18</RATEOFINVOICETAX></RATEOFINVOICETAX.LIST>"
+
+
+def _invoice_tax_rate(rate: Decimal) -> str:
+    return '<RATEOFINVOICETAX.LIST TYPE="Number">' + _tag("RATEOFINVOICETAX", rate) + '</RATEOFINVOICETAX.LIST>'
 
 
 def _income_entry(v: TallyVoucher, ledger: str, hsn: str, amount: Decimal,
@@ -161,7 +171,7 @@ def _income_entry(v: TallyVoucher, ledger: str, hsn: str, amount: Decimal,
         )
     return (
         "<LEDGERENTRIES.LIST>"
-        + (_INVOICE_TAX_RATE if invoice_tax_rate else "")
+        + (_invoice_tax_rate(ledgers.gst_rate) if invoice_tax_rate else "")
         + _tag("LEDGERNAME", ledger)
         + _tag("GSTOVRDNTAXABILITY", "Taxable")
         + _tag("GSTSOURCETYPE", "Ledger")
@@ -182,17 +192,17 @@ def _income_entry(v: TallyVoucher, ledger: str, hsn: str, amount: Decimal,
         + _tag("AMOUNT", amt)
         + "</COSTCENTREALLOCATIONS.LIST>"
         + "</CATEGORYALLOCATIONS.LIST>"
-        + _rate_details()
+        + _rate_details(ledgers.gst_rate)
         + udf
         + "</LEDGERENTRIES.LIST>"
     )
 
 
-def _tax_entry(ledger: str, amount: Decimal) -> str:
+def _tax_entry(ledger: str, amount: Decimal, gst_rate: Decimal = Decimal("18")) -> str:
     amt = _amt(amount)
     return (
         "<LEDGERENTRIES.LIST>"
-        + _INVOICE_TAX_RATE
+        + _invoice_tax_rate(gst_rate)
         + _tag("LEDGERNAME", ledger)
         + _tag("ISDEEMEDPOSITIVE", "No")
         + _tag("ISPARTYLEDGER", "No")
@@ -215,9 +225,9 @@ def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
     if v.toll:
         entries.append(_income_entry(v, ledgers.toll, ledgers.hsn_toll, v.toll, ledgers, invoice_tax_rate=True))
     if v.is_local:
-        entries += [_tax_entry(ledgers.cgst, v.cgst), _tax_entry(ledgers.sgst, v.sgst)]
+        entries += [_tax_entry(ledgers.cgst, v.cgst, ledgers.gst_rate), _tax_entry(ledgers.sgst, v.sgst, ledgers.gst_rate)]
     else:
-        entries.append(_tax_entry(ledgers.igst, v.igst))
+        entries.append(_tax_entry(ledgers.igst, v.igst, ledgers.gst_rate))
 
     attrs = f'VCHTYPE={quoteattr(ledgers.voucher_type)} ACTION="Create" OBJVIEW="Invoice Voucher View"'
     return (
@@ -259,6 +269,10 @@ def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
         + _tag("VCHSTATUSVOUCHERTYPE", ledgers.voucher_type)
         + _tag("VCHSTATUSTAXUNIT", ledgers.gst_registration)
         + _tag("BASICSHIPVESSELNO", v.car_no)
+        + (_tag("BASICSHIPDOCUMENTNO", v.dispatch_doc_no) if v.dispatch_doc_no else "")
+        + (_tag("BASICSHIPPEDBY", v.dispatched_through) if v.dispatched_through else "")
+        + (_tag("BASICFINALDESTINATION", v.destination) if v.destination else "")
+        + (_tag("BASICORDERREF", v.other_references) if v.other_references else "")
         + _tag("BASICDUEDATEOFPYMT", ledgers.payment_terms)
         + _tag("NARRATION", v.route_no)
         + _tag("VCHENTRYMODE", "Accounting Invoice")
@@ -266,7 +280,7 @@ def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
         + _tag("ISINVOICE", "Yes")
         + "<INVOICEORDERLIST.LIST>"
         + _tag("BASICORDERDATE", _d(v.trip_date))
-        + _tag("BASICPURCHASEORDERNO", v.route_no)
+        + _tag("BASICPURCHASEORDERNO", v.buyer_order_no if v.buyer_order_no is not None else v.route_no)
         + "</INVOICEORDERLIST.LIST>"
         + "".join(entries)
         + "</VOUCHER></TALLYMESSAGE>"

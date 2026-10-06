@@ -234,6 +234,8 @@ class EeeTaxiBatch(Base):
         index=True,
     )
     invoice_date: Mapped[date] = mapped_column(Date)
+    # Existing batches are PWC; client-specific rates and templates stay separate.
+    client_profile: Mapped[str] = mapped_column(String(16), default="pwc", server_default="pwc")
     start_suffix: Mapped[int] = mapped_column(Integer)
     total_rows: Mapped[int] = mapped_column(Integer, default=0)
     csv_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)

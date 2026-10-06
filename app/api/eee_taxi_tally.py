@@ -8,7 +8,7 @@ Tally, and Tally's "Prevent duplicates" stops a second copy of a number.
 from __future__ import annotations
 
 from datetime import date
-from typing import Optional
+from typing import Optional, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
@@ -21,6 +21,8 @@ from app.models import User
 from app.services.auth import require_admin, require_permission
 from app.services.eee_taxi_tally import ExportItem, delete_invoice, find_export_items, mark_exported
 from app.services.tally_export import render_tally_xml
+from app.services.ey_rates import get_ey_rates
+from app.services.ey_tally import ey_tally_ledgers
 
 router = APIRouter(prefix="/api/eee-taxi/tally", tags=["eee-taxi"])
 
@@ -35,6 +37,7 @@ class ExportIn(BaseModel):
 def _item(i: ExportItem) -> dict:
     return {
         "id": i.invoice_id,
+        "client_profile": i.client_profile,
         "invoice_no": i.invoice_no,
         "invoice_date": i.invoice_date.isoformat(),
         "entity_name": i.entity_name,
@@ -53,12 +56,13 @@ def preview(
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     include_exported: bool = Query(False),
+    client_profile: Optional[Literal["pwc", "ey"]] = Query(None),
     _: User = Depends(_eee_user),
     db: Session = Depends(get_db),
 ) -> dict:
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "The From date is after the To date.")
-    items = find_export_items(db, date_from, date_to, include_exported, newest_first=True)
+    items = find_export_items(db, date_from, date_to, include_exported, newest_first=True, client_profile=client_profile)
     return {"invoices": [_item(i) for i in items]}
 
 
@@ -76,7 +80,17 @@ def export(body: ExportIn, user: User = Depends(_eee_user), db: Session = Depend
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Fix these first: " + "; ".join(f"{i.invoice_no}: {i.problem}" for i in blocked[:10]))
 
-    xml = render_tally_xml([i.voucher for i in items])
+    profiles = {i.client_profile for i in items}
+    if len(profiles) != 1:
+        raise HTTPException(400, "Export PWC and EY separately; they use different GST registrations and Tally companies.")
+    if profiles == {"ey"}:
+        try:
+            ledgers = ey_tally_ledgers(get_ey_rates(db))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        xml = render_tally_xml([i.voucher for i in items], ledgers)
+    else:
+        xml = render_tally_xml([i.voucher for i in items])
     mark_exported(db, ids)
     first, last = items[0].invoice_no, items[-1].invoice_no
     logger.info("Tally export by {}: {} invoices ({} .. {})", user.email, len(items), first, last)

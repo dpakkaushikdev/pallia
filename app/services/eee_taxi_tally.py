@@ -25,6 +25,8 @@ from app.services.eee_taxi_pipeline import batch_rates, batch_rows
 from app.services.eee_taxi_rates import RateCard
 from app.services.eee_taxi_rental_calc import calculate_rental_fare
 from app.services.tally_export import TallyVoucher
+from app.services.eee_taxi_profiles import row_client, row_is_local, row_tax
+from app.services.ey_fares import fare_description
 
 _TOLERANCE = Decimal("0.01")
 
@@ -48,6 +50,7 @@ class ExportItem:
     batch_created_at: Optional[datetime] = None
     problem: str = ""
     voucher: Optional[TallyVoucher] = None
+    client_profile: str = "pwc"
 
 
 def _n(v: Decimal) -> str:
@@ -58,6 +61,8 @@ def _n(v: Decimal) -> str:
 def _description(row: EeeTaxiRow, rates: RateCard) -> tuple[str, ...]:
     lines = [f"Guest Name:-{row.guest_name}", f"From:-{row.pickup_location}", f"To:-{row.drop_location}"]
     lines = [line for line in lines if not line.endswith(":-")]
+    if row.client_profile == "ey":
+        return tuple(lines) + fare_description(row, rates)
     if row.booking_type == "rental":
         fr = calculate_rental_fare(row, rates)
         lines += [
@@ -75,7 +80,7 @@ def row_total(row: EeeTaxiRow) -> Decimal:
     if row.total_amount:
         return row.total_amount
     base = row.tax_base + row.parking
-    return base + sum(compute_tax(base, is_local(row.client_gstin)))
+    return base + sum(row_tax(row))
 
 
 def voucher_for_row(
@@ -87,7 +92,7 @@ def voucher_for_row(
 ) -> TallyVoucher:
     """The Tally voucher for one invoice; raises ExportProblem when Tally would reject it."""
     try:
-        party = lookup_client(row.client_gstin)
+        party = row_client(row)
     except UnknownClientError as exc:
         raise ExportProblem(str(exc)) from exc
 
@@ -95,8 +100,8 @@ def voucher_for_row(
     if not cost_centre:
         raise ExportProblem(f"Car {row.car_no} has no cost centre. Add it on Masters -> Cost centres.")
 
-    local = is_local(row.client_gstin)
-    cgst, sgst, igst = compute_tax(row.tax_base + row.parking, local)
+    local = row_is_local(row)
+    cgst, sgst, igst = row_tax(row)
     voucher = TallyVoucher(
         invoice_no=invoice_no,
         invoice_date=invoice_date,
@@ -112,6 +117,11 @@ def voucher_for_row(
         igst=igst,
         cost_centre=cost_centre,
         description=_description(row, rates),
+        buyer_order_no=row.eng_code if row.client_profile == "ey" else None,
+        other_references=f"TOTAL KMS {row.total_kms} KM" if row.client_profile == "ey" else "",
+        dispatch_doc_no=row.route_no if row.client_profile == "ey" else "",
+        dispatched_through=f"PICK UP TIME - {row.pickup_time_str}" if row.client_profile == "ey" else "",
+        destination=f"DROP TIME - {row.drop_time_str}" if row.client_profile == "ey" else "",
     )
     # The PDF prints the CSV total when there is one; Tally needs the voucher to
     # balance, so the two must agree or the books would differ from the invoice.
@@ -128,6 +138,7 @@ def _items_for_batch(batch: EeeTaxiBatch, invoices: list[EeeTaxiInvoice],
     def item(inv: EeeTaxiInvoice, row: Optional[EeeTaxiRow], **kw) -> ExportItem:
         return ExportItem(
             invoice_id=inv.id,
+            client_profile=batch.client_profile or "pwc",
             invoice_no=inv.invoice_no or "",
             invoice_date=batch.invoice_date,
             entity_name=inv.entity_name or (row.entity_name if row else ""),
@@ -173,6 +184,7 @@ def find_export_items(
     include_exported: bool = False,
     invoice_ids: Optional[list[str]] = None,
     newest_first: bool = False,
+    client_profile: str | None = None,
 ) -> list[ExportItem]:
     """Finished (signed) invoices in the date range, oldest invoice first unless *newest_first*."""
     q = (
@@ -182,6 +194,8 @@ def find_export_items(
     )
     if date_from:
         q = q.filter(EeeTaxiBatch.invoice_date >= date_from)
+    if client_profile:
+        q = q.filter(EeeTaxiBatch.client_profile == client_profile)
     if date_to:
         q = q.filter(EeeTaxiBatch.invoice_date <= date_to)
     if not include_exported:

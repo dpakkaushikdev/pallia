@@ -1,0 +1,221 @@
+"""EY fare boundaries, CSV validation, PDF/XML agreement and PWC isolation."""
+from __future__ import annotations
+
+import csv
+import io
+from dataclasses import replace
+from datetime import date
+from decimal import Decimal
+from pathlib import Path
+from xml.etree import ElementTree as ET
+
+import pytest
+from fastapi.testclient import TestClient
+from pypdf import PdfReader
+from sqlalchemy import create_engine, inspect, text
+
+from app import database
+from app.database import SessionLocal
+from app.main import app
+from app.models import EeeTaxiBatch, EeeTaxiInvoice, EeeTaxiCostCentre, EeeTaxiRateCard, User, UserRole
+from app.services.auth import get_password_hash
+from app.services.eee_taxi_csv import REQUIRED_HEADERS, parse_eee_taxi_csv
+from app.services.eee_taxi_rates import DEFAULT_RATE_CARD, get_rate_card, set_edit_password_hash
+from app.services.eee_taxi_pipeline import batch_rates, batch_rows
+from app.services.eee_taxi_tally import voucher_for_row
+from app.services.ey_clients import ey_tax
+from app.services.ey_csv import parse_ey_csv
+from app.services.ey_fares import calculate_ey_fare, apply_ey_fares, generate_ey_calc_csv, parse_ey_overrides
+from app.services.ey_rates import EyRateCard, get_ey_rates, save_ey_rates
+
+
+def ey_csv(**changes):
+    values = {name: "" for name in REQUIRED_HEADERS.values()}
+    values.update({"Date": "23/04/2026", "Cab No": "HR55AW2048", "DS no/Route No": "220426-NCR-0418",
+                   "Guest Name": "Armaan Goel", "Pickup Address": "Sector 82A, Gurugram",
+                   "Drop Location": "Terminal 2", "Pick up Time": "07:00", "Drop Time": "08:00",
+                   "Trip Duration": "1:00", "Total kms": "10", "Package": "P2P", "Trip Fare": "999",
+                   "MCD": "10", "Parking": "10", "Toll": "10", "Entity": "Ernst & Young LLP",
+                   "Entity Gst": "06AAEFE1763C1ZW", "Eng Code": "E-45303477"})
+    values.update(changes)
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=values.keys())
+    writer.writeheader()
+    writer.writerow(values)
+    return buf.getvalue().encode("utf-8-sig")
+
+
+def row(**changes):
+    return parse_ey_csv(ey_csv(**changes), EyRateCard())[1][0]
+
+
+@pytest.mark.parametrize("duration,kms,expected", [
+    ("1:00", "10", "322.00"), ("0:00", "0", "322.00"),
+    ("0:10", "20", "420.00"), ("1:00", "20", "487.50"),
+    ("1:45", "42", "1017.00"), ("1:00", "20.5", "498.00"),
+])
+def test_p2p_formula_minimum_and_grace(duration, kms, expected):
+    result = calculate_ey_fare(row(**{"Trip Duration": duration, "Total kms": kms}), EyRateCard())
+    assert result.fare == Decimal(expected)
+    assert result.night == 0
+
+
+def test_p2p_never_has_night_charge():
+    result = calculate_ey_fare(row(**{"Pick up Time": "23:00", "Drop Time": "01:00", "Trip Duration": "2:00"}), EyRateCard())
+    assert result.night == 0
+
+
+@pytest.mark.parametrize("pkg,duration,kms,label,fare", [
+    (900, "4:00", "40", "4/40", "900"), (900, "4:15", "40", "4/40", "900"),
+    (900, "4:16", "40", "4/40", "902"), (900, "5:00", "40", "4/40", "990"),
+    (900, "5:01", "40", "6/60", "1300"), (900, "6:30", "65", "6/60", "1400"),
+    (1300, "6:15", "60", "6/60", "1300"), (1300, "6:16", "60", "6/60", "1302"),
+    (1300, "7:00", "70", "6/60", "1530"), (1300, "7:01", "70", "8/80", "1800"),
+    (1300, "6:00", "70.1", "8/80", "1800"), (900, "7:01", "40", "8/80", "1800"),
+    (1800, "1:00", "10", "8/80", "1800"), (1800, "8:16", "81", "8/80", "1816"),
+])
+def test_rental_packages_extras_and_upgrade_boundaries(pkg, duration, kms, label, fare):
+    result = calculate_ey_fare(row(**{"Package": str(pkg), "Trip Duration": duration, "Total kms": kms}), EyRateCard())
+    assert result.package_label == label
+    assert result.fare == Decimal(fare)
+
+
+@pytest.mark.parametrize("start,duration,night", [("22:00", "1:00", 0), ("23:00", "1:00", 250),
+    ("04:59", "0:01", 250), ("05:00", "1:00", 0), ("22:00", "8:00", 250)])
+def test_rental_night_window_including_crossing_midnight(start, duration, night):
+    result = calculate_ey_fare(row(**{"Package": "1800", "Pick up Time": start, "Trip Duration": duration}), EyRateCard())
+    assert result.night == night
+
+
+@pytest.mark.parametrize("changes", [{"Eng Code": ""}, {"Total kms": "NaN"}, {"Total kms": "broken"},
+    {"Trip Duration": "1:99"}, {"Pick up Time": "29:00"}, {"Parking": "-10"}, {"Package": "900.5"},
+    {"Entity Gst": "06AAEFP1428R1ZW"}])
+def test_invalid_ey_input_is_rejected(changes):
+    with pytest.raises(ValueError):
+        row(**changes)
+
+
+def test_client_profiles_cannot_be_mixed():
+    with pytest.raises(ValueError, match="company list"):
+        parse_eee_taxi_csv(ey_csv(), DEFAULT_RATE_CARD)
+    with pytest.raises(ValueError, match="Eng Code"):
+        parse_ey_csv(ey_csv().replace(b"Eng Code", b"Another Code"), EyRateCard())
+
+
+def test_calculated_csv_roundtrip_keeps_toll_separate():
+    rates = EyRateCard()
+    headers, rows = parse_ey_csv(ey_csv(), rates)
+    calculated = generate_ey_calc_csv(rows, headers, rates)
+    values = list(csv.DictReader(io.StringIO(calculated.decode("utf-8-sig"))))[0]
+    assert Decimal(values["Calc_Trip_Fare"]) == 322
+    assert Decimal(values["Calc Total"]) == Decimal("369.60")
+    adjusted = apply_ey_fares(rows, rates, parse_ey_overrides(calculated, rows))[0]
+    assert adjusted.trip_fare == 322 and adjusted.parking == 30
+    assert adjusted.total_amount == 0
+    with pytest.raises(ValueError, match="minimum"):
+        apply_ey_fares(rows, rates, {0: Decimal("277.50")})
+
+
+def test_ey_local_and_interstate_tax():
+    assert ey_tax(Decimal("322"), True) == (Decimal("8.05"), Decimal("8.05"), Decimal("0"))
+    assert ey_tax(Decimal("322"), False) == (Decimal("0"), Decimal("0"), Decimal("16.10"))
+
+
+def test_upgrade_migration_defaults_old_batches_to_pwc(monkeypatch):
+    engine = create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE eee_taxi_batches (id VARCHAR(32) PRIMARY KEY)"))
+        conn.execute(text("INSERT INTO eee_taxi_batches (id) VALUES ('old')"))
+    monkeypatch.setattr(database, "engine", engine)
+    database._migrate_existing_db()
+    database._migrate_existing_db()
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT client_profile FROM eee_taxi_batches WHERE id='old'")).scalar() == "pwc"
+    assert "client_profile" in {c["name"] for c in inspect(engine).get_columns("eee_taxi_batches")}
+
+
+@pytest.fixture
+def ey_client():
+    with TestClient(app) as client:
+        with SessionLocal() as db:
+            db.query(EeeTaxiInvoice).delete()
+            db.query(EeeTaxiBatch).delete()
+            db.query(EeeTaxiRateCard).filter(EeeTaxiRateCard.id == 2).delete()
+            user = db.query(User).filter(User.email == "ey-admin@test.com").first()
+            if user is None:
+                db.add(User(email="ey-admin@test.com", hashed_password=get_password_hash("Password123"), role=UserRole.ADMIN, is_active=True))
+            if not db.query(EeeTaxiCostCentre).filter_by(vehicle_no="HR55AW2048").first():
+                db.add(EeeTaxiCostCentre(vehicle_no="HR55AW2048", cost_centre="HR55AW2048"))
+            db.commit()
+        login = client.post("/api/auth/login", json={"email": "ey-admin@test.com", "password": "Password123"})
+        client.headers.update({"Authorization": "Bearer " + login.json()["access_token"]})
+        yield client
+        with SessionLocal() as db:
+            db.query(EeeTaxiInvoice).delete()
+            db.query(EeeTaxiBatch).delete()
+            db.query(EeeTaxiRateCard).filter(EeeTaxiRateCard.id == 2).delete()
+            db.commit()
+
+
+def test_ey_master_password_and_pwc_isolation(ey_client):
+    with SessionLocal() as db:
+        before = get_rate_card(db)
+        set_edit_password_hash(db, get_password_hash("masters123"))
+    rates = ey_client.get("/api/eee-taxi/ey/rates").json()["rates"]
+    rates["p2p_per_km"] = "25"
+    url = "/api/eee-taxi/ey/rates"
+    assert ey_client.put(url, json={"edit_password": "wrong", "rates": rates}).status_code == 403
+    assert ey_client.put(url, json={"edit_password": "masters123", "rates": rates}).status_code == 200
+    with SessionLocal() as db:
+        assert get_rate_card(db) == before
+        assert get_ey_rates(db).p2p_per_km == 25
+    anonymous = TestClient(app)
+    assert anonymous.get(url).status_code == 401
+
+
+def test_ey_full_flow_pdf_xml_snapshot_and_separate_listing(ey_client):
+    client = ey_client
+    files = {"csv_file": ("ey.csv", ey_csv(), "text/csv")}
+    preview = client.post("/api/eee-taxi/preview", files=files, data={"client_profile": "ey"})
+    assert preview.status_code == 200, preview.text
+    [review] = preview.json()["rows"]
+    assert (review["fare"], review["toll"], review["gst"], review["total"]) == ("322.00", "30.00", "17.60", "369.60")
+    assert review["eng_code"] == "E-45303477"
+    start = client.post("/api/eee-taxi/batch", files=files, data={"client_profile": "ey", "invoice_date": "2026-05-08", "start_suffix": 157, "sign_mode": "dummy"})
+    assert start.status_code == 200, start.text
+    batch_id = start.json()["batch_id"]
+    assert start.json()["first_invoice"] == "HR/HO/26-27/0157"
+    # A master change after upload must not affect this batch or its XML.
+    with SessionLocal() as db:
+        save_ey_rates(db, EyRateCard(p2p_minimum=999, tally_company="EY Test Haryana Company"), "test")
+        batch = db.get(EeeTaxiBatch, batch_id)
+        assert batch_rows(batch, batch_rates(batch))[0].trip_fare == 322
+    gen = client.post(f"/api/eee-taxi/batch/{batch_id}/generate-next")
+    assert gen.json()["generated"]["status"] == "done", gen.text
+    invoice_id = gen.json()["generated"]["id"]
+    pdf = client.get(f"/api/eee-taxi/batch/{batch_id}/invoice/{invoice_id}/download")
+    reader = PdfReader(io.BytesIO(pdf.content))
+    assert len(reader.pages) == 1
+    text_pdf = reader.pages[0].extract_text()
+    for value in ("E-45303477", "220426-NCR-0418", "06AANCA3858Q1ZW", "369.60", "Other References", "PICK UP TIME", "DROP TIME"):
+        assert value in text_pdf
+    assert "07AANCA3858Q1ZU" not in text_pdf
+    assert client.get("/api/eee-taxi/tally/preview?client_profile=pwc").json()["invoices"] == []
+    assert len(client.get("/api/eee-taxi/tally/preview?client_profile=ey").json()["invoices"]) == 1
+    response = client.post("/api/eee-taxi/tally/export", json={"invoice_ids": [invoice_id]})
+    assert response.status_code == 200, response.text
+    xml = ET.fromstring(response.content.decode("utf-16"))
+    assert xml.findtext(".//CMPGSTIN") == "06AANCA3858Q1ZW"
+    assert xml.findtext(".//BASICPURCHASEORDERNO") == "E-45303477"
+    assert xml.findtext(".//BASICSHIPDOCUMENTNO") == "220426-NCR-0418"
+    assert xml.findtext(".//SVCURRENTCOMPANY") == "EY Test Haryana Company"
+    assert set(n.text for n in xml.findall(".//GSTRATE")) == {"2.5", "5"}
+    amounts = [Decimal(n.text) for n in xml.findall(".//VOUCHER/LEDGERENTRIES.LIST/AMOUNT")]
+    assert amounts == [Decimal("-369.60"), Decimal("322"), Decimal("30"), Decimal("8.80"), Decimal("8.80")]
+    assert sum(amounts) == 0
+
+
+def test_ey_batch_rejects_pwc_file_and_unknown_profile(ey_client):
+    files = {"csv_file": ("ey.csv", ey_csv(), "text/csv")}
+    assert ey_client.post("/api/eee-taxi/preview", files=files).status_code == 400
+    assert ey_client.post("/api/eee-taxi/preview", files=files, data={"client_profile": "other"}).status_code == 422

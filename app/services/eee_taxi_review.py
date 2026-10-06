@@ -17,6 +17,7 @@ from app.services.eee_taxi_clients import UnknownClientError, is_local, lookup_c
 from app.services.eee_taxi_cost_centres import get_cost_centre_state, normalize_vehicle_no
 from app.services.eee_taxi_csv import EeeTaxiRow
 from app.services.eee_taxi_pdf import compute_tax
+from app.services.eee_taxi_profiles import row_client, row_tax
 
 _TOLERANCE = Decimal("0.01")
 
@@ -35,6 +36,7 @@ class ReviewRow:
     gst: Decimal
     total: Decimal
     warnings: tuple[str, ...]
+    eng_code: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -50,6 +52,7 @@ class ReviewRow:
             "gst": f"{self.gst:.2f}",
             "total": f"{self.total:.2f}",
             "warnings": list(self.warnings),
+            "eng_code": self.eng_code,
         }
 
 
@@ -76,7 +79,7 @@ def _row_warnings(row: EeeTaxiRow, total: Decimal, repeats: Counter, invoiced: d
     if route in invoiced:
         warnings.append(f"Already invoiced as {invoiced[route]}.")
     try:
-        lookup_client(row.client_gstin)
+        row_client(row)
     except UnknownClientError:
         warnings.append(f"Unknown client GSTIN {row.client_gstin}; the invoice cannot be made.")
     if not row.car_no.strip():
@@ -87,7 +90,7 @@ def _row_warnings(row: EeeTaxiRow, total: Decimal, repeats: Counter, invoiced: d
         warnings.append("Fare is zero.")
     if row.parking < 0:
         warnings.append("Toll is negative.")
-    computed = row.tax_base + row.parking + sum(compute_tax(row.tax_base + row.parking, is_local(row.client_gstin)))
+    computed = row.tax_base + row.parking + sum(row_tax(row))
     if row.total_amount and abs(row.total_amount - computed) > _TOLERANCE:
         warnings.append(f"CSV total {row.total_amount:.2f} differs from fare + toll + GST {computed:.2f}.")
     if total <= 0:
@@ -103,7 +106,7 @@ def review_rows(db: Session, rows: list[EeeTaxiRow]) -> list[ReviewRow]:
     out: list[ReviewRow] = []
     for row in rows:
         base = row.tax_base + row.parking
-        gst = sum(compute_tax(base, is_local(row.client_gstin)))
+        gst = sum(row_tax(row))
         total = row.total_amount or base + gst
         out.append(ReviewRow(
             row_index=row.row_index,
@@ -118,5 +121,6 @@ def review_rows(db: Session, rows: list[EeeTaxiRow]) -> list[ReviewRow]:
             gst=total - base,
             total=total,
             warnings=tuple(_row_warnings(row, total, repeats, invoiced, cost_centres)),
+            eng_code=row.eng_code,
         ))
     return out

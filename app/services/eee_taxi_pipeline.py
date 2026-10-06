@@ -45,6 +45,11 @@ from app.services.eee_taxi_rental_calc import (
     parse_calc_csv,
 )
 from app.services.eee_taxi_signer import _find_signature_box, sign_eee_taxi_pdf_dummy
+from app.services.eee_taxi_profiles import restore_rates, invoice_number
+from app.services.ey_rates import EyRateCard
+from app.services.ey_csv import parse_ey_csv
+from app.services.ey_fares import apply_ey_fares, parse_ey_overrides, fare_description
+from app.services.ey_pdf import generate_ey_pdf
 
 
 # ── PDF byte helpers ──────────────────────────────────────────────────────────
@@ -115,7 +120,7 @@ def finalize_batch_status(batch: EeeTaxiBatch, db: Session) -> EeeTaxiBatchStatu
 
 def batch_rates(batch: EeeTaxiBatch) -> RateCard:
     """The rate card snapshot taken when the batch started."""
-    return _from_json(batch.rates_snapshot) if batch.rates_snapshot else DEFAULT_RATE_CARD
+    return restore_rates(batch)
 
 
 def batch_rows(batch: EeeTaxiBatch, rates: RateCard) -> list[EeeTaxiRow]:
@@ -127,6 +132,11 @@ def batch_rows(batch: EeeTaxiBatch, rates: RateCard) -> list[EeeTaxiRow]:
     """
     if not batch.csv_data:
         raise RuntimeError("Batch has no stored CSV; it cannot be generated.")
+
+    if isinstance(rates, EyRateCard):
+        _, rows = parse_ey_csv(bytes(batch.csv_data), rates)
+        overrides = parse_ey_overrides(bytes(batch.calc_csv_data), rows) if batch.calc_csv_data else {}
+        return apply_ey_fares(rows, rates, overrides)
 
     _, rows = parse_eee_taxi_csv(bytes(batch.csv_data), rates)
 
@@ -149,6 +159,10 @@ def build_invoice_pdf(
     output_dir: Path,
 ) -> tuple[Path, tuple[float, float, float, float]]:
     """Render one invoice PDF and return its path and signature box."""
+    if row.client_profile == "ey":
+        path = output_dir / (invoice_no.replace("/", "-") + ".pdf")
+        generate_ey_pdf(row, invoice_no, invoice_date, fare_description(row, rates), path)
+        return path, _find_signature_box(path)
     client_gstin = row.client_gstin.strip().upper()
     try:
         buyer = lookup_client(client_gstin)
@@ -240,9 +254,10 @@ def generate_next_invoice(batch_id: str, db: Session) -> dict:
         db.commit()
 
     sign_mode  = batch.sign_mode or "usb"
-    invoice_no = format_invoice_no(
+    invoice_no = invoice_number(
         financial_year(batch.invoice_date),
         batch.start_suffix + (inv_rec.seq if inv_rec.seq is not None else inv_rec.row_index),
+        batch.client_profile or "pwc",
     )
     inv_rec.invoice_no = invoice_no
     inv_rec.status     = EeeTaxiInvoiceStatus.GENERATING
