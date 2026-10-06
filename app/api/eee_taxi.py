@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -26,7 +26,7 @@ from app.services.eee_taxi_pipeline import (
     unsigned_pdf_bytes,
 )
 from app.services.eee_taxi_rates import get_rate_card, rate_card_to_dict
-from app.services.eee_taxi_profiles import rates_for_client, parse_trips, snapshot_rates, invoice_number, client_master_for
+from app.services.eee_taxi_profiles import rates_for_client, parse_trips, snapshot_rates, invoice_number, client_master_for, detect_client_profile
 from app.services.eee_taxi_client_master import snapshot_client_master
 from app.services.ey_rates import EyRateCard
 from app.services.ey_fares import generate_ey_calc_csv, parse_ey_overrides, apply_ey_fares
@@ -47,7 +47,7 @@ router = APIRouter(
 # ── Calculate fares for all rows ─────────────────────────────────────────────
 
 @router.post("/calculate")
-async def calculate_fares(csv_file: UploadFile, client_profile: Literal["pwc", "ey"] = Form("pwc")):
+async def calculate_fares(csv_file: UploadFile):
     """Parse CSV, calculate all fares (P2P + rental), return enriched CSV.
 
     Response headers carry row counts:
@@ -56,6 +56,10 @@ async def calculate_fares(csv_file: UploadFile, client_profile: Literal["pwc", "
     that file when starting the batch to override any calculated fare.
     """
     csv_bytes = await csv_file.read()
+    try:
+        client_profile = detect_client_profile(csv_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     with SessionLocal() as db:
         rates = rates_for_client(db, client_profile)
         client_master = client_master_for(db, client_profile)
@@ -86,7 +90,8 @@ async def calculate_fares(csv_file: UploadFile, client_profile: Literal["pwc", "
             "X-Total-Count":  str(len(rows)),
             "X-P2P-Count":    str(p2p_count),
             "X-Rental-Count": str(rental_count),
-            "Access-Control-Expose-Headers": "X-Total-Count, X-P2P-Count, X-Rental-Count",
+            "X-Client-Profile": client_profile,
+            "Access-Control-Expose-Headers": "X-Total-Count, X-P2P-Count, X-Rental-Count, X-Client-Profile",
         },
     )
 
@@ -164,10 +169,13 @@ async def preview_batch(
     csv_file: UploadFile,
     calc_csv: Optional[UploadFile] = File(None),
     use_card_fare_rows: str = Form(""),
-    client_profile: Literal["pwc", "ey"] = Form("pwc"),
 ):
     """Fare, toll, GST and total per trip, with warnings, before any invoice number is given."""
     csv_bytes = await csv_file.read()
+    try:
+        client_profile = detect_client_profile(csv_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     with SessionLocal() as db:
         rates = rates_for_client(db, client_profile)
         client_master = client_master_for(db, client_profile)
@@ -189,7 +197,6 @@ async def start_batch(
     calc_csv: Optional[UploadFile] = File(None),
     use_card_fare_rows: str = Form(""),
     exclude_rows: str = Form(""),
-    client_profile: Literal["pwc", "ey"] = Form("pwc"),
     user: User = Depends(require_permission("eee_taxi")),
 ):
     """Create a batch from the trips kept on the review screen.
@@ -209,6 +216,10 @@ async def start_batch(
         raise HTTPException(status_code=400, detail=f"Invalid invoice_date: {invoice_date!r}")
 
     csv_bytes = await csv_file.read()
+    try:
+        client_profile = detect_client_profile(csv_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     with SessionLocal() as db:
         rates = rates_for_client(db, client_profile)   # one snapshot for the whole batch
         client_master = client_master_for(db, client_profile)

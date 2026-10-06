@@ -11,8 +11,8 @@ from app.main import app  # conftest.py points DATABASE_URL at a temp DB first
 
 TRIP_CSV = (
     "Date,Car No,DS no/Route No,Guest Name,Pickup Location,Drop Location,"
-    "Pick up Time,Drop Time,Trip Duration,Total kms,Package,Trip Fare,Toll/MCD,Entity,Entity Gst\n"
-    "09/01/2026,DL1,R1,G,A,B,10:00 AM,3:00 PM,5:00,45,950,950,0,PRICE WATERHOUSE LLP,06AAEFP3641G1ZG\n"
+    "Pick up Time,Drop Time,Trip Duration,Total kms,Package,Trip Fare,Toll/MCD,Entity,Entity Gst,Company Name\n"
+    "09/01/2026,DL1,R1,G,A,B,10:00 AM,3:00 PM,5:00,45,950,950,0,PRICE WATERHOUSE LLP,06AAEFP3641G1ZG,PWC\n"
 ).encode()
 
 

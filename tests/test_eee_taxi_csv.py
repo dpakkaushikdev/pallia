@@ -74,7 +74,7 @@ def test_blank_gstin_rejects_file_instead_of_guessing():
 
 def test_unknown_gstin_rejects_file():
     row = TRIP_P2P.replace("06AAEFP1428R1ZW", "06AAAAA0000A1Z5")
-    with pytest.raises(ValueError, match="not in the company list"):
+    with pytest.raises(ValueError, match="not in the selected client master"):
         _parse(HEADER + row)
 
 

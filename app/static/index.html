@@ -874,11 +874,7 @@
 
       <!-- Phase 1: Upload CSV -->
       <div id="eetPhase1" class="card" style="padding:20px 22px;margin-bottom:16px;">
-        <div class="field-group" style="margin-bottom:14px;">
-          <label class="field" for="eetClient">Client</label>
-          <select id="eetClient" onchange="eetClientHint()"><option value="pwc">PWC</option><option value="ey">EY</option></select>
-          <div class="meta" id="eetClientHint" style="margin-top:8px;">PWC rate card and Delhi invoice series.</div>
-        </div>
+        <div class="meta" style="margin-bottom:14px;">Client is identified automatically from the CSV's Company Name column (PWC or EY).</div>
         <div class="card-title" style="margin-bottom:14px;">Step 1 — Upload Trip CSV</div>
         <div class="field-group">
           <label class="field">Trip CSV</label>
@@ -2797,12 +2793,6 @@ let _eetCalcCsvBlob  = null;   // calculated CSV blob for download
 let _eetCalcFilename = "calculated.csv";
 let _eetProfile = "pwc";
 
-function eetClientHint() {
-  $("#eetClientHint").textContent = $("#eetClient").value === "ey"
-    ? "EY rates, Haryana HR/HO invoices and 5% GST. CSV must include Eng Code."
-    : "PWC rate card and Delhi invoice series.";
-}
-
 function eetTogglePinField() {
   const isDummy = document.getElementById("eetSignModeDummy").checked;
   document.getElementById("eetPinGroup").style.display = isDummy ? "none" : "";
@@ -2815,7 +2805,6 @@ function eetReset() {
   _eetCsvFile      = null;
   _eetCalcCsvBlob  = null;
   _eetCalcFilename = "calculated.csv";
-  $("#eetClient").disabled = false;
   document.getElementById("eetCsvFile").value = "";
   document.getElementById("eetModifiedCsvFile").value = "";
   document.getElementById("eetPhase1Error").textContent = "";
@@ -2855,16 +2844,12 @@ function eetUploadAndCalculate() {
 
   const fd = new FormData();
   fd.append("csv_file", fileInput.files[0]);
-  _eetProfile = $("#eetClient").value;
-  $("#eetClient").disabled = true;
-  fd.append("client_profile", _eetProfile);
 
   fetch("/api/eee-taxi/calculate", { method: "POST", body: fd, headers: authHeaders() })
     .then(res => {
       btn.disabled    = false;
       btn.textContent = "Upload & Calculate";
       if (!res.ok) {
-        $("#eetClient").disabled = false;
         return res.text().then(t => {
           try { const e = JSON.parse(t); errEl.textContent = e.detail || "Error calculating fares."; }
           catch { errEl.textContent = `Server error (${res.status}) — check server logs for details.`; }
@@ -2874,6 +2859,7 @@ function eetUploadAndCalculate() {
       const total  = res.headers.get("X-Total-Count")  || "?";
       const p2p    = res.headers.get("X-P2P-Count")    || "0";
       const rental = res.headers.get("X-Rental-Count") || "0";
+      _eetProfile = res.headers.get("X-Client-Profile") || "pwc";
       const cd     = res.headers.get("Content-Disposition") || "";
       _eetCalcFilename = cd.match(/filename="([^"]+)"/)?.[1] || "calculated.csv";
       _eetCsvFile = fileInput.files[0];
@@ -2896,7 +2882,6 @@ function eetUploadAndCalculate() {
     .catch(e => {
       btn.disabled    = false;
       btn.textContent = "Upload & Calculate";
-      $("#eetClient").disabled = false;
       errEl.textContent = "Error: " + e;
     });
 }
@@ -2938,7 +2923,6 @@ async function eetProceed() {
 
   const fd = new FormData();
   fd.append("csv_file",     _eetCsvFile);
-  fd.append("client_profile", _eetProfile);
   fd.append("invoice_date", invDate);
   fd.append("start_suffix", suffix);
   fd.append("sign_mode",    signMode);
@@ -3996,7 +3980,6 @@ async function eetLoadPreview() {
   box.innerHTML = `<div class="meta" style="margin-bottom:10px;">Checking trips…</div>`;
   const fd = new FormData();
   fd.append("csv_file", _eetCsvFile);
-  fd.append("client_profile", _eetProfile);
   const mod = $("#eetModifiedCsvFile");
   if (mod && mod.files.length) fd.append("calc_csv", mod.files[0]);
   fd.append("use_card_fare_rows", eetChosenCardFareRows());

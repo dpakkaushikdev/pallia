@@ -23,11 +23,13 @@ from app.services.eee_taxi_clients import CLIENT_MASTER
 from app.services.eee_taxi_csv import REQUIRED_HEADERS, parse_eee_taxi_csv
 from app.services.eee_taxi_rates import DEFAULT_RATE_CARD, get_rate_card, set_edit_password_hash
 from app.services.eee_taxi_pipeline import batch_rates, batch_rows
+from app.services.eee_taxi_profiles import detect_client_profile
 from app.services.eee_taxi_tally import voucher_for_row
 from app.services.ey_clients import ey_tax
 from app.services.ey_csv import parse_ey_csv
 from app.services.ey_fares import calculate_ey_fare, apply_ey_fares, generate_ey_calc_csv, parse_ey_overrides
 from app.services.ey_rates import EyRateCard, get_ey_rates, save_ey_rates
+from tests.test_eee_taxi_csv import HEADER, TRIP_1
 
 
 def ey_csv(**changes):
@@ -37,7 +39,7 @@ def ey_csv(**changes):
                    "Drop Location": "Terminal 2", "Pick up Time": "07:00", "Drop Time": "08:00",
                    "Trip Duration": "1:00", "Total kms": "10", "Package": "P2P", "Trip Fare": "999",
                    "MCD": "10", "Parking": "10", "Toll": "10", "Entity": "Ernst & Young LLP",
-                   "Entity Gst": "06AAEFE1763C1ZW", "Eng Code": "E-45303477"})
+                   "Entity Gst": "06AAEFE1763C1ZW", "Company Name": "EY", "Eng Code": "E-45303477"})
     values.update(changes)
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=values.keys())
@@ -101,6 +103,18 @@ def test_client_profiles_cannot_be_mixed():
         parse_eee_taxi_csv(ey_csv(), DEFAULT_RATE_CARD)
     with pytest.raises(ValueError, match="Eng Code"):
         parse_ey_csv(ey_csv().replace(b"Eng Code", b"Another Code"), EyRateCard())
+
+
+def test_company_name_detects_client_and_rejects_ambiguous_files():
+    assert detect_client_profile(ey_csv()) == "ey"
+    pwc = (HEADER + TRIP_1).encode()
+    assert detect_client_profile(pwc) == "pwc"
+    ey_text = ey_csv().decode("utf-8-sig")
+    header, row_text = ey_text.splitlines()[:2]
+    with pytest.raises(ValueError, match="both PWC and EY"):
+        detect_client_profile((header + "\n" + row_text + "\n" + row_text.replace(",EY,", ",PWC," )).encode())
+    with pytest.raises(ValueError, match='"Company Name"'):
+        detect_client_profile(ey_csv().replace(b"Company Name,", b"Customer,"))
 
 
 def test_calculated_csv_roundtrip_keeps_toll_separate():
@@ -195,12 +209,12 @@ def test_client_masters_include_workbook_ey_registrations_and_save_separately(ey
 def test_ey_full_flow_pdf_xml_snapshot_and_separate_listing(ey_client):
     client = ey_client
     files = {"csv_file": ("ey.csv", ey_csv(), "text/csv")}
-    preview = client.post("/api/eee-taxi/preview", files=files, data={"client_profile": "ey"})
+    preview = client.post("/api/eee-taxi/preview", files=files)
     assert preview.status_code == 200, preview.text
     [review] = preview.json()["rows"]
     assert (review["fare"], review["toll"], review["gst"], review["total"]) == ("322.00", "30.00", "17.60", "369.60")
     assert review["eng_code"] == "E-45303477"
-    start = client.post("/api/eee-taxi/batch", files=files, data={"client_profile": "ey", "invoice_date": "2026-05-08", "start_suffix": 157, "sign_mode": "dummy"})
+    start = client.post("/api/eee-taxi/batch", files=files, data={"invoice_date": "2026-05-08", "start_suffix": 157, "sign_mode": "dummy"})
     assert start.status_code == 200, start.text
     batch_id = start.json()["batch_id"]
     assert start.json()["first_invoice"] == "HR/HO/26-27/0157"
@@ -234,7 +248,10 @@ def test_ey_full_flow_pdf_xml_snapshot_and_separate_listing(ey_client):
     assert sum(amounts) == 0
 
 
-def test_ey_batch_rejects_pwc_file_and_unknown_profile(ey_client):
+def test_ey_profile_is_detected_from_company_name_even_without_form_choice(ey_client):
     files = {"csv_file": ("ey.csv", ey_csv(), "text/csv")}
-    assert ey_client.post("/api/eee-taxi/preview", files=files).status_code == 400
-    assert ey_client.post("/api/eee-taxi/preview", files=files, data={"client_profile": "other"}).status_code == 422
+    preview = ey_client.post("/api/eee-taxi/preview", files=files)
+    assert preview.status_code == 200, preview.text
+    calculated = ey_client.post("/api/eee-taxi/calculate", files=files)
+    assert calculated.status_code == 200, calculated.text
+    assert calculated.headers["X-Client-Profile"] == "ey"
