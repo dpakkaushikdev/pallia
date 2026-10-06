@@ -27,7 +27,7 @@ from app.services.eee_taxi_profiles import detect_client_profile
 from app.services.eee_taxi_tally import voucher_for_row
 from app.services.ey_clients import ey_tax
 from app.services.ey_csv import parse_ey_csv
-from app.services.ey_fares import calculate_ey_fare, apply_ey_fares, generate_ey_calc_csv, parse_ey_overrides
+from app.services.ey_fares import calculate_ey_fare, fare_description, apply_ey_fares, generate_ey_calc_csv, parse_ey_overrides
 from app.services.ey_rates import EyRateCard, get_ey_rates, save_ey_rates
 from tests.test_eee_taxi_csv import HEADER, TRIP_1
 
@@ -68,6 +68,18 @@ def test_p2p_night_charge_applies_when_trip_overlaps_night_window(pickup, durati
     result = calculate_ey_fare(row(**{"Pick up Time": pickup, "Trip Duration": duration}), EyRateCard())
     assert result.night == night
     assert result.fare == Decimal(fare)
+
+
+def test_ey_p2p_invoice_description_matches_reference_format():
+    rates = EyRateCard()
+    trip = apply_ey_fares([row(**{"Pick up Time": "17:00", "Trip Duration": "0:46", "Total kms": "5"})], rates)[0]
+    lines = fare_description(trip, rates)
+    assert "Total Hrs 46 Mins (31*1.5 = 46.5)" in lines
+    assert "Total Kms 5 Km (5*21.00 = 105)" in lines
+    assert "Night Charge = 0" in lines
+    assert "Total Fare without Tax = 322" in lines
+    assert not any("Minimum fare" in line or "grace" in line.lower() for line in lines)
+    assert not any("23:00" in line or "05:00" in line for line in lines)
 
 
 @pytest.mark.parametrize("pkg,duration,kms,label,fare", [
@@ -252,8 +264,15 @@ def test_ey_full_flow_pdf_xml_snapshot_and_separate_listing(ey_client):
     reader = PdfReader(io.BytesIO(pdf.content))
     assert len(reader.pages) == 1
     text_pdf = reader.pages[0].extract_text()
-    for value in ("E-45303477", "220426-NCR-0418", "06AANCA3858Q1ZW", "369.60", "Other References", "PICK UP TIME", "DROP TIME"):
+    for value in (
+        "E-45303477", "220426-NCR-0418", "06AANCA3858Q1ZW", "369.60",
+        "Other References", "PICK UP TIME", "DROP TIME", "Toll & Parking",
+        "Total Hrs 60 Mins (45*1.5 = 67.5)",
+        "Total Kms 10 Km (10*21.00 = 210)",
+        "Night Charge = 0", "Total Fare without Tax = 322",
+    ):
         assert value in text_pdf
+    assert "Toll and Parking" not in text_pdf
     assert "07AANCA3858Q1ZU" not in text_pdf
     assert client.get("/api/eee-taxi/tally/preview?client_profile=pwc").json()["invoices"] == []
     assert len(client.get("/api/eee-taxi/tally/preview?client_profile=ey").json()["invoices"]) == 1

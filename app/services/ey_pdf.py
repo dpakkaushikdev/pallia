@@ -59,7 +59,7 @@ def generate_ey_pdf(row, invoice_no, invoice_date, description, output_path: Pat
     lines = [[p("Sl No."), p("Particulars", "xsb"), p("HSN/SAC"), p("GST Rate"), p("Amount", "smbr")],
              [p("1"), p(detail), p("996601"), p("5 %"), p(f"{row.tax_base:,.2f}", "smr")]]
     if row.parking:
-        lines.append([p("2"), p("Toll and Parking"), p("996601"), p("5 %"), p(f"{row.parking:,.2f}", "smr")])
+        lines.append([p("2"), p("Toll & Parking"), p("996601"), p("5 %"), p(f"{row.parking:,.2f}", "smr")])
     taxes = [("OUTPUT CGST @2.5%", cgst), ("OUTPUT SGST @2.5%", sgst)] if local else [("OUTPUT IGST @5%", igst)]
     for label, amount in taxes:
         lines.append(["", p(label, "smb"), "", "", p(f"{amount:,.2f}", "smr")])

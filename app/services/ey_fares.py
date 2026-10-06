@@ -11,6 +11,10 @@ from app.services.ey_rates import EyRateCard
 ZERO = Decimal("0")
 
 
+def _plain_amount(value: Decimal) -> str:
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
 @dataclass(frozen=True)
 class EyFare:
     base: Decimal
@@ -66,18 +70,19 @@ def calculate_ey_fare(row, rates: EyRateCard) -> EyFare:
 def fare_description(row, rates):
     result = calculate_ey_fare(row, rates)
     if row.booking_type == "p2p":
-        lines = ["POINT TO POINT", f"Billable minutes after {rates.p2p_grace_minutes} min grace: {result.charged_minutes} x {rates.p2p_per_minute} = {result.time_charge:.2f}",
-                 f"Total Kms {row.total_kms} x {rates.p2p_per_km} = {result.km_charge:.2f}",
-                 f"Minimum fare: {rates.p2p_minimum:.2f}",
-                 f"Night Charge ({rates.night_start_hour:02d}:00-{rates.night_end_hour:02d}:00) = {result.night:.2f}"]
+        trip_minutes = duration_minutes(row.trip_duration_str)
+        lines = ["POINT TO POINT",
+                 f"Total Hrs {trip_minutes} Mins ({result.charged_minutes}*{rates.p2p_per_minute} = {_plain_amount(result.time_charge)})",
+                 f"Total Kms {_plain_amount(row.total_kms)} Km ({_plain_amount(row.total_kms)}*{rates.p2p_per_km:.2f} = {_plain_amount(result.km_charge)})",
+                 f"Night Charge = {_plain_amount(result.night)}"]
     else:
         lines = [f"Rental ({result.package_label} = {result.base:.2f})",
                  f"Extra minutes after {rates.rental_grace_minutes} min grace: {result.charged_minutes} x {rates.extra_minute_rate} = {result.time_charge:.2f}",
                  f"Extra Kms {result.charged_kms} x {rates.extra_km_rate} = {result.km_charge:.2f}",
-                 f"Night Charge ({rates.night_start_hour:02d}:00-{rates.night_end_hour:02d}:00) = {result.night:.2f}"]
+                 f"Night Charge = {_plain_amount(result.night)}"]
     if row.trip_fare != result.fare:
         lines.append(f"Reviewed fare adjustment: {row.trip_fare - result.fare:+.2f}")
-    lines.append(f"Total fare without tax: {row.trip_fare:.2f}")
+    lines.append(f"Total Fare without Tax = {_plain_amount(row.trip_fare)}")
     return tuple(lines)
 
 
