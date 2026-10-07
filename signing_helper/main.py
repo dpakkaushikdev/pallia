@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from signer import SigningError, TokenNotFound, WrongPIN, sign_pdf_bytes
 
 PORT = 7777
-VERSION = "1.3.0"   # 1.3: inspect ZIPs and report per-invoice signing progress
+VERSION = "1.4.0"   # 1.4: clean trailing non-PDF data before signing
 MAX_ZIP_BYTES = 100 * 1024 * 1024
 MAX_ZIP_ENTRIES = 500
 MAX_ZIP_UNCOMPRESSED_BYTES = 200 * 1024 * 1024

@@ -10,6 +10,7 @@ looks for the Pallia Trans "For Pallia / Authorised Signatory" footer text.
 from __future__ import annotations
 
 import io
+import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +34,43 @@ class WrongPIN(Exception):
 
 class SigningError(Exception):
     """Generic signing failure."""
+
+
+def _strip_trailing_non_pdf_data(pdf_bytes: bytes) -> bytes:
+    """Drop non-whitespace appended after a structurally valid PDF EOF marker."""
+    eof = pdf_bytes.rfind(b"%%EOF")
+    if eof < 0:
+        return pdf_bytes
+    marker_end = eof + len(b"%%EOF")
+    trailing = pdf_bytes[marker_end:]
+    if not trailing.strip(b"\x00\t\n\x0c\r "):
+        return pdf_bytes
+
+    # A real PDF ends with startxref + an offset immediately before %%EOF.
+    # This avoids trimming data merely because the bytes %%EOF occur in a file.
+    trailer = pdf_bytes[max(0, eof - 128):eof]
+    match = re.search(rb"startxref\s+(\d+)\s*$", trailer)
+    if not match:
+        return pdf_bytes
+    xref_offset = int(match.group(1))
+    if xref_offset >= eof:
+        return pdf_bytes
+    xref = pdf_bytes[xref_offset:xref_offset + 32].lstrip()
+    if not xref.startswith(b"xref") and not re.match(rb"\d+\s+\d+\s+obj\b", xref):
+        return pdf_bytes
+
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(pdf_bytes), strict=True)
+        if not reader.pages:
+            return pdf_bytes
+    except Exception:
+        return pdf_bytes
+
+    clean = pdf_bytes[:marker_end]
+    clean += b"\n"
+    logger.warning("Discarded {} non-whitespace bytes appended after PDF EOF before DSC signing.", len(trailing))
+    return clean
 
 
 # ── Appearance image ──────────────────────────────────────────────────────────
@@ -195,6 +233,7 @@ def sign_pdf_bytes(
         WrongPIN: Incorrect PIN.
         SigningError: Any other failure.
     """
+    pdf_bytes = _strip_trailing_non_pdf_data(pdf_bytes)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir) / "input.pdf"
         tmp_path.write_bytes(pdf_bytes)
