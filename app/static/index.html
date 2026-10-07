@@ -874,11 +874,11 @@
 
       <!-- Phase 1: Upload CSV -->
       <div id="eetPhase1" class="card" style="padding:20px 22px;margin-bottom:16px;">
-        <div class="meta" style="margin-bottom:14px;">Client is identified automatically from the CSV's Company Name column (PWC or EY).</div>
-        <div class="card-title" style="margin-bottom:14px;">Step 1 — Upload Trip CSV</div>
+        <div class="meta" style="margin-bottom:14px;">Client is identified automatically from the Company Name column (PWC or EY). Excel uploads use the first worksheet and are converted before billing.</div>
+        <div class="card-title" style="margin-bottom:14px;">Step 1 — Upload Trip File</div>
         <div class="field-group">
-          <label class="field">Trip CSV</label>
-          <input type="file" id="eetCsvFile" accept=".csv" style="width:100%;"
+          <label class="field">Trip CSV or Excel workbook</label>
+          <input type="file" id="eetCsvFile" accept=".csv,.xlsx,.xlsm" style="width:100%;"
                  onchange="document.getElementById('eetPhase1Error').textContent = ''" />
         </div>
         <button class="btn" style="width:100%;margin-top:16px;" onclick="eetUploadAndCalculate()">

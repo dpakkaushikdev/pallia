@@ -30,6 +30,7 @@ from app.services.eee_taxi_profiles import rates_for_client, parse_trips, snapsh
 from app.services.eee_taxi_client_master import snapshot_client_master
 from app.services.ey_rates import EyRateCard
 from app.services.ey_fares import generate_ey_calc_csv, parse_ey_overrides, apply_ey_fares
+from app.services.trip_upload import trip_upload_as_csv
 from app.services.eee_taxi_review import review_rows
 from app.services.eee_taxi_rental_calc import (
     apply_fare_overrides,
@@ -55,7 +56,10 @@ async def calculate_fares(csv_file: UploadFile):
     User downloads the CSV, optionally edits Calc_Trip_Fare, and re-uploads
     that file when starting the batch to override any calculated fare.
     """
-    csv_bytes = await csv_file.read()
+    try:
+        csv_bytes = trip_upload_as_csv(await csv_file.read(), csv_file.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         client_profile = detect_client_profile(csv_bytes)
     except ValueError as exc:
@@ -101,7 +105,10 @@ async def calculate_fares(csv_file: UploadFile):
 @router.post("/fare-check")
 async def fare_check(csv_file: UploadFile):
     """List P2P trips whose CSV fare differs from the rate card or match no route."""
-    csv_bytes = await csv_file.read()
+    try:
+        csv_bytes = trip_upload_as_csv(await csv_file.read(), csv_file.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     with SessionLocal() as db:
         rates = get_rate_card(db)
         client_master = client_master_for(db, "pwc")
@@ -171,7 +178,10 @@ async def preview_batch(
     use_card_fare_rows: str = Form(""),
 ):
     """Fare, toll, GST and total per trip, with warnings, before any invoice number is given."""
-    csv_bytes = await csv_file.read()
+    try:
+        csv_bytes = trip_upload_as_csv(await csv_file.read(), csv_file.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         client_profile = detect_client_profile(csv_bytes)
     except ValueError as exc:
@@ -215,7 +225,10 @@ async def start_batch(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid invoice_date: {invoice_date!r}")
 
-    csv_bytes = await csv_file.read()
+    try:
+        csv_bytes = trip_upload_as_csv(await csv_file.read(), csv_file.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         client_profile = detect_client_profile(csv_bytes)
     except ValueError as exc:

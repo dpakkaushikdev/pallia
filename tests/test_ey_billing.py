@@ -4,13 +4,14 @@ from __future__ import annotations
 import csv
 import io
 from dataclasses import replace
-from datetime import date
+from datetime import date, time, timedelta
 from decimal import Decimal
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import pytest
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 from pypdf import PdfReader
 from sqlalchemy import create_engine, inspect, text
 
@@ -46,6 +47,23 @@ def ey_csv(**changes):
     writer.writeheader()
     writer.writerow(values)
     return buf.getvalue().encode("utf-8-sig")
+
+
+def ey_xlsx(**changes):
+    workbook = Workbook()
+    sheet = workbook.active
+    for values in csv.reader(io.StringIO(ey_csv(**changes).decode("utf-8-sig"))):
+        sheet.append(values)
+    headers = {cell.value: cell.column for cell in sheet[1]}
+    sheet.cell(2, headers["Date"], date(2026, 4, 23))
+    sheet.cell(2, headers["Pick up Time"], time(7, 0))
+    sheet.cell(2, headers["Drop Time"], time(8, 0))
+    sheet.cell(2, headers["Trip Duration"], timedelta(hours=1))
+    sheet.cell(2, headers["Trip Duration"]).number_format = "[h]:mm"
+    output = io.BytesIO()
+    workbook.save(output)
+    workbook.close()
+    return output.getvalue()
 
 
 def row(**changes):
@@ -129,6 +147,29 @@ def test_company_name_detects_client_and_rejects_ambiguous_files():
         detect_client_profile((header + "\n" + row_text + "\n" + row_text.replace(",EY,", ",PWC," )).encode())
     with pytest.raises(ValueError, match='"Company Name"'):
         detect_client_profile(ey_csv().replace(b"Company Name,", b"Customer,"))
+
+
+def test_excel_trip_upload_is_converted_before_ey_calculation_and_batch(ey_client):
+    files = {"csv_file": ("EY Trips.xlsx", ey_xlsx(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    calculated = ey_client.post("/api/eee-taxi/calculate", files=files)
+    assert calculated.status_code == 200, calculated.text
+    assert calculated.headers["X-Client-Profile"] == "ey"
+    assert "Calc_Trip_Fare" in calculated.content.decode("utf-8-sig")
+
+    preview = ey_client.post("/api/eee-taxi/preview", files=files)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["rows"][0]["entity_name"] == "Ernst & Young LLP"
+    assert preview.json()["rows"][0]["eng_code"] == "E-45303477"
+
+    started = ey_client.post(
+        "/api/eee-taxi/batch", files=files,
+        data={"invoice_date": "2026-05-08", "start_suffix": 157, "sign_mode": "dummy"},
+    )
+    assert started.status_code == 200, started.text
+    with SessionLocal() as db:
+        batch = db.get(EeeTaxiBatch, started.json()["batch_id"])
+        assert batch.csv_filename == "EY Trips.xlsx"
+        assert detect_client_profile(batch.csv_data) == "ey"
 
 
 def test_calculated_csv_roundtrip_keeps_toll_separate():
