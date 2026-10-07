@@ -51,6 +51,8 @@ from app.services.ey_rates import EyRateCard
 from app.services.ey_csv import parse_ey_csv
 from app.services.ey_fares import apply_ey_fares, parse_ey_overrides, fare_description
 from app.services.ey_pdf import generate_ey_pdf
+from app.services.ey_pdf import vehicle_model_from_cost_centre
+from app.services.eee_taxi_cost_centres import get_cost_centre_state, normalize_vehicle_no
 
 
 # ── PDF byte helpers ──────────────────────────────────────────────────────────
@@ -161,11 +163,15 @@ def build_invoice_pdf(
     rates: RateCard,
     output_dir: Path,
     client_master=None,
+    cost_centres=None,
 ) -> tuple[Path, tuple[float, float, float, float]]:
     """Render one invoice PDF and return its path and signature box."""
     if row.client_profile == "ey":
         path = output_dir / (invoice_no.replace("/", "-") + ".pdf")
-        generate_ey_pdf(row, invoice_no, invoice_date, fare_description(row, rates), path, client_master)
+        cost_centre = (cost_centres or {}).get(normalize_vehicle_no(row.car_no), "")
+        model = vehicle_model_from_cost_centre(row.car_no, cost_centre)
+        generate_ey_pdf(row, invoice_no, invoice_date, fare_description(row, rates), path,
+                        client_master, vehicle_model=model)
         return path, _find_signature_box(path)
     client_gstin = row.client_gstin.strip().upper()
     try:
@@ -280,6 +286,7 @@ def generate_next_invoice(batch_id: str, db: Session) -> dict:
         pdf_path, sig_box = build_invoice_pdf(
             row, invoice_no, batch.invoice_date, rates, output_dir,
             restore_client_master(batch.client_master_snapshot, batch.client_profile or "pwc"),
+            {c.vehicle_no: c.cost_centre for c in get_cost_centre_state(db).rows},
         )
 
         inv_rec.booking_type = row.booking_type

@@ -23,7 +23,7 @@ from app.services.auth import get_password_hash
 from app.services.eee_taxi_clients import CLIENT_MASTER
 from app.services.eee_taxi_csv import REQUIRED_HEADERS, parse_eee_taxi_csv
 from app.services.eee_taxi_rates import DEFAULT_RATE_CARD, get_rate_card, set_edit_password_hash
-from app.services.eee_taxi_pipeline import batch_rates, batch_rows
+from app.services.eee_taxi_pipeline import batch_rates, batch_rows, build_invoice_pdf
 from app.services.eee_taxi_profiles import detect_client_profile
 from app.services.eee_taxi_tally import voucher_for_row
 from app.services.ey_clients import ey_tax
@@ -106,6 +106,22 @@ def test_ey_rental_extra_time_description_shows_duration_grace_and_calculation()
     lines = fare_description(trip, rates)
     assert "Extra Hrs 0:49 (49-15=34*2)=68" in lines
     assert not any("Extra minutes after" in line for line in lines)
+
+
+def test_ey_rental_kilometres_and_vehicle_model_appear_in_invoice(tmp_path):
+    rates = EyRateCard()
+    trip = apply_ey_fares([row(**{"Package": "1800", "Total kms": "88"})], rates)[0]
+    lines = fare_description(trip, rates)
+    assert "Extra Kms 8 Km (8*14.00 = 112)" in lines
+
+    pdf_path, _ = build_invoice_pdf(
+        trip, "EY/26-27/0001", date(2026, 10, 7), rates, tmp_path,
+        cost_centres={"HR55AW2048": "HR55AW2048(TIGOR-EV)"},
+    )
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(str(pdf_path)).pages)
+    assert "Motor Vehicle No." in text
+    assert "HR55AW2048(TIGOR-EV)" in text
+    assert "Extra Kms 8 Km (8*14.00 = 112)" in text
 
 
 @pytest.mark.parametrize("pkg,duration,kms,label,fare", [

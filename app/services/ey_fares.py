@@ -87,7 +87,8 @@ def fare_description(row, rates):
             calculation = f"max(0,{raw_extra}-{rates.rental_grace_minutes})={result.charged_minutes}*{rate}"
         lines = [f"Rental ({result.package_label} = {result.base:.2f})",
                  f"Extra Hrs {extra_clock} ({calculation})={_plain_amount(result.time_charge)}",
-                 f"Extra Kms {result.charged_kms} x {rates.extra_km_rate} = {result.km_charge:.2f}",
+                 f"Extra Kms {_plain_amount(result.charged_kms)} Km "
+                 f"({_plain_amount(result.charged_kms)}*{rates.extra_km_rate:.2f} = {_plain_amount(result.km_charge)})",
                  f"Night Charge = {_plain_amount(result.night)}"]
     if row.trip_fare != result.fare:
         lines.append(f"Reviewed fare adjustment: {row.trip_fare - result.fare:+.2f}")

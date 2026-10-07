@@ -1,5 +1,6 @@
 """EY-only invoice layout, matching the supplied Haryana/5% sample."""
 from pathlib import Path
+import re
 from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
@@ -14,7 +15,16 @@ from app.services.ey_clients import SELLER_ADDRESS, SELLER_GSTIN, ey_is_local, e
 COMPANY = "EEE-TAXI MOBILITY SOLUTIONS PRIVATE LIMITED"
 
 
-def generate_ey_pdf(row, invoice_no, invoice_date, description, output_path: Path, client_master=None):
+def vehicle_model_from_cost_centre(vehicle_no, cost_centre):
+    """Return the model suffix stored in a Tally cost-centre name, if any."""
+    if not cost_centre:
+        return ""
+    match = re.search(r"\(([^()]*)\)\s*$", cost_centre.strip())
+    return match.group(1).strip() if match else ""
+
+
+def generate_ey_pdf(row, invoice_no, invoice_date, description, output_path: Path, client_master=None,
+                    vehicle_model=""):
     """Description contains the actual fare calculation, shared with Tally."""
     buyer = lookup_ey_client(row.client_gstin, client_master)
     local = ey_is_local(row.client_gstin)
@@ -50,7 +60,8 @@ def generate_ey_pdf(row, invoice_no, invoice_date, description, output_path: Pat
         [p(f"Buyer's Order No.\n{row.eng_code}", "xsb"), p(f"Dated\n{d(row.trip_date)}")],
         [p(f"Dispatch Doc No.\n{row.route_no}"), p("Delivery Note Date")],
         [p(f"Dispatched through\nPICK UP TIME - {row.pickup_time_str}"), p(f"Destination\nDROP TIME - {row.drop_time_str}")],
-        [p(f"Bill of Lading/LR-RR No.\ndt. {d(row.trip_date)}"), p(f"Motor Vehicle No.\n{row.car_no}")],
+        [p(f"Bill of Lading/LR-RR No.\ndt. {d(row.trip_date)}"),
+         p(f"Motor Vehicle No.\n{row.car_no}{f'({vehicle_model})' if vehicle_model else ''}")],
     ]
     header = table([[table([[company], [buyer_text]], [left-8]), table(metadata, [(right-8)/2]*2)]], [left, right])
     label = "CAR RENTAL - LOCAL (5%)" if local else "CAR RENTAL - INTERSTATE (5%)"
