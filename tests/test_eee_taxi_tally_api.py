@@ -119,6 +119,7 @@ def test_export_downloads_xml_and_marks_the_invoice(client, admin):
     text = resp.content[2:].decode("utf-16-le")
     assert "<VOUCHERNUMBER>DL/HO/26-27/1381</VOUCHERNUMBER>" in text
     assert "<NAME>HR55BB4906</NAME>" in text
+    assert "G TO G KM (MAX=20 KM)) &amp; HRS (1 HRS) INCLUDED" in text
     assert "DL-HO-26-27-1381" in resp.headers["content-disposition"]
 
     assert "inv-rental" not in _preview(client, admin)

@@ -30,6 +30,7 @@ from app.services.ey_fares import fare_description
 from app.services.eee_taxi_client_master import restore_client_master
 
 _TOLERANCE = Decimal("0.01")
+_PWC_RENTAL_INCLUDED_LINE = "G TO G KM (MAX=20 KM)) & HRS (1 HRS) INCLUDED"
 
 
 class ExportProblem(ValueError):
@@ -74,6 +75,7 @@ def _description(row: EeeTaxiRow, rates: RateCard) -> tuple[str, ...]:
         ]
         if fr.night_charge:
             lines.append(f"Night Charges ({rates.night_label}=  {_n(fr.night_charge)})")
+        lines.append(_PWC_RENTAL_INCLUDED_LINE)
     return tuple(lines)
 
 
