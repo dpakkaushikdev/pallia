@@ -141,7 +141,7 @@ The browser orchestrates both steps:
 4. The server stores the signed bytes, marks the invoice `done`, and flips the
    batch to `completed` / `partial` once nothing is left to sign.
 
-The PIN never leaves the browser and the server never sees it. PDF bytes are
+The PIN stays on the user's PC and the server never sees it. PDF bytes are
 kept in the database rather than on disk, because a serverless disk is
 per-instance and ephemeral; the unsigned copy is dropped once the signed one
 arrives.
@@ -161,8 +161,14 @@ copy dist\PalliaSignHelper.exe %LOCALAPPDATA%\PalliaSignHelper\
 
 The helper sits in the system tray and registers itself to start with Windows.
 It needs the token driver (`C:\Windows\System32\CryptoIDA_pkcs11.dll`) that the
-DSC vendor's software installs. Helper 1.1.0 or newer is required (it accepts
-the `sig_box` field); the web app checks `GET /health` for `supports_sig_box`.
+DSC vendor's software installs. Helper 1.2.0 or newer is required. It supports
+invoice `sig_box` signing and the Billing dashboard's ZIP workflow. To sign a
+ZIP, the browser sends it directly to `http://127.0.0.1:7777/sign-zip`; the
+helper signs each PDF using the USB DSC token and returns a signed ZIP. Other
+files and folders are preserved, and the source ZIP remains unchanged. ZIPs
+are limited to 100 MB compressed, 200 MB uncompressed and 500 entries. Rebuild
+and copy the helper after updating this repository; the dashboard checks its
+version before starting a ZIP signature.
 
 ---
 

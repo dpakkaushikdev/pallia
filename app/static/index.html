@@ -664,6 +664,15 @@
         </div>
         <div class="stat-grid" id="billingSummaryGrid"></div>
         <div class="card" style="padding:18px 20px;">
+          <div class="card-title">Sign Pallia invoices from ZIP</div>
+          <p style="color:#64748b;margin:0 0 12px;">Upload a ZIP containing invoice PDFs. Each PDF will be digitally signed with the connected DSC token, then downloaded in a new ZIP.</p>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <input type="file" id="palliaInvoiceZip" accept=".zip,application/zip" />
+            <button class="btn" id="btnSignInvoiceZip" onclick="openZipSignModal()">Upload ZIP &amp; Sign</button>
+          </div>
+          <div id="zipSignStatus" class="meta" style="margin-top:10px;min-height:18px;" aria-live="polite"></div>
+        </div>
+        <div class="card" style="padding:18px 20px;">
           <div class="card-title">Recent Generated Invoices</div>
           <table class="data-table" id="recentGeneratedTable">
             <thead><tr><th>Invoice No.</th><th>Date</th><th>Actions</th></tr></thead>
@@ -1335,6 +1344,20 @@
   </div>
 </div>
 
+<div id="zipSignModal" class="modal-backdrop hidden">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h3>Sign invoice PDFs with DSC</h3>
+    <p class="modal-sub">Enter your USB token PIN. It is sent only to PalliaSignHelper running on this PC. Keep the DSC token connected until signing finishes.</p>
+    <label class="field">Token PIN</label>
+    <input type="password" id="zipSignPin" placeholder="Enter PIN" autocomplete="off" onkeydown="if(event.key==='Enter')signInvoiceZip()" />
+    <div id="zipSignModalStatus" class="meta" style="margin-top:8px;min-height:18px;" aria-live="polite"></div>
+    <div class="modal-actions">
+      <button class="btn secondary" onclick="closeZipSignModal()">Cancel</button>
+      <button class="btn" id="btnZipSignConfirm" onclick="signInvoiceZip()">Sign ZIP</button>
+    </div>
+  </div>
+</div>
+
 <!-- Create / Edit User Modal -->
 <div id="userModal" class="modal-backdrop hidden">
   <div class="modal" onclick="event.stopPropagation()" style="max-width:480px;">
@@ -1616,7 +1639,7 @@ function buildSidebar() {
   if (TAB_DEFS.some(canAccess)) {
     const mainLabel = document.createElement("div");
     mainLabel.className = "sb-section-label";
-    mainLabel.textContent = "Main";
+    mainLabel.textContent = "Pallia Trans";
     nav.appendChild(mainLabel);
   }
 
@@ -2699,6 +2722,59 @@ async function generateInvoice() {
 // ── PDF Signing ───────────────────────────────────────────────────────────────
 
 const SIGN_HELPER_URL = "http://127.0.0.1:7777";
+
+function openZipSignModal() {
+  const file = $("#palliaInvoiceZip").files[0];
+  const status = $("#zipSignStatus");
+  if (!file) { status.textContent = "Choose a ZIP file first."; return; }
+  if (!file.name.toLowerCase().endsWith(".zip")) { status.textContent = "Choose a .zip archive."; return; }
+  status.textContent = "";
+  $("#zipSignPin").value = "";
+  $("#zipSignModalStatus").textContent = "";
+  $("#zipSignModal").classList.remove("hidden");
+  $("#zipSignPin").focus();
+}
+
+function closeZipSignModal() { $("#zipSignModal").classList.add("hidden"); }
+$("#zipSignModal").addEventListener("click", closeZipSignModal);
+
+async function signInvoiceZip() {
+  const file = $("#palliaInvoiceZip").files[0];
+  const pin = $("#zipSignPin").value;
+  const status = $("#zipSignModalStatus");
+  const button = $("#btnZipSignConfirm");
+  if (!file || !pin) { status.textContent = "Select a ZIP and enter the DSC PIN."; return; }
+  button.disabled = true;
+  status.textContent = "Connecting to PalliaSignHelper…";
+  try {
+    const health = await fetch(`${SIGN_HELPER_URL}/health`, { signal: AbortSignal.timeout(2500) });
+    if (!health.ok) throw new Error("PalliaSignHelper is not responding.");
+    const helper = await health.json();
+    if (helper.version && helper.version < "1.2.0") throw new Error("Update PalliaSignHelper.exe to version 1.2.0 or newer before signing a ZIP.");
+    status.textContent = "Signing PDFs with the DSC token. Please keep this page open…";
+    const response = await fetch(`${SIGN_HELPER_URL}/sign-zip`, {
+      method: "POST", headers: { "Content-Type": "application/zip", "X-DSC-PIN": pin }, body: file,
+      signal: AbortSignal.timeout(10 * 60 * 1000)
+    });
+    if (!response.ok) {
+      let detail = `Signing failed (${response.status}).`;
+      try { detail = (await response.json()).detail || detail; } catch (_) {}
+      throw new Error(detail);
+    }
+    const signedZip = await response.blob();
+    const url = URL.createObjectURL(signedZip);
+    const link = document.createElement("a");
+    link.href = url; link.download = file.name.replace(/\.zip$/i, "") + "_signed.zip";
+    document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+    closeZipSignModal();
+    $("#zipSignStatus").textContent = "Signed ZIP downloaded. The source archive was left unchanged.";
+  } catch (error) {
+    status.textContent = error.name === "TimeoutError" ? "Signing timed out. For large ZIP files, try a smaller batch." : error.message;
+  } finally {
+    button.disabled = false;
+    $("#zipSignPin").value = "";
+  }
+}
 
 function openPinModal() {
   $("#pinInput").value = ""; $("#pinStatus").textContent = ""; $("#btnPinSign").disabled = false;
