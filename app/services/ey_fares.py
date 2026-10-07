@@ -81,10 +81,7 @@ def fare_description(row, rates):
         raw_extra = result.extra_time_minutes
         extra_clock = f"{raw_extra // 60}:{raw_extra % 60:02d}"
         rate = _plain_amount(rates.extra_minute_rate)
-        if raw_extra > rates.rental_grace_minutes:
-            calculation = f"{raw_extra}-{rates.rental_grace_minutes}={result.charged_minutes}*{rate}"
-        else:
-            calculation = f"max(0,{raw_extra}-{rates.rental_grace_minutes})={result.charged_minutes}*{rate}"
+        calculation = f"{raw_extra}-{rates.rental_grace_minutes}={result.charged_minutes}*{rate}"
         lines = [f"Rental ({result.package_label} = {result.base:.2f})",
                  f"Extra Hrs {extra_clock} ({calculation})={_plain_amount(result.time_charge)}",
                  f"Extra Kms {_plain_amount(result.charged_kms)} Km "

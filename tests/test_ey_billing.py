@@ -108,6 +108,12 @@ def test_ey_rental_extra_time_description_shows_duration_grace_and_calculation()
     assert not any("Extra minutes after" in line for line in lines)
 
 
+def test_ey_rental_zero_extra_time_shows_direct_grace_calculation():
+    rates = EyRateCard()
+    trip = apply_ey_fares([row(**{"Package": "900", "Trip Duration": "4:00"})], rates)[0]
+    assert "Extra Hrs 0:00 (0-15=0*2)=0" in fare_description(trip, rates)
+
+
 def test_ey_rental_kilometres_and_vehicle_model_appear_in_invoice(tmp_path):
     rates = EyRateCard()
     trip = apply_ey_fares([row(**{"Package": "1800", "Total kms": "88"})], rates)[0]
