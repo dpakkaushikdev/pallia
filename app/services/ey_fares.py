@@ -25,6 +25,7 @@ class EyFare:
     night: Decimal
     fare: Decimal
     package_label: str = ""
+    extra_time_minutes: int = 0
 
 
 def calculate_ey_fare(row, rates: EyRateCard) -> EyFare:
@@ -58,13 +59,14 @@ def calculate_ey_fare(row, rates: EyRateCard) -> EyFare:
     elif package == rates.packages[0] and minutes > rates.medium_upgrade_minutes:
         package = rates.packages[1]
     extra_minutes = max(0, minutes - package.hours * 60 - rates.rental_grace_minutes)
+    extra_time_minutes = max(0, minutes - package.hours * 60)
     # Retain the existing CSV kilometre treatment (whole billing kilometres).
     extra_kms = Decimal(max(0, int(row.billing_kms) - package.kms))
     time_charge = extra_minutes * rates.extra_minute_rate
     km_charge = extra_kms * rates.extra_km_rate
     fare = (Decimal(package.fare) + time_charge + km_charge + night).quantize(Decimal("0.01"))
     return EyFare(Decimal(package.fare), extra_minutes, time_charge, extra_kms, km_charge, night, fare,
-                  f"{package.hours}/{package.kms}")
+                  f"{package.hours}/{package.kms}", extra_time_minutes)
 
 
 def fare_description(row, rates):
@@ -76,8 +78,15 @@ def fare_description(row, rates):
                  f"Total Kms {_plain_amount(row.total_kms)} Km ({_plain_amount(row.total_kms)}*{rates.p2p_per_km:.2f} = {_plain_amount(result.km_charge)})",
                  f"Night Charge = {_plain_amount(result.night)}"]
     else:
+        raw_extra = result.extra_time_minutes
+        extra_clock = f"{raw_extra // 60}:{raw_extra % 60:02d}"
+        rate = _plain_amount(rates.extra_minute_rate)
+        if raw_extra > rates.rental_grace_minutes:
+            calculation = f"{raw_extra}-{rates.rental_grace_minutes}={result.charged_minutes}*{rate}"
+        else:
+            calculation = f"max(0,{raw_extra}-{rates.rental_grace_minutes})={result.charged_minutes}*{rate}"
         lines = [f"Rental ({result.package_label} = {result.base:.2f})",
-                 f"Extra minutes after {rates.rental_grace_minutes} min grace: {result.charged_minutes} x {rates.extra_minute_rate} = {result.time_charge:.2f}",
+                 f"Extra Hrs {extra_clock} ({calculation})={_plain_amount(result.time_charge)}",
                  f"Extra Kms {result.charged_kms} x {rates.extra_km_rate} = {result.km_charge:.2f}",
                  f"Night Charge = {_plain_amount(result.night)}"]
     if row.trip_fare != result.fare:

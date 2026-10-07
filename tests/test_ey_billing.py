@@ -100,6 +100,14 @@ def test_ey_p2p_invoice_description_matches_reference_format():
     assert not any("23:00" in line or "05:00" in line for line in lines)
 
 
+def test_ey_rental_extra_time_description_shows_duration_grace_and_calculation():
+    rates = EyRateCard()
+    trip = apply_ey_fares([row(**{"Package": "900", "Trip Duration": "4:49"})], rates)[0]
+    lines = fare_description(trip, rates)
+    assert "Extra Hrs 0:49 (49-15=34*2)=68" in lines
+    assert not any("Extra minutes after" in line for line in lines)
+
+
 @pytest.mark.parametrize("pkg,duration,kms,label,fare", [
     (900, "4:00", "40", "4/40", "900"), (900, "4:15", "40", "4/40", "900"),
     (900, "4:16", "40", "4/40", "902"), (900, "5:00", "40", "4/40", "990"),
