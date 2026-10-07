@@ -22,7 +22,7 @@ SLOT_NO     = 0
 
 # A4 lower-right authorisation box used when footer anchor detection fails.
 # (x1, y1, x2, y2) — PDF points, origin bottom-left of page.
-_SIG_BOX_FALLBACK = (337, 117, 580, 167)
+_SIG_BOX_FALLBACK = (337, 141, 580, 198)
 
 # Timestamp format matching Adobe's display: "2026.05.13 14:50:06 +05'30'"
 _TS_FMT = "%Y.%m.%d %H:%M:%S +05'30'"
@@ -150,7 +150,8 @@ def _find_signature_box(pdf_path: Path) -> tuple[float, float, float, float]:
         page = reader.pages[0]
         page_width = float(page.mediabox.width)
 
-        found: dict[str, float] = {}   # key → absolute page y of the text baseline
+        for_pallia_ys: list[float] = []
+        authorised_ys: list[float] = []
 
         def _visit(text: str, cm, tm, font_dict, font_size):
             # Absolute y = current-transformation y + text-matrix y
@@ -158,28 +159,32 @@ def _find_signature_box(pdf_path: Path) -> tuple[float, float, float, float]:
             t = text.strip()
             if not t:
                 return
-            if "For Pallia" in t and "for_pallia" not in found:
-                found["for_pallia"] = y
-                logger.debug("Detected 'For Pallia Trans' at y={:.1f}", y)
-            if ("Authorised" in t or "Authorized" in t) and "auth_sig" not in found:
-                found["auth_sig"] = y
-                logger.debug("Detected 'Authorised Signatory' at y={:.1f}", y)
+            lower = t.casefold()
+            if "for pallia" in lower:
+                for_pallia_ys.append(y)
+            if "authorised" in lower or "authorized" in lower:
+                authorised_ys.append(y)
 
         page.extract_text(visitor_text=_visit)
 
-        if "for_pallia" in found and "auth_sig" in found:
-            y_top    = max(found["for_pallia"], found["auth_sig"])   # higher on page
-            y_bottom = min(found["for_pallia"], found["auth_sig"])   # lower on page
-            gap      = y_top - y_bottom
+        if for_pallia_ys and authorised_ys:
+            y_for = max(for_pallia_ys)
+            # Select the nearest "Authorised" label below the footer; these
+            # forms also have unrelated authorisation labels higher on page.
+            footer_auth = [y for y in authorised_ys if y < y_for]
+            if not footer_auth:
+                raise ValueError("No Authorised Signatory anchor below the Pallia footer")
+            y_auth = max(footer_auth)
+            gap = y_for - y_auth
             logger.info(
                 "Sig anchors — For Pallia y={:.1f}, Auth Signatory y={:.1f}, gap={:.1f} pts",
-                found["for_pallia"], found["auth_sig"], gap,
+                y_for, y_auth, gap,
             )
             if gap >= 30:
                 margin = 4.0
                 x1 = page_width * 0.57
                 x2 = page_width - 15.0
-                box = (x1, y_bottom + margin, x2, y_top - margin)
+                box = (x1, y_auth + margin, x2, y_for - margin)
                 logger.info("Auto-detected sig box: {}", tuple(round(v, 1) for v in box))
                 return box
             logger.warning("Detected gap {:.1f} pts is too small; using fallback box.", gap)

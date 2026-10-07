@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from signer import SigningError, TokenNotFound, WrongPIN, sign_pdf_bytes
 
 PORT = 7777
-VERSION = "1.5.0"   # 1.5: place the visible DSC signature in the lower-right box
+VERSION = "1.6.0"   # 1.6: detect uppercase footer anchors and avoid footer overlap
 MAX_ZIP_BYTES = 100 * 1024 * 1024
 MAX_ZIP_ENTRIES = 500
 MAX_ZIP_UNCOMPRESSED_BYTES = 200 * 1024 * 1024

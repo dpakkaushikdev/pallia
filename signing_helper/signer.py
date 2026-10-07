@@ -22,7 +22,7 @@ CERT_LABEL  = "cont_333741d242fc5a8c459f"   # update after DSC renewal
 SLOT_NO     = 0
 
 # A4 lower-right authorisation box, in PDF points (origin at bottom-left).
-_SIG_BOX_FALLBACK = (337, 117, 580, 167)
+_SIG_BOX_FALLBACK = (337, 141, 580, 198)
 _TS_FMT = "%Y.%m.%d %H:%M:%S +05'30'"
 _IMG_W, _IMG_H = 440, 92
 
@@ -166,29 +166,35 @@ def _find_signature_box(pdf_path: Path) -> tuple[float, float, float, float]:
         reader = PdfReader(str(pdf_path))
         page = reader.pages[0]
         page_width = float(page.mediabox.width)
-        found: dict[str, float] = {}
+        for_pallia_ys: list[float] = []
+        authorised_ys: list[float] = []
 
         def _visit(text: str, cm, tm, font_dict, font_size):
             y = (cm[5] if cm else 0.0) + tm[5]
             t = text.strip()
             if not t:
                 return
-            if "For Pallia" in t and "for_pallia" not in found:
-                found["for_pallia"] = y
-            if ("Authorised" in t or "Authorized" in t) and "auth_sig" not in found:
-                found["auth_sig"] = y
+            lower = t.casefold()
+            if "for pallia" in lower:
+                for_pallia_ys.append(y)
+            if "authorised" in lower or "authorized" in lower:
+                authorised_ys.append(y)
 
         page.extract_text(visitor_text=_visit)
 
-        if "for_pallia" in found and "auth_sig" in found:
-            y_top    = max(found["for_pallia"], found["auth_sig"])
-            y_bottom = min(found["for_pallia"], found["auth_sig"])
-            gap      = y_top - y_bottom
+        if for_pallia_ys and authorised_ys:
+            y_for = max(for_pallia_ys)
+            # Ignore unrelated authorisation labels above the footer.
+            footer_auth = [y for y in authorised_ys if y < y_for]
+            if not footer_auth:
+                raise ValueError("No Authorised Signatory anchor below the Pallia footer")
+            y_auth = max(footer_auth)
+            gap = y_for - y_auth
             if gap >= 30:
                 margin = 4.0
                 x1 = page_width * 0.57
                 x2 = page_width - 15.0
-                return (x1, y_bottom + margin, x2, y_top - margin)
+                return (x1, y_auth + margin, x2, y_for - margin)
     except Exception as exc:
         logger.warning("Sig-zone auto-detection failed ({}); using fallback.", exc)
 
