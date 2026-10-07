@@ -52,8 +52,8 @@ class RentalFareResult:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _parse_hour(time_str: str) -> Optional[int]:
-    """Return 0-23 hour from strings like '8:00 AM', '22:00', '10:00 PM'."""
+def _parse_clock_minutes(time_str: str) -> Optional[int]:
+    """Return minutes since midnight from '8:01 AM', '22:01', or '10:01 PM'."""
     if not time_str or not time_str.strip():
         return None
     s = time_str.strip().upper()
@@ -63,11 +63,12 @@ def _parse_hour(time_str: str) -> Optional[int]:
     parts = cleaned.replace(".", ":").split(":")
     try:
         hour = int(parts[0])
+        minute = int(parts[1]) if len(parts) > 1 else 0
         if is_pm and hour != 12:
             hour += 12
         elif is_am and hour == 12:
             hour = 0
-        return hour % 24
+        return (hour % 24) * 60 + minute
     except (ValueError, IndexError):
         return None
 
@@ -118,9 +119,9 @@ def calculate_rental_fare(row: EeeTaxiRow, rates: RateCard) -> RentalFareResult:
     extra_time_charge = Decimal(full_extra_hours) * rates.extra_hour_rate
 
     # ── Night charge ──────────────────────────────────────────────────────────
-    pickup_h     = _parse_hour(row.pickup_time_str)
-    drop_h       = _parse_hour(row.drop_time_str)
-    is_night     = rates.is_night_hour(pickup_h) or rates.is_night_hour(drop_h)
+    pickup_minute = _parse_clock_minutes(row.pickup_time_str)
+    drop_minute   = _parse_clock_minutes(row.drop_time_str)
+    is_night      = rates.is_night_minute(pickup_minute) or rates.is_night_minute(drop_minute)
     night_charge = rates.night_charge if is_night else Decimal("0")
 
     trip_fare = Decimal(effective_pkg) + extra_km_charge + extra_time_charge + night_charge

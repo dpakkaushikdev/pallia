@@ -33,8 +33,8 @@ def calculate_ey_fare(row, rates: EyRateCard) -> EyFare:
     end = start + minutes
     night = ZERO
     for day in range(-1, end // 1440 + 1):
-        night_start = day * 1440 + rates.night_start_hour * 60
-        night_end = day * 1440 + rates.night_end_hour * 60
+        night_start = day * 1440 + rates.night_start_hour * 60 + rates.night_start_minute
+        night_end = day * 1440 + rates.night_end_hour * 60 + rates.night_end_minute
         if night_end < night_start:
             night_end += 1440
         if max(start, night_start) < min(end, night_end):

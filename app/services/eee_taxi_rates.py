@@ -63,8 +63,10 @@ class RateCard:
     extra_hour_rate: Decimal
     extra_km_rate: Decimal
     night_charge: Decimal
-    night_start_hour: int        # night window start, inclusive (0-23)
-    night_end_hour: int          # night window end, exclusive (0-23)
+    night_start_hour: int        # night window start hour, inclusive (0-23)
+    night_start_minute: int      # night window start minute (0-59)
+    night_end_hour: int          # night window end hour, exclusive (0-23)
+    night_end_minute: int        # night window end minute (0-59)
     # Rules
     partial_hour_minutes: int    # leftover minutes >= this count as a full extra hour
     upgrade_minutes: int         # small -> large upgrade when duration >= this
@@ -84,17 +86,19 @@ class RateCard:
             return self.small_hours, self.small_kms
         return self.large_hours, self.large_kms
 
-    def is_night_hour(self, hour: Optional[int]) -> bool:
-        if hour is None:
+    def is_night_minute(self, minute_of_day: Optional[int]) -> bool:
+        if minute_of_day is None:
             return False
-        start, end = self.night_start_hour, self.night_end_hour
+        start = self.night_start_hour * 60 + self.night_start_minute
+        end = self.night_end_hour * 60 + self.night_end_minute
         if start <= end:
-            return start <= hour < end
-        return hour >= start or hour < end   # window crosses midnight
+            return start <= minute_of_day < end
+        return minute_of_day >= start or minute_of_day < end   # window crosses midnight
 
     @property
     def night_label(self) -> str:
-        return f"{self.night_start_hour:02d}:00-{self.night_end_hour:02d}:00"
+        return (f"{self.night_start_hour:02d}:{self.night_start_minute:02d}-"
+                f"{self.night_end_hour:02d}:{self.night_end_minute:02d}")
 
     def area_for_zone(self, zone: str) -> Optional[str]:
         key = _norm(zone)
@@ -149,7 +153,7 @@ DEFAULT_RATE_CARD = RateCard(
     extra_hour_rate=Decimal("200"),
     extra_km_rate=Decimal("17"),
     night_charge=Decimal("265"),
-    night_start_hour=23, night_end_hour=5,
+    night_start_hour=23, night_start_minute=0, night_end_hour=5, night_end_minute=0,
     partial_hour_minutes=31,
     upgrade_minutes=6 * 60 + 31,
     upgrade_kms=61,
@@ -219,7 +223,9 @@ class RateCardIn(BaseModel):
     extra_km_rate: Decimal = Field(ge=0, le=1_000, max_digits=8, decimal_places=2)
     night_charge: Decimal = Field(ge=0, le=10_000, max_digits=8, decimal_places=2)
     night_start_hour: int = Field(ge=0, le=23)
+    night_start_minute: int = Field(default=0, ge=0, le=59)
     night_end_hour: int = Field(ge=0, le=23)
+    night_end_minute: int = Field(default=0, ge=0, le=59)
     partial_hour_minutes: int = Field(ge=1, le=60)
     upgrade_minutes: int = Field(ge=1, le=24 * 60)
     upgrade_kms: int = Field(ge=1, le=2_000)
@@ -230,8 +236,8 @@ class RateCardIn(BaseModel):
     def _check_consistency(self) -> "RateCardIn":
         if self.small_fare == self.large_fare:
             raise ValueError("The two package fares must differ; they identify the package in the CSV.")
-        if self.night_start_hour == self.night_end_hour:
-            raise ValueError("Night start and end hour cannot be the same.")
+        if (self.night_start_hour, self.night_start_minute) == (self.night_end_hour, self.night_end_minute):
+            raise ValueError("Night start and end time cannot be the same.")
         seen_routes: set[tuple[str, str]] = set()
         for r in self.routes:
             key = (_norm(r.from_area), _norm(r.to_area))

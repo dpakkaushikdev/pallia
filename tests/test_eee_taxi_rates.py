@@ -62,6 +62,18 @@ def test_night_charge_when_drop_in_night_window():
     assert res.night_charge == Decimal("265")
 
 
+def test_night_window_rate_card_supports_minute_precision():
+    custom = replace(RATES, night_start_hour=23, night_start_minute=1)
+    assert custom.night_label == "23:01-05:00"
+    assert calculate_rental_fare(_row(pickup="23:00", drop="22:59"), custom).night_charge == 0
+    assert calculate_rental_fare(_row(pickup="23:01", drop="22:59"), custom).night_charge == Decimal("265")
+
+
+def test_rate_card_api_model_accepts_night_start_minute():
+    values = {**rate_card_to_dict(RATES), "night_start_minute": 1}
+    assert RateCardIn(**values).to_rate_card().night_label == "23:01-05:00"
+
+
 def test_changing_the_rate_card_changes_the_fare():
     custom = replace(RATES, small_fare=1000, extra_km_rate=Decimal("20"))
     res = calculate_rental_fare(_row(package=1000, kms="45"), custom)

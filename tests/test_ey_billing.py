@@ -122,6 +122,14 @@ def test_rental_night_window_including_crossing_midnight(start, duration, night)
     assert result.night == night
 
 
+def test_ey_night_charge_boundary_supports_minutes():
+    rates = EyRateCard(night_start_hour=23, night_start_minute=1)
+    before_start = calculate_ey_fare(row(**{"Pick up Time": "23:00", "Trip Duration": "0:01"}), rates)
+    at_start = calculate_ey_fare(row(**{"Pick up Time": "23:01", "Trip Duration": "0:01"}), rates)
+    assert before_start.night == 0
+    assert at_start.night == 250
+
+
 @pytest.mark.parametrize("changes", [{"Eng Code": ""}, {"Total kms": "NaN"}, {"Total kms": "broken"},
     {"Trip Duration": "1:99"}, {"Pick up Time": "29:00"}, {"Parking": "-10"}, {"Package": "900.5"},
     {"Entity Gst": "06AAEFP1428R1ZW"}])

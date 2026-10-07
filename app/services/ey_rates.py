@@ -37,7 +37,9 @@ class EyRateCard(BaseModel):
     large_upgrade_kms: int = Field(default=70, ge=1, le=2000)
     night_charge: Decimal = Field(default=Decimal("250"), ge=0, le=10000, decimal_places=2)
     night_start_hour: int = Field(default=23, ge=0, le=23)
+    night_start_minute: int = Field(default=0, ge=0, le=59)
     night_end_hour: int = Field(default=5, ge=0, le=23)
+    night_end_minute: int = Field(default=0, ge=0, le=59)
     # Defaults match the imported Haryana EY vouchers; each value remains
     # editable because Tally requires exact company and ledger names.
     tally_company: str = Field(default="EEE-TAXI MOBILITY SOLUTIONS PRIVATE LIMITED( HR)", max_length=255)
@@ -62,8 +64,8 @@ class EyRateCard(BaseModel):
             raise ValueError("Second upgrade must fall between the second and third package hours.")
         if not self.packages[1].kms <= self.large_upgrade_kms < self.packages[2].kms:
             raise ValueError("Large-package km threshold must fall between the second and third package limits.")
-        if self.night_start_hour == self.night_end_hour:
-            raise ValueError("Night start and end must differ.")
+        if (self.night_start_hour, self.night_start_minute) == (self.night_end_hour, self.night_end_minute):
+            raise ValueError("Night start and end times must differ.")
         for name in type(self).model_fields:
             if name.startswith("tally_"):
                 value = getattr(self, name).strip()
