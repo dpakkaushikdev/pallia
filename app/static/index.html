@@ -665,12 +665,13 @@
         <div class="stat-grid" id="billingSummaryGrid"></div>
         <div class="card" style="padding:18px 20px;">
           <div class="card-title">Sign Pallia invoices from ZIP</div>
-          <p style="color:#64748b;margin:0 0 12px;">Upload a ZIP containing invoice PDFs. Each PDF will be digitally signed with the connected DSC token, then downloaded in a new ZIP.</p>
+          <p style="color:#64748b;margin:0 0 12px;">Review the invoice PDFs in your ZIP, track each DSC signature, then download the signed ZIP.</p>
           <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-            <input type="file" id="palliaInvoiceZip" accept=".zip,application/zip" />
-            <button class="btn" id="btnSignInvoiceZip" onclick="openZipSignModal()">Upload ZIP &amp; Sign</button>
+            <input type="file" id="palliaInvoiceZip" accept=".zip,application/zip" onchange="resetZipInvoiceReview()" />
+            <button class="btn" id="btnSignInvoiceZip" onclick="inspectInvoiceZip()">Review ZIP</button>
           </div>
           <div id="zipSignStatus" class="meta" style="margin-top:10px;min-height:18px;" aria-live="polite"></div>
+          <div id="zipInvoiceReview" class="hidden" style="margin-top:14px;"></div>
         </div>
         <div class="card" style="padding:18px 20px;">
           <div class="card-title">Recent Generated Invoices</div>
@@ -2750,8 +2751,9 @@ async function signInvoiceZip() {
     const health = await fetch(`${SIGN_HELPER_URL}/health`, { signal: AbortSignal.timeout(2500) });
     if (!health.ok) throw new Error("PalliaSignHelper is not responding.");
     const helper = await health.json();
-    if (helper.version && helper.version < "1.2.0") throw new Error("Update PalliaSignHelper.exe to version 1.2.0 or newer before signing a ZIP.");
-    status.textContent = "Signing PDFs with the DSC token. Please keep this page open…";
+    const version = (helper.version || "0").split(".").map(part => parseInt(part, 10) || 0);
+    if (version[0] < 1 || (version[0] === 1 && version[1] < 3)) throw new Error("Update PalliaSignHelper.exe to version 1.3.0 or newer to see per-invoice signing progress.");
+    status.textContent = "Starting DSC signing…";
     const response = await fetch(`${SIGN_HELPER_URL}/sign-zip`, {
       method: "POST", headers: { "Content-Type": "application/zip", "X-DSC-PIN": pin }, body: file,
       signal: AbortSignal.timeout(10 * 60 * 1000)
@@ -2761,18 +2763,101 @@ async function signInvoiceZip() {
       try { detail = (await response.json()).detail || detail; } catch (_) {}
       throw new Error(detail);
     }
-    const signedZip = await response.blob();
-    const url = URL.createObjectURL(signedZip);
-    const link = document.createElement("a");
-    link.href = url; link.download = file.name.replace(/\.zip$/i, "") + "_signed.zip";
-    document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+    const { job_id: jobId } = await response.json();
     closeZipSignModal();
-    $("#zipSignStatus").textContent = "Signed ZIP downloaded. The source archive was left unchanged.";
+    await followZipSigningJob(jobId, file);
   } catch (error) {
-    status.textContent = error.name === "TimeoutError" ? "Signing timed out. For large ZIP files, try a smaller batch." : error.message;
+    status.textContent = error.name === "TimeoutError" ? "Timed out while starting ZIP signing." : error.message;
   } finally {
     button.disabled = false;
     $("#zipSignPin").value = "";
+  }
+}
+
+function escapeZipFilename(value) {
+  return String(value).replace(/[&<>\"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[ch]);
+}
+
+function resetZipInvoiceReview() {
+  $("#zipInvoiceReview").classList.add("hidden");
+  $("#zipInvoiceReview").innerHTML = "";
+  $("#zipSignStatus").textContent = "";
+}
+
+function updateZipInvoiceStatuses(files) {
+  files.forEach((file, index) => {
+    const cell = $(`#zipInvoiceStatus${index}`);
+    if (!cell) return;
+    cell.textContent = file.status + (file.error ? ` — ${file.error}` : "");
+    cell.className = file.status === "Signed" ? "text-ok" : file.status === "Failed" ? "text-err" : "meta";
+    if (file.status === "Signing") cell.innerHTML = `<span class="spinner"></span> Signing`;
+  });
+}
+
+function renderZipInvoiceReview(files) {
+  const review = $("#zipInvoiceReview");
+  review.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;"><strong>${files.length} invoice PDF${files.length === 1 ? "" : "s"} found</strong><button class="btn sm" onclick="openZipSignModal()">Sign PDFs with DSC</button></div><div style="max-height:360px;overflow:auto;border:1px solid var(--line,#e2e8f0);border-radius:8px;"><table class="data-table"><thead><tr><th>Invoice file</th><th>Status</th></tr></thead><tbody>${files.map((file, index) => `<tr><td>${escapeZipFilename(file.filename)}</td><td id="zipInvoiceStatus${index}" class="meta">Ready</td></tr>`).join("")}</tbody></table></div>`;
+  review.classList.remove("hidden");
+}
+
+async function inspectInvoiceZip() {
+  const file = $("#palliaInvoiceZip").files[0];
+  const button = $("#btnSignInvoiceZip");
+  const status = $("#zipSignStatus");
+  if (!file) { status.textContent = "Choose a ZIP file first."; return; }
+  if (!file.name.toLowerCase().endsWith(".zip")) { status.textContent = "Choose a .zip archive."; return; }
+  button.disabled = true;
+  status.textContent = "Reading the ZIP and listing invoice PDFs…";
+  try {
+    const health = await fetch(`${SIGN_HELPER_URL}/health`, { signal: AbortSignal.timeout(2500) });
+    if (!health.ok) throw new Error("PalliaSignHelper is not responding.");
+    const helper = await health.json();
+    const version = (helper.version || "0").split(".").map(part => parseInt(part, 10) || 0);
+    if (version[0] < 1 || (version[0] === 1 && version[1] < 3)) throw new Error("Update PalliaSignHelper.exe to version 1.3.0 or newer to review invoice files and track signing.");
+    const response = await fetch(`${SIGN_HELPER_URL}/sign-zip/inspect`, {
+      method: "POST", headers: { "Content-Type": "application/zip" }, body: file,
+      signal: AbortSignal.timeout(2 * 60 * 1000)
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || `Could not inspect ZIP (${response.status}).`);
+    renderZipInvoiceReview(result.files);
+    status.textContent = "Review the invoice list, then start DSC signing.";
+  } catch (error) {
+    status.textContent = error.name === "TimeoutError" ? "ZIP inspection timed out." : error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function followZipSigningJob(jobId, sourceFile) {
+  const status = $("#zipSignStatus");
+  status.textContent = "DSC signing started. Keep this page open to follow each invoice.";
+  try {
+    let result;
+    for (let attempt = 0; attempt < 1800; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 700));
+      const response = await fetch(`${SIGN_HELPER_URL}/sign-zip/${jobId}`, { signal: AbortSignal.timeout(10000) });
+      result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "Could not read signing progress.");
+      updateZipInvoiceStatuses(result.files || []);
+      if (result.state === "complete") break;
+      if (result.state === "failed") throw new Error(result.error || "An invoice could not be signed.");
+    }
+    if (!result || result.state !== "complete") throw new Error("Signing is taking longer than expected. The helper may still be working; refresh progress by inspecting and starting again only after it finishes.");
+    const download = await fetch(`${SIGN_HELPER_URL}/sign-zip/${jobId}/download`, { signal: AbortSignal.timeout(2 * 60 * 1000) });
+    if (!download.ok) {
+      let detail = `Could not download the signed ZIP (${download.status}).`;
+      try { detail = (await download.json()).detail || detail; } catch (_) {}
+      throw new Error(detail);
+    }
+    const signedZip = await download.blob();
+    const url = URL.createObjectURL(signedZip);
+    const link = document.createElement("a");
+    link.href = url; link.download = sourceFile.name.replace(/\.zip$/i, "") + "_signed.zip";
+    document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+    status.textContent = "All invoice PDFs are signed. The signed ZIP was downloaded; the source archive is unchanged.";
+  } catch (error) {
+    status.textContent = error.message;
   }
 }
 

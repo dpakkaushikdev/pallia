@@ -161,14 +161,14 @@ copy dist\PalliaSignHelper.exe %LOCALAPPDATA%\PalliaSignHelper\
 
 The helper sits in the system tray and registers itself to start with Windows.
 It needs the token driver (`C:\Windows\System32\CryptoIDA_pkcs11.dll`) that the
-DSC vendor's software installs. Helper 1.2.0 or newer is required. It supports
-invoice `sig_box` signing and the Billing dashboard's ZIP workflow. To sign a
-ZIP, the browser sends it directly to `http://127.0.0.1:7777/sign-zip`; the
-helper signs each PDF using the USB DSC token and returns a signed ZIP. Other
-files and folders are preserved, and the source ZIP remains unchanged. ZIPs
-are limited to 100 MB compressed, 200 MB uncompressed and 500 entries. Rebuild
-and copy the helper after updating this repository; the dashboard checks its
-version before starting a ZIP signature.
+DSC vendor's software installs. Helper 1.3.0 or newer is required. It supports
+invoice `sig_box` signing and the Billing dashboard's ZIP workflow. The page
+first inspects the ZIP and lists its invoice PDFs. After the user starts
+signing, it shows per-invoice progress and downloads the signed archive when
+all PDFs are done. Other files and folders are preserved, and the source ZIP
+remains unchanged. ZIPs are limited to 100 MB compressed, 200 MB uncompressed
+and 500 entries. Rebuild and copy the helper after updating this repository;
+the dashboard checks its version before inspection.
 
 ---
 
