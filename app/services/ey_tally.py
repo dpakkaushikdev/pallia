@@ -12,6 +12,7 @@ def ey_tally_ledgers(rates):
         company=rates.tally_company,
         company_gstin=SELLER_GSTIN,
         company_state="Haryana",
+        voucher_type=rates.tally_voucher_type,
         gst_registration=rates.tally_registration,
         sales_local=rates.tally_sales_local,
         sales_interstate=rates.tally_sales_interstate,

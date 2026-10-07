@@ -38,15 +38,16 @@ class EyRateCard(BaseModel):
     night_charge: Decimal = Field(default=Decimal("250"), ge=0, le=10000, decimal_places=2)
     night_start_hour: int = Field(default=23, ge=0, le=23)
     night_end_hour: int = Field(default=5, ge=0, le=23)
-    # Exact names in the user's Haryana Tally company. Company must be set
-    # before export; the PDF does not establish the accounting company name.
-    tally_company: str = Field(default="", max_length=255)
+    # Defaults match the imported Haryana EY vouchers; each value remains
+    # editable because Tally requires exact company and ledger names.
+    tally_company: str = Field(default="EEE-TAXI MOBILITY SOLUTIONS PRIVATE LIMITED( HR)", max_length=255)
+    tally_voucher_type: str = Field(default="TAX INVOICE", min_length=1, max_length=128)
     tally_registration: str = Field(default="Haryana Registration", min_length=1, max_length=128)
-    tally_sales_local: str = Field(default="CAR RENTAL - LOCAL (5%)", min_length=1, max_length=128)
+    tally_sales_local: str = Field(default="CAR RENTAL -  LOCAL( 5%)", min_length=1, max_length=128)
     tally_sales_interstate: str = Field(default="CAR RENTAL - INTERSTATE (5%)", min_length=1, max_length=128)
-    tally_toll: str = Field(default="Toll & Parking", min_length=1, max_length=128)
-    tally_cgst: str = Field(default="OUTPUT CGST @2.5%", min_length=1, max_length=128)
-    tally_sgst: str = Field(default="OUTPUT SGST @2.5%", min_length=1, max_length=128)
+    tally_toll: str = Field(default="Toll and Parking", min_length=1, max_length=128)
+    tally_cgst: str = Field(default="OUTPUT CGST @ 2.5.%", min_length=1, max_length=128)
+    tally_sgst: str = Field(default="OUTPUT SGST @ 2.5%", min_length=1, max_length=128)
     tally_igst: str = Field(default="OUTPUT IGST @5%", min_length=1, max_length=128)
 
     @model_validator(mode="after")
@@ -82,7 +83,22 @@ EY_RATE_ID = 2  # PWC always uses row 1, including the shared masters password.
 
 def get_ey_rates(db: Session) -> EyRateCard:
     row = db.get(EeeTaxiRateCard, EY_RATE_ID)
-    return EyRateCard.model_validate(row.rates) if row and row.rates else EyRateCard()
+    if not row or not row.rates:
+        return EyRateCard()
+    # Upgrade only the former built-in values to the exact names seen in the
+    # user's Tally-imported EY vouchers. Preserve any names they customized.
+    values = dict(row.rates)
+    prior_defaults = {
+        "tally_company": ("", "EEE-TAXI MOBILITY SOLUTIONS PRIVATE LIMITED( HR)"),
+        "tally_sales_local": ("CAR RENTAL - LOCAL (5%)", "CAR RENTAL -  LOCAL( 5%)"),
+        "tally_toll": ("Toll & Parking", "Toll and Parking"),
+        "tally_cgst": ("OUTPUT CGST @2.5%", "OUTPUT CGST @ 2.5.%"),
+        "tally_sgst": ("OUTPUT SGST @2.5%", "OUTPUT SGST @ 2.5%"),
+    }
+    for name, (old, new) in prior_defaults.items():
+        if values.get(name, old) == old:
+            values[name] = new
+    return EyRateCard.model_validate(values)
 
 
 def ey_rate_response(db: Session) -> dict:

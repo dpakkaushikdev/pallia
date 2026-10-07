@@ -283,6 +283,15 @@ def test_ey_full_flow_pdf_xml_snapshot_and_separate_listing(ey_client):
     xml = ET.fromstring(response.content.decode("utf-16"))
     assert xml.findtext(".//CMPGSTIN") == "06AANCA3858Q1ZW"
     assert xml.findtext(".//BASICPURCHASEORDERNO") == "E-45303477"
+    [voucher] = xml.findall(".//VOUCHER")
+    assert voucher.attrib["VCHTYPE"] == "TAX INVOICE"
+    assert voucher.findtext("VOUCHERTYPENAME") == "TAX INVOICE"
+    assert xml.findtext("./BODY/IMPORTDATA/REQUESTDESC/STATICVARIABLES/SVCURRENTCOMPANY") == "EY Test Haryana Company"
+    ledger_names = [entry.findtext("LEDGERNAME") for entry in voucher.findall("LEDGERENTRIES.LIST")]
+    assert ledger_names == [
+        "Ernst & Young LLP", "CAR RENTAL -  LOCAL( 5%)", "Toll and Parking",
+        "OUTPUT CGST @ 2.5.%", "OUTPUT SGST @ 2.5%",
+    ]
     assert xml.findtext(".//BASICSHIPDOCUMENTNO") == "220426-NCR-0418"
     assert xml.findtext(".//SVCURRENTCOMPANY") == "EY Test Haryana Company"
     assert set(n.text for n in xml.findall(".//GSTRATE")) == {"2.5", "5"}
@@ -342,6 +351,23 @@ def test_invoice_history_fetches_only_50_records_per_page(ey_client):
     second = ey_client.get("/api/eee-taxi/tally/history?page=2").json()
     assert first["count"] == 51 and len(first["invoices"]) == 50 and first["pages"] == 2
     assert second["count"] == 51 and len(second["invoices"]) == 1 and second["page"] == 2
+
+
+def test_ey_tally_defaults_upgrade_to_names_from_imported_tally_xml():
+    old_defaults = EyRateCard(
+        tally_company="", tally_sales_local="CAR RENTAL - LOCAL (5%)",
+        tally_toll="Toll & Parking", tally_cgst="OUTPUT CGST @2.5%", tally_sgst="OUTPUT SGST @2.5%",
+    )
+    with SessionLocal() as db:
+        save_ey_rates(db, old_defaults, "test")
+        migrated = get_ey_rates(db)
+
+    assert migrated.tally_company == "EEE-TAXI MOBILITY SOLUTIONS PRIVATE LIMITED( HR)"
+    assert migrated.tally_voucher_type == "TAX INVOICE"
+    assert migrated.tally_sales_local == "CAR RENTAL -  LOCAL( 5%)"
+    assert migrated.tally_toll == "Toll and Parking"
+    assert migrated.tally_cgst == "OUTPUT CGST @ 2.5.%"
+    assert migrated.tally_sgst == "OUTPUT SGST @ 2.5%"
 
 
 def test_batch_requires_a_valid_starting_invoice_suffix(ey_client):
