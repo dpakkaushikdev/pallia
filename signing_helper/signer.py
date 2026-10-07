@@ -21,7 +21,8 @@ PKCS11_LIB = r"C:\Windows\System32\CryptoIDA_pkcs11.dll"
 CERT_LABEL  = "cont_333741d242fc5a8c459f"   # update after DSC renewal
 SLOT_NO     = 0
 
-_SIG_BOX_FALLBACK = (18, 82, 275, 128)
+# A4 lower-right authorisation box, in PDF points (origin at bottom-left).
+_SIG_BOX_FALLBACK = (337, 117, 580, 167)
 _TS_FMT = "%Y.%m.%d %H:%M:%S +05'30'"
 _IMG_W, _IMG_H = 440, 92
 
@@ -185,8 +186,9 @@ def _find_signature_box(pdf_path: Path) -> tuple[float, float, float, float]:
             gap      = y_top - y_bottom
             if gap >= 30:
                 margin = 4.0
-                x2  = page_width * 0.46
-                return (18.0, y_bottom + margin, x2, y_top - margin)
+                x1 = page_width * 0.57
+                x2 = page_width - 15.0
+                return (x1, y_bottom + margin, x2, y_top - margin)
     except Exception as exc:
         logger.warning("Sig-zone auto-detection failed ({}); using fallback.", exc)
 

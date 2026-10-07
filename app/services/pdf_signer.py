@@ -20,9 +20,9 @@ PKCS11_LIB = r"C:\Windows\System32\CryptoIDA_pkcs11.dll"
 CERT_LABEL  = "cont_333741d242fc5a8c459f"   # update if cert was renewed
 SLOT_NO     = 0
 
-# Fallback signature box used only when auto-detection fails.
+# A4 lower-right authorisation box used when footer anchor detection fails.
 # (x1, y1, x2, y2) — PDF points, origin bottom-left of page.
-_SIG_BOX_FALLBACK = (18, 82, 275, 128)
+_SIG_BOX_FALLBACK = (337, 117, 580, 167)
 
 # Timestamp format matching Adobe's display: "2026.05.13 14:50:06 +05'30'"
 _TS_FMT = "%Y.%m.%d %H:%M:%S +05'30'"
@@ -177,8 +177,9 @@ def _find_signature_box(pdf_path: Path) -> tuple[float, float, float, float]:
             )
             if gap >= 30:
                 margin = 4.0
-                x2  = page_width * 0.46    # left ~46 % of page width
-                box = (18.0, y_bottom + margin, x2, y_top - margin)
+                x1 = page_width * 0.57
+                x2 = page_width - 15.0
+                box = (x1, y_bottom + margin, x2, y_top - margin)
                 logger.info("Auto-detected sig box: {}", tuple(round(v, 1) for v in box))
                 return box
             logger.warning("Detected gap {:.1f} pts is too small; using fallback box.", gap)
