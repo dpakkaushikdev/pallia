@@ -42,7 +42,7 @@ def test_rejects_invalid_headers_duplicate_registrations_and_missing_make(source
 def test_bundled_master_and_unknown_vehicle():
     master = vehicle_make_map()
     assert len(master) == 90
-    assert master["HR55AX3523"] == "TIGOR- XR"
+    assert master["HR55AX3523"] == "TIGOR-EV"
     assert vehicle_display_name("XX99ZZ9999", master) == "XX99ZZ9999"
 
 
@@ -50,17 +50,17 @@ def test_master_make_is_used_in_pdf_and_tally_even_when_cost_centre_differs(tmp_
     rates = EyRateCard()
     _, [row] = parse_ey_csv(ey_csv(**{"Cab No": "HR55AX3523"}), rates)
     master = vehicle_make_map()
-    centres = {row.car_no: "HR55AX3523(TIGOR-EV)"}
+    centres = {row.car_no: "HR55AX3523(OLD-MAKE)"}
     path, _ = build_invoice_pdf(row, "HR/HO/26-27/1164", date(2026, 10, 8), rates, tmp_path,
                                 cost_centres=centres, vehicle_master=master)
     text = "\n".join(p.extract_text() for p in PdfReader(path).pages)
-    assert "HR55AX3523(TIGOR- XR)" in text
+    assert "HR55AX3523(TIGOR-EV)" in text
     voucher = voucher_for_row(row, "HR/HO/26-27/1164", date(2026, 10, 8), rates, centres,
                               vehicle_master=master)
     xml = ET.fromstring(render_tally_xml([voucher], ey_tally_ledgers(rates)).decode("utf-16"))
-    assert xml.findtext(".//BASICSHIPVESSELNO") == "HR55AX3523(TIGOR- XR)"
+    assert xml.findtext(".//BASICSHIPVESSELNO") == "HR55AX3523(TIGOR-EV)"
     assert voucher.car_no == "HR55AX3523"
-    assert "TIGOR-EV" not in text
+    assert "OLD-MAKE" not in text
 
 
 def test_vehicle_master_requires_login_and_password_and_import_is_review_only():
@@ -83,9 +83,10 @@ def test_vehicle_master_requires_login_and_password_and_import_is_review_only():
         assert client.put(endpoint, json={'rows': rows, 'edit_password': 'incorrect'}, headers=headers).status_code == 403
         saved = client.put(endpoint, json={'rows': rows, 'edit_password': 'VehicleEdit1'}, headers=headers)
         assert saved.status_code == 200
-        assert saved.json()['rows'] == rows
+        expected = [dict(rows[0], make='TIGOR-EV')]
+        assert saved.json()['rows'] == expected
         with SessionLocal() as db:
-            assert vehicle_make_map(db) == {'HR55AX3523': 'TIGOR- XR'}
+            assert vehicle_make_map(db) == {'HR55AX3523': 'TIGOR-EV'}
             db.query(EeeTaxiVehicleMaster).delete()
             db.query(EeeTaxiRateCard).delete()
             db.commit()

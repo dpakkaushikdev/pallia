@@ -77,7 +77,13 @@ def parse_vehicle_csv(data: bytes) -> list[VehicleRow]:
 def get_vehicle_rows(db: Session) -> list[VehicleRow]:
     stored = db.get(EeeTaxiVehicleMaster, 1)
     if stored is not None:
-        return VehicleRows(rows=stored.rows).rows
+        rows = VehicleRows(rows=stored.rows).rows
+        # Upgrade copies saved before the fleet make correction as well as
+        # the bundled CSV, without replacing any other vehicle details.
+        for row in rows:
+            if row.make == "TIGOR- XR":
+                row.make = "TIGOR-EV"
+        return rows
     return parse_vehicle_csv(DEFAULT_CSV.read_bytes())
 
 
