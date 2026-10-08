@@ -24,6 +24,7 @@ from app import __version__
 from app.api import auth as auth_api
 from app.api import dashboard as dashboard_api
 from app.api import eee_taxi as eee_taxi_api
+from app.api import eee_taxi_documents as eee_taxi_documents_api
 from app.api import eee_taxi_cost_centres as eee_taxi_cost_centres_api
 from app.api import eee_taxi_clients as eee_taxi_clients_api
 from app.api import eee_taxi_rates as eee_taxi_rates_api
@@ -61,6 +62,7 @@ if settings.billing_module_enabled:
     app.include_router(billing_api.router)
 app.include_router(dashboard_api.router)
 app.include_router(eee_taxi_api.router)
+app.include_router(eee_taxi_documents_api.router)
 app.include_router(eee_taxi_rates_api.router)
 app.include_router(ey_rates_api.router)
 app.include_router(eee_taxi_cost_centres_api.router)

@@ -150,6 +150,21 @@ Because the browser is the driver, **the tab must stay open** until the batch
 finishes. Closing it mid-run leaves the remaining invoices `pending` or
 `awaiting_signature`.
 
+### EEE-Taxi documents
+
+Open **EEE-Taxi > Document**, enter **DS no/Route No**, select EY or PWC,
+and click **Open / Create entry**. Existing entries with the same client and
+route number reopen without creating duplicates.
+
+EY entries have Invoice, DS, Parking, Toll / MCD, GPS and Email Screenshot.
+PWC entries have the same categories except Email Screenshot. Each category
+accepts multiple PDFs, PNG, JPG or WebP images (up to 3 MB per file). Click a
+category's paste area and press Ctrl+V to attach a clipboard screenshot, or
+choose **Upload from PC**. Attachments save immediately in the database and
+can be viewed, downloaded or removed when the entry is reopened. The saved
+entry list supports DS/Route searches and shows which categories are missing.
+Access follows the EEE-Taxi permission, including attachment downloads.
+
 ### Installing the signing helper on a PC
 
 ```powershell

@@ -307,6 +307,39 @@ class EeeTaxiInvoice(Base):
         return f"<EeeTaxiInvoice {self.id} no={self.invoice_no} status={self.status}>"
 
 
+class EeeTaxiDocumentEntry(Base):
+    __tablename__ = "eee_taxi_document_entries"
+    __table_args__ = (UniqueConstraint("client_profile", "route_no", name="uq_eee_document_route"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    client_profile: Mapped[str] = mapped_column(String(16), index=True)
+    route_no: Mapped[str] = mapped_column(String(64), index=True)
+    created_by: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    files: Mapped[list["EeeTaxiDocumentFile"]] = relationship(
+        back_populates="entry", cascade="all, delete-orphan", lazy="selectin",
+        order_by="EeeTaxiDocumentFile.created_at",
+    )
+
+
+class EeeTaxiDocumentFile(Base):
+    __tablename__ = "eee_taxi_document_files"
+    __table_args__ = (UniqueConstraint("entry_id", "category", "sha256", name="uq_eee_document_file"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    entry_id: Mapped[str] = mapped_column(ForeignKey("eee_taxi_document_entries.id", ondelete="CASCADE"), index=True)
+    category: Mapped[str] = mapped_column(String(32))
+    filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(64))
+    size: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    data: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
+    uploaded_by: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    entry: Mapped[EeeTaxiDocumentEntry] = relationship(back_populates="files")
+
+
 class EeeTaxiRateCard(Base):
     """Single-row table holding the editable EEE-Taxi rate card.
 
