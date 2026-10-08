@@ -1,3 +1,7 @@
+import io
+
+import pytest
+from pypdf import PdfReader, PdfWriter
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
@@ -6,6 +10,7 @@ from signing_helper.signer import (
     SigningError,
     _find_signature_box as helper_find_signature_box,
     inspect_signature_box,
+    sign_pdf_bytes,
 )
 
 
@@ -75,3 +80,23 @@ def test_accounts_placement_composes_scaled_and_flipped_pdf_text_matrices(tmp_pa
     expected = (A4[0] * 0.57, expected_y_auth + 4, A4[0] - 15, expected_y_for - 4)
     for box in (app_find_signature_box(path), helper_find_signature_box(path), inspect_signature_box(path.read_bytes())):
         assert all(abs(a - b) < 0.1 for a, b in zip(box, expected))
+
+
+@pytest.mark.parametrize("page_count", [2, 3])
+def test_accounts_rejects_multiple_pages_in_review_and_before_token_signing(tmp_path, page_count):
+    path = tmp_path / "accounts.pdf"
+    _form_pdf(path)
+    writer = PdfWriter()
+    writer.add_page(PdfReader(path).pages[0])
+    for _ in range(page_count - 1):
+        writer.add_blank_page(width=A4[0], height=A4[1])
+    output = io.BytesIO()
+    writer.write(output)
+    pdf_bytes = output.getvalue()
+
+    for action in (
+        lambda: inspect_signature_box(pdf_bytes),
+        lambda: sign_pdf_bytes(pdf_bytes, "unused", sig_box=[1, 2, 3, 4], require_signature_anchors=True),
+    ):
+        with pytest.raises(SigningError, match=f"This PDF has {page_count} pages"):
+            action()

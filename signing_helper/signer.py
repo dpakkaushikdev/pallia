@@ -164,6 +164,10 @@ def _find_signature_box(pdf_path: Path, require_anchors: bool = False) -> tuple[
     try:
         from pypdf import PdfReader
         reader = PdfReader(str(pdf_path))
+        if require_anchors and len(reader.pages) != 1:
+            raise SigningError(
+                f"This PDF has {len(reader.pages)} pages. Accounts signing accepts only 1-page PDFs."
+            )
         page = reader.pages[0]
         page_width = float(page.mediabox.width)
         for_pallia_ys: list[float] = []
@@ -199,6 +203,8 @@ def _find_signature_box(pdf_path: Path, require_anchors: bool = False) -> tuple[
                 x1 = page_width * 0.57
                 x2 = page_width - 15.0
                 return (x1, y_auth + margin, x2, y_for - margin)
+    except SigningError:
+        raise
     except Exception as exc:
         logger.warning("Sig-zone auto-detection failed ({}); using fallback.", exc)
 
@@ -264,6 +270,10 @@ def sign_pdf_bytes(
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir) / "input.pdf"
         tmp_path.write_bytes(pdf_bytes)
+        detected_box = (
+            _find_signature_box(tmp_path, require_anchors=True)
+            if require_signature_anchors else None
+        )
 
         try:
             from pyhanko.sign import signers
@@ -315,10 +325,6 @@ def sign_pdf_bytes(
                     background=PdfImage(appearance_img),
                     border_width=0,
                     background_opacity=1.0,
-                )
-                detected_box = (
-                    _find_signature_box(tmp_path, require_anchors=True)
-                    if require_signature_anchors else None
                 )
                 if sig_box is not None and len(sig_box) == 4:
                     sig_box = tuple(float(v) for v in sig_box)

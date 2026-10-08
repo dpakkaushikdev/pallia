@@ -863,13 +863,14 @@
       <div class="page-hd"><h1>Accounts</h1></div>
       <div class="card" style="padding:18px 20px;">
         <div class="card-title">Sign Accounts PDFs with DSC</div>
-        <p style="color:#64748b;margin:0 0 12px;">Select the account PDFs. Each signature is positioned between "For Pallia Trans Logistics Private Limited" and "Authorised Signatory" based on that PDF's layout. Files missing either footer line are flagged and won't be signed.</p>
+        <p style="color:#64748b;margin:0 0 12px;">Select the account PDFs. Only 1-page PDFs can be signed. Each signature is positioned between "For Pallia Trans Logistics Private Limited" and "Authorised Signatory" based on that PDF's layout. Files with more pages or missing either footer line are left unsigned and listed in the completion summary.</p>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
           <input type="file" id="accountsPdfFiles" accept=".pdf,application/pdf" multiple onchange="resetAccountsPdfReview()" />
           <button class="btn" id="btnReviewAccountsPdfs" onclick="inspectAccountsPdfs()">Review PDFs</button>
         </div>
         <div id="accountsPdfStatus" class="meta" style="margin-top:10px;min-height:18px;" aria-live="polite"></div>
         <div id="accountsPdfReview" class="hidden" style="margin-top:14px;"></div>
+        <div id="accountsPdfSummary" class="hidden" style="margin-top:14px;white-space:pre-line;" role="status"></div>
       </div>
     </div>
 
@@ -2890,6 +2891,19 @@ function resetAccountsPdfReview() {
   $("#accountsPdfReview").innerHTML = "";
   $("#accountsPdfReview").classList.add("hidden");
   $("#accountsPdfStatus").textContent = "";
+  $("#accountsPdfSummary").textContent = "";
+  $("#accountsPdfSummary").classList.add("hidden");
+}
+
+function showAccountsPdfSummary() {
+  const signed = accountsPdfItems.filter(item => item.status === "Signed").length;
+  const unsigned = accountsPdfItems.filter(item => item.status !== "Signed");
+  const summary = $("#accountsPdfSummary");
+  summary.textContent = `${signed} PDF${signed === 1 ? "" : "s"} signed. ${unsigned.length} PDF${unsigned.length === 1 ? "" : "s"} not signed.`;
+  if (unsigned.length) {
+    summary.textContent += "\nFiles not signed:\n" + unsigned.map(item => `${item.file.name} — ${item.error || "Signing stopped before this file was processed."}`).join("\n");
+  }
+  summary.classList.remove("hidden");
 }
 
 function renderAccountsPdfReview() {
@@ -2918,13 +2932,14 @@ async function inspectAccountsPdfs() {
     status.textContent = "Select no more than 50 PDFs or 100 MB total."; return;
   }
   button.disabled = true;
+  $("#accountsPdfFiles").disabled = true;
   status.textContent = "Checking Pallia footer lines and calculating each signature position…";
   try {
     const health = await fetch(`${SIGN_HELPER_URL}/health`, { signal: AbortSignal.timeout(2500) });
     if (!health.ok) throw new Error("PalliaSignHelper is not responding.");
     const helper = await health.json();
     const version = (helper.version || "0").split(".").map(part => parseInt(part, 10) || 0);
-    if (version[0] < 1 || (version[0] === 1 && version[1] < 7)) throw new Error("Update PalliaSignHelper.exe to version 1.7.0 or newer for Accounts PDF signing.");
+    if (version[0] < 1 || (version[0] === 1 && version[1] < 8)) throw new Error("Update PalliaSignHelper.exe to version 1.8.0 or newer for single-page Accounts PDF signing.");
     for (const file of files) {
       const item = { file, status: "Checking footer" };
       accountsPdfItems.push(item);
@@ -2948,10 +2963,12 @@ async function inspectAccountsPdfs() {
     }
     const ready = accountsPdfItems.filter(item => item.status === "Ready").length;
     status.textContent = `${ready} PDF${ready === 1 ? "" : "s"} have both footer lines and are ready to sign. Others need fixing before signing.`;
+    if (!ready) showAccountsPdfSummary();
   } catch (error) {
     status.textContent = error.name === "TimeoutError" ? "Timed out while checking the local signing helper." : error.message;
   } finally {
     button.disabled = false;
+    $("#accountsPdfFiles").disabled = false;
   }
 }
 
@@ -3016,6 +3033,7 @@ async function signAccountsPdfs() {
   }
   const signed = accountsPdfItems.filter(item => item.status === "Signed").length;
   $("#accountsPdfStatus").textContent = `${signed} PDF${signed === 1 ? "" : "s"} signed. Download signed files from the table; originals remain unchanged.`;
+  showAccountsPdfSummary();
   $("#accountsSignPin").value = "";
   accountsPdfSigning = false;
   $("#accountsPdfFiles").disabled = false;
