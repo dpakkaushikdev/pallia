@@ -129,6 +129,8 @@ def test_ey_rental_kilometres_and_vehicle_model_appear_in_invoice(tmp_path):
     )
     text = "\n".join(page.extract_text() or "" for page in PdfReader(str(pdf_path)).pages)
     assert "Motor Vehicle No." in text
+    assert "Quantity" in text
+    assert len(PdfReader(str(pdf_path)).pages) == 1
     assert "HR55AW2048(TIGOR- XR)" in text
     assert "TIGOR-EV" not in text
     assert "Extra Kms 8 Km (8*14.00 = 112)" in text
@@ -347,6 +349,7 @@ def test_ey_full_flow_pdf_xml_snapshot_and_separate_listing(ey_client):
     reader = PdfReader(io.BytesIO(pdf.content))
     assert len(reader.pages) == 1
     text_pdf = reader.pages[0].extract_text()
+    assert "Quantity" in text_pdf
     for value in (
         "E-45303477", "220426-NCR-0418", "06AANCA3858Q1ZW", "369.60",
         "Other References", "PICK UP TIME", "DROP TIME", "Toll & Parking",

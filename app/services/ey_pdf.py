@@ -67,15 +67,15 @@ def generate_ey_pdf(row, invoice_no, invoice_date, description, output_path: Pat
     label = "CAR RENTAL - LOCAL (5%)" if local else "CAR RENTAL - INTERSTATE (5%)"
     detail = "\n".join([label, f"Guest Name :- {row.guest_name}", f"From - {row.pickup_location}",
                          f"To - {row.drop_location}", *description])
-    lines = [[p("Sl No."), p("Particulars", "xsb"), p("HSN/SAC"), p("GST Rate"), p("Amount", "smbr")],
-             [p("1"), p(detail), p("996601"), p("5 %"), p(f"{row.tax_base:,.2f}", "smr")]]
+    lines = [[p("Sl No."), p("Particulars", "xsb"), p("HSN/SAC"), p("GST Rate"), p("Quantity"), p("Amount", "smbr")],
+             [p("1"), p(detail), p("996601"), p("5 %"), "", p(f"{row.tax_base:,.2f}", "smr")]]
     if row.parking:
-        lines.append([p("2"), p("Toll & Parking"), p("996601"), p("5 %"), p(f"{row.parking:,.2f}", "smr")])
+        lines.append([p("2"), p("Toll & Parking"), p("996601"), p("5 %"), "", p(f"{row.parking:,.2f}", "smr")])
     taxes = [("OUTPUT CGST @2.5%", cgst), ("OUTPUT SGST @2.5%", sgst)] if local else [("OUTPUT IGST @5%", igst)]
     for label, amount in taxes:
-        lines.append(["", p(label, "smb"), "", "", p(f"{amount:,.2f}", "smr")])
-    lines.append(["", p("Total", "smb"), "", "", Paragraph(f'<font name="{_FONT_RUPEE}">&#8377;</font> {total:,.2f}', styles["smbr"])])
-    items = table(lines, [9*mm, width-65*mm, 19*mm, 15*mm, 22*mm])
+        lines.append(["", p(label, "smb"), "", "", "", p(f"{amount:,.2f}", "smr")])
+    lines.append(["", p("Total", "smb"), "", "", "", Paragraph(f'<font name="{_FONT_RUPEE}">&#8377;</font> {total:,.2f}', styles["smbr"])])
+    items = table(lines, [9*mm, width-83*mm, 19*mm, 15*mm, 18*mm, 22*mm])
     words = amount_in_words(total).replace("Rupees ", "INR ", 1)
     signature = table([[p("for " + COMPANY)], [Spacer(1, 38)], [p("Authorised Signatory")]], [width*.4-8], False)
     footer = table([[p(f"Amount Chargeable (in words)\n{words}\n\nRemarks:\n{row.route_no}"), signature]], [width*.6, width*.4])
