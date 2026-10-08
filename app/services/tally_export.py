@@ -74,6 +74,7 @@ class TallyVoucher:
     dispatch_doc_no: str = ""
     dispatched_through: str = ""
     destination: str = ""
+    motor_vehicle_no: str = ""
 
     @property
     def total(self) -> Decimal:
@@ -276,7 +277,7 @@ def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
         + _tag("PERSISTEDVIEW", "Invoice Voucher View")
         + _tag("VCHSTATUSVOUCHERTYPE", ledgers.voucher_type)
         + _tag("VCHSTATUSTAXUNIT", ledgers.gst_registration)
-        + _tag("BASICSHIPVESSELNO", v.car_no)
+        + _tag("BASICSHIPVESSELNO", v.motor_vehicle_no or v.car_no)
         + (_tag("BASICSHIPDOCUMENTNO", v.dispatch_doc_no) if v.dispatch_doc_no else "")
         + (_tag("BASICSHIPPEDBY", v.dispatched_through) if v.dispatched_through else "")
         + (_tag("BASICFINALDESTINATION", v.destination) if v.destination else "")

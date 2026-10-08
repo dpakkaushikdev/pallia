@@ -1,6 +1,8 @@
 """Generate EEE-Taxi GST tax invoice PDF using ReportLab."""
 from __future__ import annotations
 
+from xml.sax.saxutils import escape
+
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -202,7 +204,7 @@ def generate_eee_taxi_invoice_pdf(
         [_p("Buyer's Order No.", st["xsb"]),    _p(ctx.route_no, st["xs"]),  _p("Dated", st["xsb"]),          _p(trip_d, st["xs"])],
         [_p("Dispatch Doc No.", st["xs"]),       _p("", st["xs"]),             _p("Delivery Note Date", st["xs"]), _p("", st["xs"])],
         [_p("Dispatched through", st["xs"]),     _p("", st["xs"]),             _p("Destination", st["xs"]),     _p("", st["xs"])],
-        [_p("Bill of Lading/LR-RR No.", st["xsb"]), _p(f"dt. {trip_d}", st["xs"]), _p("Motor Vehicle No.", st["xsb"]), _p(ctx.car_no, st["xs"])],
+        [_p("Bill of Lading/LR-RR No.", st["xsb"]), _p(f"dt. {trip_d}", st["xs"]), _p("Motor Vehicle No.", st["xsb"]), _p(escape(ctx.car_no), st["xs"])],
     ]
     meta_tbl = Table(meta_rows, colWidths=[rw*0.32, rw*0.24, rw*0.22, rw*0.22])
     meta_tbl.setStyle(TableStyle([

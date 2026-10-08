@@ -338,6 +338,16 @@ class EeeTaxiCostCentre(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class EeeTaxiVehicleMaster(Base):
+    """Shared vehicle details imported from the fleet CSV."""
+    __tablename__ = "eee_taxi_vehicle_master"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    rows: Mapped[list] = mapped_column(JSON)
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class EeeTaxiClient(Base):
     """One buyer entity/GSTIN/address, separated by the PWC or EY profile."""
     __tablename__ = "eee_taxi_clients"

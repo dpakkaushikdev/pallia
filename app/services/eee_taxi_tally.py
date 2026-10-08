@@ -28,6 +28,7 @@ from app.services.tally_export import TallyVoucher
 from app.services.eee_taxi_profiles import row_client, row_is_local, row_tax
 from app.services.ey_fares import fare_description
 from app.services.eee_taxi_client_master import restore_client_master
+from app.services.eee_taxi_vehicles import vehicle_make_map, vehicle_display_name
 
 _TOLERANCE = Decimal("0.01")
 _PWC_RENTAL_INCLUDED_LINE = "G TO G KM (MAX=20 KM)) & HRS (1 HRS) INCLUDED"
@@ -94,6 +95,7 @@ def voucher_for_row(
     rates: RateCard,
     cost_centres: dict[str, str],
     client_master=None,
+    vehicle_master=None,
 ) -> TallyVoucher:
     """The Tally voucher for one invoice; raises ExportProblem when Tally would reject it."""
     try:
@@ -127,6 +129,7 @@ def voucher_for_row(
         dispatch_doc_no=row.route_no if row.client_profile == "ey" else "",
         dispatched_through=f"PICK UP TIME - {row.pickup_time_str}" if row.client_profile == "ey" else "",
         destination=f"DROP TIME - {row.drop_time_str}" if row.client_profile == "ey" else "",
+        motor_vehicle_no=vehicle_display_name(row.car_no, vehicle_master),
     )
     # The PDF prints the CSV total when there is one; Tally needs the voucher to
     # balance, so the two must agree or the books would differ from the invoice.
@@ -139,7 +142,7 @@ def voucher_for_row(
 
 
 def _items_for_batch(batch: EeeTaxiBatch, invoices: list[EeeTaxiInvoice],
-                     cost_centres: dict[str, str]) -> list[ExportItem]:
+                     cost_centres: dict[str, str], vehicle_master=None) -> list[ExportItem]:
     def item(inv: EeeTaxiInvoice, row: Optional[EeeTaxiRow], **kw) -> ExportItem:
         return ExportItem(
             invoice_id=inv.id,
@@ -177,7 +180,7 @@ def _items_for_batch(batch: EeeTaxiBatch, invoices: list[EeeTaxiInvoice],
             out.append(item(inv, row, total=None, problem="This invoice is no longer in its batch's CSV."))
             continue
         try:
-            v = voucher_for_row(row, inv.invoice_no, batch.invoice_date, rates, cost_centres, client_master)
+            v = voucher_for_row(row, inv.invoice_no, batch.invoice_date, rates, cost_centres, client_master, vehicle_master)
             out.append(item(inv, row, total=v.total, voucher=v))
         except ExportProblem as exc:
             out.append(item(inv, row, total=row_total(row), problem=str(exc)))
@@ -215,9 +218,10 @@ def find_export_items(
         by_batch.setdefault(inv.batch_id, []).append(inv)
 
     cost_centres = {c.vehicle_no: c.cost_centre for c in get_cost_centre_state(db).rows}
+    vehicle_master = vehicle_make_map(db)
     items: list[ExportItem] = []
     for batch_id, invoices in by_batch.items():
-        items += _items_for_batch(db.get(EeeTaxiBatch, batch_id), invoices, cost_centres)
+        items += _items_for_batch(db.get(EeeTaxiBatch, batch_id), invoices, cost_centres, vehicle_master)
     return sorted(items, key=lambda i: (i.invoice_date, i.batch_created_at or datetime.min, i.invoice_no),
                   reverse=newest_first)
 

@@ -125,10 +125,12 @@ def test_ey_rental_kilometres_and_vehicle_model_appear_in_invoice(tmp_path):
     pdf_path, _ = build_invoice_pdf(
         trip, "EY/26-27/0001", date(2026, 10, 7), rates, tmp_path,
         cost_centres={"HR55AW2048": "HR55AW2048(TIGOR-EV)"},
+        vehicle_master={"HR55AW2048": "TIGOR- XR"},
     )
     text = "\n".join(page.extract_text() or "" for page in PdfReader(str(pdf_path)).pages)
     assert "Motor Vehicle No." in text
-    assert "HR55AW2048(TIGOR-EV)" in text
+    assert "HR55AW2048(TIGOR- XR)" in text
+    assert "TIGOR-EV" not in text
     assert "Extra Kms 8 Km (8*14.00 = 112)" in text
 
 

@@ -28,6 +28,7 @@ from app.api import eee_taxi_cost_centres as eee_taxi_cost_centres_api
 from app.api import eee_taxi_clients as eee_taxi_clients_api
 from app.api import eee_taxi_rates as eee_taxi_rates_api
 from app.api import eee_taxi_tally as eee_taxi_tally_api
+from app.api import eee_taxi_vehicles as eee_taxi_vehicles_api
 from app.api import ey_rates as ey_rates_api
 from app.config import settings
 from app.database import SessionLocal, init_db
@@ -65,6 +66,7 @@ app.include_router(ey_rates_api.router)
 app.include_router(eee_taxi_cost_centres_api.router)
 app.include_router(eee_taxi_clients_api.router)
 app.include_router(eee_taxi_tally_api.router)
+app.include_router(eee_taxi_vehicles_api.router)
 
 
 # Usage events are written off the request path: each write is several database

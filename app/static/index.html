@@ -1104,6 +1104,7 @@
         <button class="seg-btn" role="tab" aria-selected="false" data-mst="ey" onclick="mstShow('ey')">EY rate card</button>
         <button class="seg-btn" role="tab" aria-selected="false" data-mst="clients" onclick="mstShow('clients')">Client entities</button>
         <button class="seg-btn" role="tab" aria-selected="false" data-mst="cc" onclick="mstShow('cc')">Cost centres</button>
+        <button class="seg-btn" role="tab" aria-selected="false" data-mst="vehicles" onclick="mstShow('vehicles')">Vehicle master</button>
       </div>
 
       <section id="mstRates">
@@ -1210,7 +1211,7 @@
           <p class="meta">Night charges apply to rentals only when the trip overlaps the night window. Rental kilometres use the same whole-kilometre treatment as PWC.</p>
         </div>
         <div class="card"><div class="card-title">EY Tally company and ledgers</div>
-          <p class="meta">Haryana GSTIN 06AANCA3858Q1ZW. GST: 5% interstate or 2.5% CGST + 2.5% SGST locally. Enter the exact Haryana company name and check ledger names against Tally before the first XML export. Vehicle cost centres use the shared Cost centres master.</p>
+          <p class="meta">Haryana GSTIN 06AANCA3858Q1ZW. GST: 5% interstate or 2.5% CGST + 2.5% SGST locally. Enter the exact Haryana company name and check ledger names against Tally before the first XML export. Motor Vehicle No. includes the make from Vehicle master.</p>
           <div class="grid-3" id="eyTallyFields"></div>
         </div>
       </section>
@@ -1236,6 +1237,27 @@
             <tbody></tbody>
           </table>
           <div id="cmEmpty" class="placeholder hidden">No client entities are saved for this profile.</div>
+        </div>
+      </section>
+      <section id="mstVehicles" class="hidden">
+        <div class="sec-hd">
+          <div class="meta" id="vmMeta">Loading...</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <input type="file" id="vmCsv" accept=".csv,text/csv" class="hidden" onchange="vmImport()">
+            <button class="btn secondary sm" id="vmImportBtn" onclick="$('#vmCsv').click()">Import vehicle CSV</button>
+            <button class="btn sm" id="vmEdit" onclick="vmStartEdit()">Edit makes</button>
+            <button class="btn secondary sm hidden" id="vmCancel" onclick="vmCancel()">Cancel</button>
+            <button class="btn sm hidden" id="vmSave" onclick="vmSave()">Save vehicle master</button>
+          </div>
+        </div>
+        <p class="meta">Motor Vehicle No. uses Vehicle Number Plate followed by Make in brackets in both the PDF and Tally export. Replacing the master applies to newly generated PDFs and new XML exports. Existing PDF downloads keep their saved content.</p>
+        <div id="vmMsg" class="hidden" style="margin-bottom:12px;" aria-live="polite"></div>
+        <div class="card" style="overflow:auto;">
+          <input type="search" id="vmSearch" placeholder="Search registration or make" oninput="vmRender()" aria-label="Search vehicle master" style="margin-bottom:12px;">
+          <table class="data-table" id="vmTable">
+            <thead><tr><th>Vehicle registration</th><th>Make</th><th>Availability</th><th>Pollution expiry</th><th>Registration date</th><th>Chassis number</th><th>Engine number</th></tr></thead>
+            <tbody></tbody>
+          </table>
         </div>
       </section>
       <section id="mstCc" class="hidden">
@@ -1749,7 +1771,7 @@ function switchTab(tabId) {
   if (tabId === "dashboard") refreshDashboard();
   if (tabId === "api-dashboard") initApiDashboard();
   if (tabId === "admin") refreshUsers();
-  if (tabId === "eee-rates") { rcLoad(); ccLoad(); eyLoad(); cmLoad(); }
+  if (tabId === "eee-rates") { rcLoad(); ccLoad(); eyLoad(); cmLoad(); vmLoad(); }
   if (tabId === "eee-history") historyLoad();
   if (tabId === "eee-tally") txLoad();
 }
@@ -3652,6 +3674,7 @@ function mstShow(which) {
   $("#mstCc").classList.toggle("hidden", which !== "cc");
   $("#mstEy").classList.toggle("hidden", which !== "ey");
   $("#mstClients").classList.toggle("hidden", which !== "clients");
+  $("#mstVehicles").classList.toggle("hidden", which !== "vehicles");
 }
 
 const RC_LABELS = {
@@ -4586,6 +4609,72 @@ async function txDelete(id) {
 
 function eetChosenCardFareRows() {
   return [...$$(".eet-card-pick")].filter(c => c.checked).map(c => c.value).join(",");
+}
+
+// Vehicle makes are shared by PDF generation and Tally exports.
+let _vm = { saved: [], rows: [], editing: false, password: null };
+function vmMessage(text, ok = false) {
+  $("#vmMsg").className = text ? "extraction-note " + (ok ? "ok" : "err") : "hidden";
+  $("#vmMsg").textContent = text;
+}
+function vmRender() {
+  const query = $("#vmSearch").value.trim().toLowerCase();
+  $("#vmTable tbody").innerHTML = _vm.rows.map((row, index) => {
+    if (query && !`${row.vehicle_no} ${row.make}`.toLowerCase().includes(query)) return "";
+    const make = _vm.editing
+      ? `<input value="${rcEsc(row.make)}" maxlength="100" aria-label="Make for ${rcEsc(row.vehicle_no)}" onchange="_vm.rows[${index}].make=this.value">`
+      : rcEsc(row.make);
+    return `<tr><td>${rcEsc(row.vehicle_no)}</td><td>${make}</td>${["availability", "pollution_expiry", "registration_date", "chassis_no", "engine_no"].map(key => `<td>${rcEsc(row[key] || "")}</td>`).join("")}</tr>`;
+  }).join("");
+  $("#vmEdit").classList.toggle("hidden", _vm.editing);
+  $("#vmCancel").classList.toggle("hidden", !_vm.editing);
+  $("#vmSave").classList.toggle("hidden", !_vm.editing);
+}
+async function vmLoad() {
+  try {
+    const data = await api("/api/eee-taxi/vehicles");
+    _vm = { saved: data.rows, rows: structuredClone(data.rows), editing: false, password: null };
+    _mstHasPassword = data.has_edit_password;
+    $("#vmMeta").textContent = `${data.rows.length} vehicles` + (data.updated_by ? `; last saved by ${data.updated_by}` : "; loaded from Vehicle Master.csv");
+    vmMessage("");
+    vmRender();
+  } catch (error) { vmMessage("Could not load vehicle master: " + error.message); }
+}
+function vmStartEdit() {
+  mstUnlock(password => { _vm.password = password; _vm.editing = true; vmRender(); });
+}
+function vmCancel() {
+  _vm.rows = structuredClone(_vm.saved);
+  _vm.editing = false;
+  _vm.password = null;
+  vmRender();
+  vmMessage("Changes discarded.", true);
+}
+async function vmImport() {
+  const file = $("#vmCsv").files[0];
+  if (!file) return;
+  const button = $("#vmImportBtn");
+  button.disabled = true;
+  try {
+    const body = new FormData(); body.append("file", file);
+    const data = await api("/api/eee-taxi/vehicles/import-csv", { method: "POST", body });
+    mstUnlock(password => {
+      _vm.password = password; _vm.editing = true; _vm.rows = data.rows;
+      vmRender();
+      vmMessage(`${data.rows.length} vehicles read. Review the list, then save to replace the current vehicle master.`, true);
+    });
+  } catch (error) { vmMessage(error.message); }
+  finally { button.disabled = false; $("#vmCsv").value = ""; }
+}
+async function vmSave() {
+  const button = $("#vmSave");
+  button.disabled = true;
+  try {
+    await api("/api/eee-taxi/vehicles", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows: _vm.rows, edit_password: _vm.password }) });
+    await vmLoad();
+    vmMessage("Vehicle master saved. New PDFs and Tally exports will use these makes.", true);
+  } catch (error) { vmMessage(error.message); }
+  finally { button.disabled = false; }
 }
 
 // Buyer entity masters are separate for PWC and EY and share the masters password.
