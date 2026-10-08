@@ -7,8 +7,8 @@ from app.services.pdf_signer import _SIG_BOX_FALLBACK, _find_signature_box
 def _make_pdf(path, anchors=True):
     pdf = canvas.Canvas(str(path), pagesize=A4)
     if anchors:
-        pdf.drawString(40, 160, "For Pallia Trans Logistics Private Limited")
-        pdf.drawString(40, 80, "Authorised Signatory")
+        pdf.drawString(360, 160, "For Pallia Trans Logistics Private Limited")
+        pdf.drawString(360, 80, "Authorised Signatory")
     pdf.save()
 
 

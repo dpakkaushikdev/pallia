@@ -103,62 +103,27 @@ def _build_appearance_image(signer_name: str, timestamp_str: str):
 
 # ── Signature-zone detection ──────────────────────────────────────────────────
 
-def _find_signature_box(pdf_path: Path, require_anchors: bool = False) -> tuple[float, float, float, float]:
+def _find_signature_box(pdf_path: Path, require_anchors: bool = False,
+                        single_page_only: bool = True) -> tuple[float, float, float, float]:
     try:
         from pypdf import PdfReader
+        try:
+            from .footer import find_footer_box
+        except ImportError:
+            from footer import find_footer_box
         reader = PdfReader(str(pdf_path))
-        if require_anchors and len(reader.pages) != 1:
+        if require_anchors and single_page_only and len(reader.pages) != 1:
             raise SigningError(
                 f"This PDF has {len(reader.pages)} pages. Accounts signing accepts only 1-page PDFs."
             )
-        page = reader.pages[0]
-        page_width = float(page.mediabox.width)
-        for_pallia_ys: list[float] = []
-        authorised_ys: list[float] = []
-
-        def _visit(text: str, cm, tm, font_dict, font_size):
-            ctm = cm or (1, 0, 0, 1, 0, 0)
-            text_matrix = tm or (1, 0, 0, 1, 0, 0)
-            # Compose the current transform and text matrix. Adding their
-            # translations alone fails on scaled/flipped invoice templates.
-            y = ctm[1] * text_matrix[4] + ctm[3] * text_matrix[5] + ctm[5]
-            t = text.strip()
-            if not t:
-                return
-            lower = t.casefold()
-            if "for pallia" in lower:
-                for_pallia_ys.append(y)
-            if "authorised" in lower or "authorized" in lower:
-                authorised_ys.append(y)
-
-        page.extract_text(visitor_text=_visit)
-
-        if for_pallia_ys and authorised_ys:
-            y_for = max(for_pallia_ys)
-            # Ignore unrelated authorisation labels above the footer.
-            footer_auth = [y for y in authorised_ys if y < y_for]
-            if not footer_auth:
-                raise ValueError("No Authorised Signatory anchor below the Pallia footer")
-            y_auth = max(footer_auth)
-            gap = y_for - y_auth
-            if gap >= 20:
-                margin = 4.0
-                x1 = page_width * 0.57
-                x2 = page_width - 15.0
-                return (x1, y_auth + margin, x2, y_for - margin)
-            if require_anchors:
-                raise SigningError("Both footer lines were found, but there is less than 20 points of space between them for the signature.")
+        return find_footer_box(reader.pages[0])
     except SigningError:
         raise
     except Exception as exc:
+        if require_anchors:
+            raise SigningError(str(exc)) from exc
         logger.warning("Sig-zone auto-detection failed ({}); using fallback.", exc)
-
-    if require_anchors:
-        raise SigningError(
-            "Could not locate both 'For Pallia Trans Logistics Private Limited' and "
-            "'Authorised Signatory' in the PDF footer."
-        )
-    return _SIG_BOX_FALLBACK
+        return _SIG_BOX_FALLBACK
 
 
 def inspect_signature_box(pdf_bytes: bytes) -> tuple[float, float, float, float]:
@@ -218,7 +183,10 @@ def sign_pdf_bytes(
         tmp_path.write_bytes(pdf_bytes)
         detected_box = (
             _find_signature_box(tmp_path, require_anchors=True)
-            if require_signature_anchors else None
+            if require_signature_anchors else (
+                _find_signature_box(tmp_path, require_anchors=True, single_page_only=False)
+                if sig_box is None else None
+            )
         )
 
         try:

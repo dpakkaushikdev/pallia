@@ -123,3 +123,30 @@ def test_footer_gap_too_small_reports_space_problem_instead_of_missing_lines(tmp
     pdf.save()
     with pytest.raises(SigningError, match="Both footer lines were found"):
         inspect_signature_box(path.read_bytes())
+
+
+@pytest.mark.parametrize("footer_y", [310.77, 302.85, 220.86])
+@pytest.mark.parametrize("company", ["For PALLIA TRANS LOGISTICS PRIVATE LIMITED",
+                                     "FOR PALLIA LOGISTICS PRIVATE LIMITED"])
+def test_mahindra_landscape_signature_tracks_left_footer(tmp_path, footer_y, company):
+    path = tmp_path / "mahindra.pdf"
+    pdf = canvas.Canvas(str(path), pagesize=(841.89, 595.28))
+    pdf.setFont("Helvetica", 6.6)
+    pdf.drawString(9.91, footer_y, company)
+    pdf.drawString(9.91, footer_y - 106.77, "Authorised Signatory")
+    pdf.drawString(450, 510, "Authorised Signatory")
+    pdf.save()
+    for find_box in (app_find_signature_box, helper_find_signature_box):
+        x1, y1, x2, y2 = find_box(path)
+        assert 9.91 < x1 < x2 < 841.89 / 2
+        assert y1 == pytest.approx(footer_y - 106.77 + 8)
+        assert y2 == pytest.approx(footer_y - 8)
+
+
+def test_billing_rejects_missing_footer_before_opening_dsc(tmp_path):
+    path = tmp_path / "no-footer.pdf"
+    pdf = canvas.Canvas(str(path))
+    pdf.drawString(40, 200, "Invoice without footer anchors")
+    pdf.save()
+    with pytest.raises(SigningError, match="Could not locate both"):
+        sign_pdf_bytes(path.read_bytes(), "unused")

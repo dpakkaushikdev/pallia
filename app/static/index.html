@@ -665,7 +665,7 @@
         <div class="stat-grid" id="billingSummaryGrid"></div>
         <div class="card" style="padding:18px 20px;">
           <div class="card-title">Sign Pallia invoices from ZIP</div>
-          <p style="color:#64748b;margin:0 0 12px;">Review the invoice PDFs in your ZIP, track each DSC signature, then download the signed ZIP.</p>
+          <p style="color:#64748b;margin:0 0 12px;">Review the invoice PDFs in your ZIP, track each DSC signature, then download the signed ZIP. Each signature follows the space between ?For Pallia Logistics Private Limited? (or ?For Pallia Trans Logistics?) and ?Authorised Signatory?, on the left or right of that invoice.</p>
           <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
             <input type="file" id="palliaInvoiceZip" accept=".zip,application/zip" onchange="resetZipInvoiceReview()" />
             <button class="btn" id="btnSignInvoiceZip" onclick="inspectInvoiceZip()">Review ZIP</button>
@@ -2845,7 +2845,7 @@ async function signInvoiceZip() {
     if (!health.ok) throw new Error("PalliaSignHelper is not responding.");
     const helper = await health.json();
     const version = (helper.version || "0").split(".").map(part => parseInt(part, 10) || 0);
-    if (version[0] < 1 || (version[0] === 1 && version[1] < 4)) throw new Error("Update PalliaSignHelper.exe to version 1.4.0 or newer to sign this invoice ZIP.");
+    if (version[0] < 1 || (version[0] === 1 && version[1] < 13)) throw new Error("Update PalliaSignHelper.exe to version 1.13.0 or newer for Mahindra and Tata footer placement.");
     status.textContent = "Starting DSC signing…";
     const response = await fetch(`${SIGN_HELPER_URL}/sign-zip`, {
       method: "POST", headers: { "Content-Type": "application/zip", "X-DSC-PIN": pin, "X-DSC-Token": selectedDsc("zipSignPin") }, body: file,
@@ -2906,7 +2906,7 @@ async function inspectInvoiceZip() {
     if (!health.ok) throw new Error("PalliaSignHelper is not responding.");
     const helper = await health.json();
     const version = (helper.version || "0").split(".").map(part => parseInt(part, 10) || 0);
-    if (version[0] < 1 || (version[0] === 1 && version[1] < 4)) throw new Error("Update PalliaSignHelper.exe to version 1.4.0 or newer to review and sign invoice PDFs.");
+    if (version[0] < 1 || (version[0] === 1 && version[1] < 13)) throw new Error("Update PalliaSignHelper.exe to version 1.13.0 or newer for Mahindra and Tata footer placement.");
     const response = await fetch(`${SIGN_HELPER_URL}/sign-zip/inspect`, {
       method: "POST", headers: { "Content-Type": "application/zip" }, body: file,
       signal: AbortSignal.timeout(2 * 60 * 1000)

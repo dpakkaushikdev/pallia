@@ -196,6 +196,12 @@ Helper **1.12.0** uses a plain black signature appearance with the signer name
 in capitals on two whole-word lines (for example, RAMASHANKAR above SHARMA),
 without the decorative red initial. Certificate details stay in the right column.
 
+Helper **1.13.0** also supports Mahindra landscape invoices with a left-side
+Pallia footer. It locates both footer lines per PDF and keeps the signature
+on their side, following changing vertical positions. Billing ZIP signing
+rejects missing or cramped footer anchors before opening the DSC session.
+Tata and Accounts right-side footer placement remains supported.
+
 ---
 
 ## Next step: fill in the real TMS selectors

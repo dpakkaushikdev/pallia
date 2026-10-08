@@ -67,64 +67,14 @@ def _build_appearance_image(signer_name: str, timestamp_str: str):
 # ── Signature-zone detection ─────────────────────────────────────────────────
 
 def _find_signature_box(pdf_path: Path) -> tuple[float, float, float, float]:
-    """Scan the first page for 'For Pallia Trans' and 'Authorised Signatory' text,
-    then return a box (x1, y1, x2, y2) that fits between them.
-
-    Falls back to _SIG_BOX_FALLBACK if either anchor cannot be located or the
-    detected gap is too small to hold the stamp (< 20 pts).
-    """
+    """Locate the signature space on the same side as both Pallia footer lines."""
     try:
         from pypdf import PdfReader
-        reader = PdfReader(str(pdf_path))
-        page = reader.pages[0]
-        page_width = float(page.mediabox.width)
-
-        for_pallia_ys: list[float] = []
-        authorised_ys: list[float] = []
-
-        def _visit(text: str, cm, tm, font_dict, font_size):
-            ctm = cm or (1, 0, 0, 1, 0, 0)
-            text_matrix = tm or (1, 0, 0, 1, 0, 0)
-            # Compose the current transform and text matrix; summing their
-            # translations fails on scaled/flipped invoice templates.
-            y = ctm[1] * text_matrix[4] + ctm[3] * text_matrix[5] + ctm[5]
-            t = text.strip()
-            if not t:
-                return
-            lower = t.casefold()
-            if "for pallia" in lower:
-                for_pallia_ys.append(y)
-            if "authorised" in lower or "authorized" in lower:
-                authorised_ys.append(y)
-
-        page.extract_text(visitor_text=_visit)
-
-        if for_pallia_ys and authorised_ys:
-            y_for = max(for_pallia_ys)
-            # Select the nearest "Authorised" label below the footer; these
-            # forms also have unrelated authorisation labels higher on page.
-            footer_auth = [y for y in authorised_ys if y < y_for]
-            if not footer_auth:
-                raise ValueError("No Authorised Signatory anchor below the Pallia footer")
-            y_auth = max(footer_auth)
-            gap = y_for - y_auth
-            logger.info(
-                "Sig anchors — For Pallia y={:.1f}, Auth Signatory y={:.1f}, gap={:.1f} pts",
-                y_for, y_auth, gap,
-            )
-            if gap >= 20:
-                margin = 4.0
-                x1 = page_width * 0.57
-                x2 = page_width - 15.0
-                box = (x1, y_auth + margin, x2, y_for - margin)
-                logger.info("Auto-detected sig box: {}", tuple(round(v, 1) for v in box))
-                return box
-            logger.warning("Detected gap {:.1f} pts is too small; using fallback box.", gap)
+        from signing_helper.footer import find_footer_box
+        return find_footer_box(PdfReader(str(pdf_path)).pages[0])
     except Exception as exc:
-        logger.warning("Sig-zone auto-detection failed ({}); using fallback box.", exc)
-
-    logger.warning("Using fallback SIG_BOX {}.", _SIG_BOX_FALLBACK)
-    return _SIG_BOX_FALLBACK
+        logger.warning("Sig-zone auto-detection failed ({}); using fallback.", exc)
+        return _SIG_BOX_FALLBACK
 
 
 # ── CN extraction from certificate ───────────────────────────────────────────
