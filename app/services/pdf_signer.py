@@ -154,8 +154,11 @@ def _find_signature_box(pdf_path: Path) -> tuple[float, float, float, float]:
         authorised_ys: list[float] = []
 
         def _visit(text: str, cm, tm, font_dict, font_size):
-            # Absolute y = current-transformation y + text-matrix y
-            y = (cm[5] if cm else 0.0) + tm[5]
+            ctm = cm or (1, 0, 0, 1, 0, 0)
+            text_matrix = tm or (1, 0, 0, 1, 0, 0)
+            # Compose the current transform and text matrix; summing their
+            # translations fails on scaled/flipped invoice templates.
+            y = ctm[1] * text_matrix[4] + ctm[3] * text_matrix[5] + ctm[5]
             t = text.strip()
             if not t:
                 return

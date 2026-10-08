@@ -25,10 +25,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from signer import SigningError, TokenNotFound, WrongPIN, sign_pdf_bytes
+from signer import SigningError, TokenNotFound, WrongPIN, inspect_signature_box, sign_pdf_bytes
 
 PORT = 7777
-VERSION = "1.6.0"   # 1.6: detect uppercase footer anchors and avoid footer overlap
+VERSION = "1.7.0"   # 1.7: strict per-PDF footer inspection for Accounts signing
 MAX_ZIP_BYTES = 100 * 1024 * 1024
 MAX_ZIP_ENTRIES = 500
 MAX_ZIP_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
@@ -79,6 +79,11 @@ class SignRequest(BaseModel):
     # Optional (x1, y1, x2, y2) in PDF points; EEE-Taxi sends this so the
     # stamp lands in its invoice footer instead of being auto-detected.
     sig_box: Optional[list[float]] = None
+    require_signature_anchors: bool = False
+
+
+class InspectPdfRequest(BaseModel):
+    pdf_b64: str
 
 
 class SignResponse(BaseModel):
@@ -106,7 +111,10 @@ def sign(body: SignRequest):
         return JSONResponse(status_code=400, content={"detail": "Invalid base64 PDF data."})
 
     try:
-        signed_bytes = sign_pdf_bytes(pdf_bytes, body.pin, sig_box=body.sig_box)
+        signed_bytes = sign_pdf_bytes(
+            pdf_bytes, body.pin, sig_box=body.sig_box,
+            require_signature_anchors=body.require_signature_anchors,
+        )
     except TokenNotFound as exc:
         return JSONResponse(status_code=503, content={"detail": str(exc)})
     except WrongPIN as exc:
@@ -115,6 +123,19 @@ def sign(body: SignRequest):
         return JSONResponse(status_code=500, content={"detail": str(exc)})
 
     return SignResponse(signed_pdf_b64=base64.b64encode(signed_bytes).decode())
+
+
+@app.post("/inspect-pdf")
+def inspect_pdf(body: InspectPdfRequest):
+    try:
+        pdf_bytes = base64.b64decode(body.pdf_b64, validate=True)
+    except Exception:
+        return JSONResponse(status_code=400, content={"detail": "Invalid base64 PDF data."})
+    try:
+        box = inspect_signature_box(pdf_bytes)
+    except SigningError as exc:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+    return {"signature_box": list(box)}
 
 
 async def _read_zip_request(request: Request) -> bytes:

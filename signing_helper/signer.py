@@ -160,7 +160,7 @@ def _build_appearance_image(signer_name: str, timestamp_str: str):
 
 # ── Signature-zone detection ──────────────────────────────────────────────────
 
-def _find_signature_box(pdf_path: Path) -> tuple[float, float, float, float]:
+def _find_signature_box(pdf_path: Path, require_anchors: bool = False) -> tuple[float, float, float, float]:
     try:
         from pypdf import PdfReader
         reader = PdfReader(str(pdf_path))
@@ -170,7 +170,11 @@ def _find_signature_box(pdf_path: Path) -> tuple[float, float, float, float]:
         authorised_ys: list[float] = []
 
         def _visit(text: str, cm, tm, font_dict, font_size):
-            y = (cm[5] if cm else 0.0) + tm[5]
+            ctm = cm or (1, 0, 0, 1, 0, 0)
+            text_matrix = tm or (1, 0, 0, 1, 0, 0)
+            # Compose the current transform and text matrix. Adding their
+            # translations alone fails on scaled/flipped invoice templates.
+            y = ctm[1] * text_matrix[4] + ctm[3] * text_matrix[5] + ctm[5]
             t = text.strip()
             if not t:
                 return
@@ -198,7 +202,21 @@ def _find_signature_box(pdf_path: Path) -> tuple[float, float, float, float]:
     except Exception as exc:
         logger.warning("Sig-zone auto-detection failed ({}); using fallback.", exc)
 
+    if require_anchors:
+        raise SigningError(
+            "Could not locate both 'For Pallia Trans Logistics Private Limited' and "
+            "'Authorised Signatory' in the PDF footer."
+        )
     return _SIG_BOX_FALLBACK
+
+
+def inspect_signature_box(pdf_bytes: bytes) -> tuple[float, float, float, float]:
+    """Find a Pallia footer signature box or fail instead of using a fallback."""
+    pdf_bytes = _strip_trailing_non_pdf_data(pdf_bytes)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir) / "inspect.pdf"
+        tmp_path.write_bytes(pdf_bytes)
+        return _find_signature_box(tmp_path, require_anchors=True)
 
 
 # ── CN extraction ─────────────────────────────────────────────────────────────
@@ -229,6 +247,7 @@ def sign_pdf_bytes(
     pdf_bytes: bytes,
     pin: str,
     sig_box: tuple[float, float, float, float] | list[float] | None = None,
+    require_signature_anchors: bool = False,
 ) -> bytes:
     """Sign PDF bytes using the USB DSC token. Returns signed PDF bytes.
 
@@ -297,9 +316,15 @@ def sign_pdf_bytes(
                     border_width=0,
                     background_opacity=1.0,
                 )
+                detected_box = (
+                    _find_signature_box(tmp_path, require_anchors=True)
+                    if require_signature_anchors else None
+                )
                 if sig_box is not None and len(sig_box) == 4:
                     sig_box = tuple(float(v) for v in sig_box)
                     logger.info("Using signature box from request: {}", sig_box)
+                elif detected_box is not None:
+                    sig_box = detected_box
                 else:
                     sig_box = _find_signature_box(tmp_path)
 

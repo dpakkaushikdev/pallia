@@ -860,10 +860,16 @@
 
     <!-- ───── ACCOUNTS TAB ───── -->
     <div class="tab-pane" id="pane-accounts">
-      <div class="card placeholder" style="padding:60px 20px;">
-        <div style="font-size:32px;margin-bottom:12px;">📊</div>
-        <h2 style="color:var(--text);margin-bottom:8px;">Accounts</h2>
-        Receivables, payables, ledger. Coming soon.
+      <div class="page-hd"><h1>Accounts</h1></div>
+      <div class="card" style="padding:18px 20px;">
+        <div class="card-title">Sign Accounts PDFs with DSC</div>
+        <p style="color:#64748b;margin:0 0 12px;">Select the account PDFs. Each signature is positioned between "For Pallia Trans Logistics Private Limited" and "Authorised Signatory" based on that PDF's layout. Files missing either footer line are flagged and won't be signed.</p>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <input type="file" id="accountsPdfFiles" accept=".pdf,application/pdf" multiple onchange="resetAccountsPdfReview()" />
+          <button class="btn" id="btnReviewAccountsPdfs" onclick="inspectAccountsPdfs()">Review PDFs</button>
+        </div>
+        <div id="accountsPdfStatus" class="meta" style="margin-top:10px;min-height:18px;" aria-live="polite"></div>
+        <div id="accountsPdfReview" class="hidden" style="margin-top:14px;"></div>
       </div>
     </div>
 
@@ -1355,6 +1361,20 @@
     <div class="modal-actions">
       <button class="btn secondary" onclick="closeZipSignModal()">Cancel</button>
       <button class="btn" id="btnZipSignConfirm" onclick="signInvoiceZip()">Sign ZIP</button>
+    </div>
+  </div>
+</div>
+
+<div id="accountsSignModal" class="modal-backdrop hidden">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h3>Sign Accounts PDFs with DSC</h3>
+    <p class="modal-sub">Enter your USB token PIN. It is sent only to PalliaSignHelper on this PC. Each PDF is checked again for both footer lines before signing.</p>
+    <label class="field">Token PIN</label>
+    <input type="password" id="accountsSignPin" placeholder="Enter PIN" autocomplete="off" onkeydown="if(event.key==='Enter')signAccountsPdfs()" />
+    <div id="accountsSignModalStatus" class="meta" style="margin-top:8px;min-height:18px;" aria-live="polite"></div>
+    <div class="modal-actions">
+      <button class="btn secondary" onclick="closeAccountsSignModal()">Cancel</button>
+      <button class="btn" id="btnAccountsSignConfirm" onclick="signAccountsPdfs()">Sign Ready PDFs</button>
     </div>
   </div>
 </div>
@@ -2859,6 +2879,149 @@ async function followZipSigningJob(jobId, sourceFile) {
   } catch (error) {
     status.textContent = error.message;
   }
+}
+
+let accountsPdfItems = [];
+let accountsPdfSigning = false;
+
+function resetAccountsPdfReview() {
+  accountsPdfItems.forEach(item => { if (item.downloadUrl) URL.revokeObjectURL(item.downloadUrl); });
+  accountsPdfItems = [];
+  $("#accountsPdfReview").innerHTML = "";
+  $("#accountsPdfReview").classList.add("hidden");
+  $("#accountsPdfStatus").textContent = "";
+}
+
+function renderAccountsPdfReview() {
+  const review = $("#accountsPdfReview");
+  const readyCount = accountsPdfItems.filter(item => item.status === "Ready").length;
+  const rows = accountsPdfItems.map((item, index) => {
+    const status = item.status === "Signing" ? `<span class="spinner"></span> Signing`
+      : `${escapeZipFilename(item.status)}${item.error ? ` — ${escapeZipFilename(item.error)}` : ""}${item.placement ? `<div class="meta" style="font-size:11px;">${escapeZipFilename(item.placement)}</div>` : ""}`;
+    const download = item.downloadUrl
+      ? `<a class="btn secondary sm" href="${item.downloadUrl}" download="${escapeZipFilename(item.signedName)}">Download Signed</a>` : "";
+    const cls = item.status === "Signed" ? "text-ok" : item.status === "Failed" ? "text-err" : "meta";
+    return `<tr><td>${escapeZipFilename(item.file.name)}</td><td id="accountsPdfStatus${index}" class="${cls}">${status}</td><td>${download}</td></tr>`;
+  }).join("");
+  review.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;"><strong>${accountsPdfItems.length} PDF${accountsPdfItems.length === 1 ? "" : "s"} reviewed</strong><button class="btn sm" ${readyCount && !accountsPdfSigning ? "" : "disabled"} onclick="openAccountsSignModal()">Sign ${readyCount} Ready PDF${readyCount === 1 ? "" : "s"} with DSC</button></div><div style="max-height:360px;overflow:auto;border:1px solid var(--line,#e2e8f0);border-radius:8px;"><table class="data-table"><thead><tr><th>PDF file</th><th>Status / signature placement</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  review.classList.remove("hidden");
+}
+
+async function inspectAccountsPdfs() {
+  const files = Array.from($("#accountsPdfFiles").files || []);
+  const button = $("#btnReviewAccountsPdfs");
+  const status = $("#accountsPdfStatus");
+  resetAccountsPdfReview();
+  if (!files.length) { status.textContent = "Select one or more PDFs from the Accounts PDF folder."; return; }
+  if (files.some(file => !file.name.toLowerCase().endsWith(".pdf"))) { status.textContent = "Select PDF files only."; return; }
+  if (files.length > 50 || files.reduce((sum, file) => sum + file.size, 0) > 100 * 1024 * 1024) {
+    status.textContent = "Select no more than 50 PDFs or 100 MB total."; return;
+  }
+  button.disabled = true;
+  status.textContent = "Checking Pallia footer lines and calculating each signature position…";
+  try {
+    const health = await fetch(`${SIGN_HELPER_URL}/health`, { signal: AbortSignal.timeout(2500) });
+    if (!health.ok) throw new Error("PalliaSignHelper is not responding.");
+    const helper = await health.json();
+    const version = (helper.version || "0").split(".").map(part => parseInt(part, 10) || 0);
+    if (version[0] < 1 || (version[0] === 1 && version[1] < 7)) throw new Error("Update PalliaSignHelper.exe to version 1.7.0 or newer for Accounts PDF signing.");
+    for (const file of files) {
+      const item = { file, status: "Checking footer" };
+      accountsPdfItems.push(item);
+      renderAccountsPdfReview();
+      try {
+        const pdfB64 = _arrayBufferToBase64(await file.arrayBuffer());
+        const response = await fetch(`${SIGN_HELPER_URL}/inspect-pdf`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pdf_b64: pdfB64 }), signal: AbortSignal.timeout(60000)
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || `Could not inspect ${file.name}.`);
+        item.signatureBox = result.signature_box;
+        item.status = "Ready";
+        item.placement = `Signature box: ${item.signatureBox.map(value => Number(value).toFixed(0)).join(", ")}`;
+      } catch (error) {
+        item.status = "Failed";
+        item.error = error.message;
+      }
+      renderAccountsPdfReview();
+    }
+    const ready = accountsPdfItems.filter(item => item.status === "Ready").length;
+    status.textContent = `${ready} PDF${ready === 1 ? "" : "s"} have both footer lines and are ready to sign. Others need fixing before signing.`;
+  } catch (error) {
+    status.textContent = error.name === "TimeoutError" ? "Timed out while checking the local signing helper." : error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function openAccountsSignModal() {
+  if (!accountsPdfItems.some(item => item.status === "Ready")) return;
+  $("#accountsSignPin").value = "";
+  $("#accountsSignModalStatus").textContent = "";
+  $("#accountsSignModal").classList.remove("hidden");
+  $("#accountsSignPin").focus();
+}
+
+function closeAccountsSignModal() { $("#accountsSignModal").classList.add("hidden"); }
+$("#accountsSignModal").addEventListener("click", closeAccountsSignModal);
+
+function accountsPdfBlob(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: "application/pdf" });
+}
+
+async function signAccountsPdfs() {
+  const pin = $("#accountsSignPin").value;
+  const modalStatus = $("#accountsSignModalStatus");
+  const button = $("#btnAccountsSignConfirm");
+  if (!pin) { modalStatus.textContent = "Enter the DSC token PIN."; return; }
+  button.disabled = true;
+  accountsPdfSigning = true;
+  $("#accountsPdfFiles").disabled = true;
+  $("#btnReviewAccountsPdfs").disabled = true;
+  const readyItems = accountsPdfItems.filter(item => item.status === "Ready");
+  closeAccountsSignModal();
+  for (const item of readyItems) {
+    item.status = "Signing";
+    renderAccountsPdfReview();
+    $("#accountsPdfStatus").textContent = `Signing ${item.file.name}… Keep the DSC token connected.`;
+    try {
+      const pdfB64 = _arrayBufferToBase64(await item.file.arrayBuffer());
+      const response = await fetch(`${SIGN_HELPER_URL}/sign`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pdf_b64: pdfB64, pin, sig_box: item.signatureBox, require_signature_anchors: true }),
+        signal: AbortSignal.timeout(2 * 60 * 1000)
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        item.status = "Failed";
+        item.error = result.detail || `Signing failed (${response.status}).`;
+        renderAccountsPdfReview();
+        if (response.status === 401 || response.status === 503) break;
+        continue;
+      }
+      item.status = "Signed";
+      item.signedName = item.file.name.replace(/\.pdf$/i, "") + "_signed.pdf";
+      item.downloadUrl = URL.createObjectURL(accountsPdfBlob(result.signed_pdf_b64));
+    } catch (error) {
+      item.status = "Failed";
+      item.error = error.name === "TimeoutError" ? "Signing timed out." : error.message;
+      renderAccountsPdfReview();
+      if (error.name === "TypeError") break;
+    }
+    renderAccountsPdfReview();
+  }
+  const signed = accountsPdfItems.filter(item => item.status === "Signed").length;
+  $("#accountsPdfStatus").textContent = `${signed} PDF${signed === 1 ? "" : "s"} signed. Download signed files from the table; originals remain unchanged.`;
+  $("#accountsSignPin").value = "";
+  accountsPdfSigning = false;
+  $("#accountsPdfFiles").disabled = false;
+  $("#btnReviewAccountsPdfs").disabled = false;
+  renderAccountsPdfReview();
+  button.disabled = false;
 }
 
 function openPinModal() {
