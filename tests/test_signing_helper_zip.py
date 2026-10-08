@@ -218,3 +218,34 @@ def test_accounts_sign_endpoint_enforces_pdf_limit_without_review():
                                headers={"X-DSC-PIN": "1234"})
     assert response.status_code == 400
     assert "no more than 50 PDFs" in response.json()["detail"]
+
+
+def test_accounts_zip_preserves_selected_device_and_stops_on_selection_error(monkeypatch):
+    calls = []
+
+    def sign(pdf, pin, require_signature_anchors=False, token_serial=None):
+        calls.append(token_serial)
+        raise signing_helper_main.CertificateSelectionError("Selected DSC is disconnected")
+
+    monkeypatch.setattr(signing_helper_main, "sign_pdf_bytes", sign)
+    source = _zip_bytes([("one.pdf", _accounts_pdf()), ("two.pdf", _accounts_pdf())])
+    with TestClient(signing_helper_main.app) as client:
+        started = client.post("/accounts-zip", content=source,
+                              headers={"X-DSC-PIN": "pin", "X-DSC-Token": "accounts"})
+        status = client.get(f"/sign-zip/{started.json()['job_id']}").json()
+    assert calls == ["accounts"]
+    assert status["signing_stopped"] == "Selected DSC is disconnected"
+    assert all(item["status"] == "Failed" for item in status["files"])
+
+
+def test_single_pdf_selection_error_is_returned_as_conflict(monkeypatch):
+    def sign(pdf, pin, sig_box=None, require_signature_anchors=False, token_serial=None):
+        assert token_serial == "eee"
+        raise signing_helper_main.CertificateSelectionError("Multiple signing identities")
+
+    monkeypatch.setattr(signing_helper_main, "sign_pdf_bytes", sign)
+    with TestClient(signing_helper_main.app) as client:
+        response = client.post("/sign", json={"pdf_b64": base64.b64encode(_accounts_pdf()).decode(),
+                                             "pin": "pin", "token_serial": "eee"})
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Multiple signing identities"

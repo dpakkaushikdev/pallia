@@ -2768,7 +2768,56 @@ async function generateInvoice() {
 
 const SIGN_HELPER_URL = "http://127.0.0.1:7777";
 
+const dscFields = {
+  zipSignPin: "pallia-billing", pinInput: "pallia-billing",
+  accountsSignPin: "pallia-accounts", eetPin: "eee"
+};
+for (const [inputId, profile] of Object.entries(dscFields)) {
+  const row = document.createElement("div");
+  row.style.margin = "12px 0";
+  const label = document.createElement("label");
+  label.textContent = "DSC for " + {"pallia-billing":"Pallia Billing", "pallia-accounts":"Pallia Accounts", eee:"EEE"}[profile];
+  label.htmlFor = inputId + "Token";
+  const select = document.createElement("select");
+  select.id = inputId + "Token";
+  select.style.width = "100%";
+  select.append(new Option("Refresh to select a connected DSC", ""));
+  const refresh = document.createElement("button");
+  refresh.type = "button";
+  refresh.className = "btn sm";
+  refresh.textContent = "Refresh DSC list";
+  refresh.onclick = () => refreshDscTokens(inputId);
+  select.onchange = () => localStorage.setItem("dsc-device-" + profile, select.value);
+  row.append(label, select, refresh);
+  document.getElementById(inputId).after(row);
+}
+
+async function refreshDscTokens(inputId) {
+  const select = document.getElementById(inputId + "Token");
+  select.disabled = true;
+  try {
+    const response = await fetch(`${SIGN_HELPER_URL}/tokens`, {signal: AbortSignal.timeout(15000)});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "Update the signing helper to v1.11.0.");
+    const saved = localStorage.getItem("dsc-device-" + dscFields[inputId]);
+    select.replaceChildren(new Option("Select the intended DSC", ""));
+    for (const token of result.tokens) select.append(new Option(`${token.label} (${token.serial})`, token.serial));
+    if (saved && result.tokens.some(token => token.serial === saved)) select.value = saved;
+    if (!result.tokens.length) select.options[0].textContent = "Connect the DSC and refresh";
+  } catch (error) {
+    select.replaceChildren(new Option(error.message, ""));
+  } finally { select.disabled = false; }
+}
+
+function selectedDsc(inputId) {
+  const select = document.getElementById(inputId + "Token");
+  if (select.disabled || !select.value) throw new Error("Select the intended DSC device before signing.");
+  return select.value;
+}
+
+
 function openZipSignModal() {
+  refreshDscTokens("zipSignPin");
   const file = $("#palliaInvoiceZip").files[0];
   const status = $("#zipSignStatus");
   if (!file) { status.textContent = "Choose a ZIP file first."; return; }
@@ -2799,7 +2848,7 @@ async function signInvoiceZip() {
     if (version[0] < 1 || (version[0] === 1 && version[1] < 4)) throw new Error("Update PalliaSignHelper.exe to version 1.4.0 or newer to sign this invoice ZIP.");
     status.textContent = "Starting DSC signing…";
     const response = await fetch(`${SIGN_HELPER_URL}/sign-zip`, {
-      method: "POST", headers: { "Content-Type": "application/zip", "X-DSC-PIN": pin }, body: file,
+      method: "POST", headers: { "Content-Type": "application/zip", "X-DSC-PIN": pin, "X-DSC-Token": selectedDsc("zipSignPin") }, body: file,
       signal: AbortSignal.timeout(10 * 60 * 1000)
     });
     if (!response.ok) {
@@ -3034,6 +3083,7 @@ async function inspectAccountsPdfs() {
 }
 
 function openAccountsSignModal() {
+  refreshDscTokens("accountsSignPin");
   if (!accountsPdfItems.some(item => item.status === "Ready")) return;
   $("#accountsSignPin").value = "";
   $("#accountsSignModalStatus").textContent = "";
@@ -3061,12 +3111,12 @@ function renderAccountsZipDownloads() {
   }).join("");
 }
 
-async function signAccountsZip(group, pin) {
+async function signAccountsZip(group, pin, tokenSerial) {
   group.error = "";
   $("#accountsPdfStatus").textContent = `Signing ${group.file.name}… Keep the DSC token connected.`;
   try {
     const response = await fetch(`${SIGN_HELPER_URL}/accounts-zip`, {
-      method: "POST", headers: { "Content-Type": "application/zip", "X-DSC-PIN": pin }, body: group.file,
+      method: "POST", headers: { "Content-Type": "application/zip", "X-DSC-PIN": pin, "X-DSC-Token": tokenSerial }, body: group.file,
       signal: AbortSignal.timeout(2 * 60 * 1000)
     });
     const started = await response.json();
@@ -3109,6 +3159,9 @@ async function signAccountsPdfs() {
   const modalStatus = $("#accountsSignModalStatus");
   const button = $("#btnAccountsSignConfirm");
   if (!pin) { modalStatus.textContent = "Enter the DSC token PIN."; return; }
+  let tokenSerial;
+  try { tokenSerial = selectedDsc("accountsSignPin"); }
+  catch (error) { modalStatus.textContent = error.message; return; }
   button.disabled = true;
   accountsPdfSigning = true;
   $("#accountsPdfFiles").disabled = true;
@@ -3124,7 +3177,7 @@ async function signAccountsPdfs() {
       const pdfB64 = _arrayBufferToBase64(await item.file.arrayBuffer());
       const response = await fetch(`${SIGN_HELPER_URL}/sign`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pdf_b64: pdfB64, pin, sig_box: item.signatureBox, require_signature_anchors: true }),
+        body: JSON.stringify({ pdf_b64: pdfB64, pin, token_serial: tokenSerial, sig_box: item.signatureBox, require_signature_anchors: true }),
         signal: AbortSignal.timeout(2 * 60 * 1000)
       });
       const result = await response.json();
@@ -3132,7 +3185,7 @@ async function signAccountsPdfs() {
         item.status = "Failed";
         item.error = result.detail || `Signing failed (${response.status}).`;
         renderAccountsPdfReview();
-        if (response.status === 401 || response.status === 503) { signingStopped = true; break; }
+        if (response.status === 401 || response.status === 503 || response.status === 409) { signingStopped = true; break; }
         continue;
       }
       item.status = "Signed";
@@ -3148,7 +3201,7 @@ async function signAccountsPdfs() {
   }
   for (const group of accountsZipGroups) {
     if (signingStopped) break;
-    if (group.items.some(item => item.status === "Ready")) signingStopped = await signAccountsZip(group, pin);
+    if (group.items.some(item => item.status === "Ready")) signingStopped = await signAccountsZip(group, pin, tokenSerial);
   }
   const signed = accountsPdfItems.filter(item => item.status === "Signed").length;
   $("#accountsPdfStatus").textContent = `${signed} PDF${signed === 1 ? "" : "s"} signed. Download your ZIPs below, or standalone signed PDFs from the table.`;
@@ -3162,6 +3215,7 @@ async function signAccountsPdfs() {
 }
 
 function openPinModal() {
+  refreshDscTokens("pinInput");
   $("#pinInput").value = ""; $("#pinStatus").textContent = ""; $("#btnPinSign").disabled = false;
   $("#pinModal").classList.remove("hidden");
   setTimeout(() => $("#pinInput").focus(), 80);
@@ -3211,7 +3265,7 @@ async function doSignPdf() {
     const signRes = await fetch(`${SIGN_HELPER_URL}/sign`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pdf_b64: pdfB64, pin }),
+      body: JSON.stringify({ pdf_b64: pdfB64, pin, token_serial: selectedDsc("pinInput") }),
     });
     if (signRes.status === 401) throw new Error("Incorrect PIN. Please try again.");
     if (signRes.status === 503) throw new Error("USB token not found. Make sure the DSC pendrive is connected.");
@@ -3293,6 +3347,7 @@ let _eetCalcFilename = "calculated.csv";
 let _eetProfile = "pwc";
 
 function eetTogglePinField() {
+  refreshDscTokens("eetPin");
   const isDummy = document.getElementById("eetSignModeDummy").checked;
   document.getElementById("eetPinGroup").style.display = isDummy ? "none" : "";
 }
@@ -3401,6 +3456,11 @@ async function eetProceed() {
   }
   if (signMode === "usb" && !pin) { alert("Please enter the DSC PIN for USB signing."); return; }
 
+  let tokenSerial = "";
+  if (signMode === "usb") {
+    try { tokenSerial = selectedDsc("eetPin"); }
+    catch (error) { alert(error.message); return; }
+  }
   const kept = eetKeptRows();
   if (!_eetReviewRows.length) { alert("The trip check has not loaded yet. Wait a moment and try again."); return; }
   if (!kept.length) { alert("Every trip is removed. Undo at least one."); return; }
@@ -3417,6 +3477,7 @@ async function eetProceed() {
   _eetBatchId = null;
   eetResetSignState();
   _eetPin = signMode === "usb" ? pin : "";
+  _eetTokenSerial = tokenSerial;
   document.getElementById("eetInvoiceList").innerHTML = "";
   ["eetDownloadAllBtn","eetDownloadP2pBtn","eetDownloadRentalBtn"].forEach(id => {
     document.getElementById(id).style.display = "none";
@@ -3555,6 +3616,7 @@ function authHeaders() {
 // the signed PDF back. One invoice at a time — the token handles one op at once.
 
 let _eetPin = "";
+let _eetTokenSerial = "";
 let _eetDriving = false;        // generate/sign driver currently running
 let _eetSignHalted = false;     // stopped on wrong PIN / missing token / helper down
 let _eetSignCurrent = null;     // invoice id being signed right now
@@ -3610,11 +3672,12 @@ async function eetSignOne(inv) {
     signRes = await fetch(`${SIGN_HELPER_URL}/sign`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pdf_b64: pdfB64, pin: _eetPin, sig_box: inv.sig_box || null }),
+      body: JSON.stringify({ pdf_b64: pdfB64, pin: _eetPin, token_serial: _eetTokenSerial, sig_box: inv.sig_box || null }),
     });
   } catch (_) {
     throw eetFatalSignError("Signing helper stopped responding. Start PalliaSignHelper.exe and click Retry.");
   }
+  if (signRes.status === 409) { const err = await signRes.json(); throw eetFatalSignError(err.detail); }
   if (signRes.status === 401) throw eetFatalSignError("Incorrect DSC PIN. Correct the PIN above and click Retry.");
   if (signRes.status === 503) throw eetFatalSignError("USB token not found. Plug in the DSC pendrive and click Retry.");
   if (!signRes.ok) {
@@ -3714,6 +3777,8 @@ function eetRetrySigning() {
   const pin = document.getElementById("eetPin").value;
   if (pin) _eetPin = pin;
   if (!_eetPin) { alert("Enter the DSC PIN first."); return; }
+  try { _eetTokenSerial = selectedDsc("eetPin"); }
+  catch (error) { alert(error.message); return; }
   _eetSignHalted = false;
   eetSetSignNote(`<span class="spinner"></span> Retrying...`);
   if (!_eetPollTimer) _eetPollTimer = setInterval(eetPollBatch, 2000);

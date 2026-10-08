@@ -18,8 +18,6 @@ from pathlib import Path
 from loguru import logger
 
 PKCS11_LIB = r"C:\Windows\System32\CryptoIDA_pkcs11.dll"
-CERT_LABEL  = "cont_333741d242fc5a8c459f"   # update after DSC renewal
-SLOT_NO     = 0
 
 # A4 lower-right authorisation box, in PDF points (origin at bottom-left).
 _SIG_BOX_FALLBACK = (337, 141, 580, 198)
@@ -35,6 +33,10 @@ class WrongPIN(Exception):
 
 class SigningError(Exception):
     """Generic signing failure."""
+
+
+class CertificateSelectionError(SigningError):
+    """Token certificates do not identify one usable signing identity."""
 
 
 def _strip_trailing_non_pdf_data(pdf_bytes: bytes) -> bytes:
@@ -198,11 +200,13 @@ def _find_signature_box(pdf_path: Path, require_anchors: bool = False) -> tuple[
                 raise ValueError("No Authorised Signatory anchor below the Pallia footer")
             y_auth = max(footer_auth)
             gap = y_for - y_auth
-            if gap >= 30:
+            if gap >= 20:
                 margin = 4.0
                 x1 = page_width * 0.57
                 x2 = page_width - 15.0
                 return (x1, y_auth + margin, x2, y_for - margin)
+            if require_anchors:
+                raise SigningError("Both footer lines were found, but there is less than 20 points of space between them for the signature.")
     except SigningError:
         raise
     except Exception as exc:
@@ -254,6 +258,7 @@ def sign_pdf_bytes(
     pin: str,
     sig_box: tuple[float, float, float, float] | list[float] | None = None,
     require_signature_anchors: bool = False,
+    token_serial: str | None = None,
 ) -> bytes:
     """Sign PDF bytes using the USB DSC token. Returns signed PDF bytes.
 
@@ -278,20 +283,24 @@ def sign_pdf_bytes(
         try:
             from pyhanko.sign import signers
             from pyhanko.sign.fields import SigFieldSpec
-            from pyhanko.sign.pkcs11 import PKCS11Signer, open_pkcs11_session
+            from pyhanko.sign.pkcs11 import PKCS11Signer
             from pyhanko.sign.signers.pdf_signer import PdfSigner
             from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
             from pyhanko.pdf_utils.images import PdfImage
             from pyhanko.stamp import StaticStampStyle
+            try:
+                from .token_certificate import select_signing_certificate
+                from .token_device import open_token_session
+            except ImportError:
+                from token_certificate import select_signing_certificate
+                from token_device import open_token_session
         except ImportError as exc:
             raise SigningError("pyhanko not installed.") from exc
 
         try:
-            session_ctx = open_pkcs11_session(
-                lib_location=PKCS11_LIB,
-                slot_no=SLOT_NO,
-                user_pin=pin,
-            )
+            session_ctx = open_token_session(PKCS11_LIB, pin, token_serial)
+        except ValueError as exc:
+            raise CertificateSelectionError(str(exc)) from exc
         except Exception as exc:
             err = str(exc)
             if any(k in err for k in ("CKR_TOKEN_NOT_PRESENT", "CKR_SLOT_ID_INVALID",
@@ -303,16 +312,13 @@ def sign_pdf_bytes(
 
         try:
             with session_ctx as session:
-                cert_label_to_use: str | None = CERT_LABEL
                 try:
-                    cms_signer = PKCS11Signer(pkcs11_session=session, cert_label=cert_label_to_use)
-                    _ = cms_signer.signing_cert
-                except Exception as probe_exc:
-                    if "Could not find certificate" in str(probe_exc):
-                        cert_label_to_use = None
-                        cms_signer = PKCS11Signer(pkcs11_session=session, cert_label=None)
-                    else:
-                        raise
+                    cert, key_selector, chain = select_signing_certificate(session)
+                except ValueError as exc:
+                    raise CertificateSelectionError(str(exc)) from exc
+                cms_signer = PKCS11Signer(pkcs11_session=session, signing_cert=cert,
+                                          ca_chain=chain, **key_selector)
+                _ = cms_signer.signing_cert
 
                 try:
                     signer_name = _extract_cn(cms_signer.signing_cert)

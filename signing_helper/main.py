@@ -25,10 +25,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from signer import SigningError, TokenNotFound, WrongPIN, inspect_signature_box, sign_pdf_bytes
+from signer import CertificateSelectionError, SigningError, TokenNotFound, WrongPIN, inspect_signature_box, sign_pdf_bytes
 
 PORT = 7777
-VERSION = "1.10.0"   # 1.10: Accounts ZIP output with a report of unsigned PDFs
+VERSION = "1.11.0"   # 1.11: select the current DSC certificate and fit compact footers
 MAX_ZIP_BYTES = 100 * 1024 * 1024
 MAX_ZIP_ENTRIES = 500
 MAX_ZIP_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
@@ -80,6 +80,7 @@ class SignRequest(BaseModel):
     # stamp lands in its invoice footer instead of being auto-detected.
     sig_box: Optional[list[float]] = None
     require_signature_anchors: bool = False
+    token_serial: Optional[str] = None
 
 
 class InspectPdfRequest(BaseModel):
@@ -100,7 +101,19 @@ def health():
         "port": PORT,
         "version": VERSION,
         "supports_sig_box": True,
+        "supports_token_selection": True,
     }
+
+
+@app.get("/tokens")
+def list_tokens():
+    from token_device import connected_tokens, token_serial
+    from signer import PKCS11_LIB
+    try:
+        return {"tokens": [{"serial": token_serial(token), "label": token.label.strip()}
+                           for token in connected_tokens(PKCS11_LIB)]}
+    except Exception:
+        return JSONResponse(status_code=503, content={"detail": "Cannot read DSC devices. Check the USB connection and token driver."})
 
 
 @app.post("/sign", response_model=SignResponse)
@@ -114,11 +127,14 @@ def sign(body: SignRequest):
         signed_bytes = sign_pdf_bytes(
             pdf_bytes, body.pin, sig_box=body.sig_box,
             require_signature_anchors=body.require_signature_anchors,
+            **({"token_serial": body.token_serial} if body.token_serial else {}),
         )
     except TokenNotFound as exc:
         return JSONResponse(status_code=503, content={"detail": str(exc)})
     except WrongPIN as exc:
         return JSONResponse(status_code=401, content={"detail": str(exc)})
+    except CertificateSelectionError as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
     except SigningError as exc:
         return JSONResponse(status_code=500, content={"detail": str(exc)})
 
@@ -188,7 +204,7 @@ def _set_zip_job_file(job_id: str, index: int, status: str, error: str | None = 
             job["files"][index]["error"] = error
 
 
-def _process_zip_job(job_id: str, archive_bytes: bytes, pin: str, accounts: bool = False) -> None:
+def _process_zip_job(job_id: str, archive_bytes: bytes, pin: str, accounts: bool = False, token_serial: str | None = None) -> None:
     job = _zip_jobs[job_id]
     stop_error = None
     try:
@@ -211,8 +227,8 @@ def _process_zip_job(job_id: str, archive_bytes: bytes, pin: str, accounts: bool
                                 if stop_error:
                                     raise SigningError(f"Signing stopped: {stop_error}")
                                 _set_zip_job_file(job_id, index, "Signing")
-                                content = sign_pdf_bytes(content, pin, require_signature_anchors=True)
-                            except (TokenNotFound, WrongPIN) as exc:
+                                content = sign_pdf_bytes(content, pin, require_signature_anchors=True, **({"token_serial": token_serial} if token_serial else {}))
+                            except (TokenNotFound, WrongPIN, CertificateSelectionError) as exc:
                                 stop_error = str(exc)
                                 _set_zip_job_file(job_id, index, "Failed", stop_error)
                             except SigningError as exc:
@@ -221,7 +237,7 @@ def _process_zip_job(job_id: str, archive_bytes: bytes, pin: str, accounts: bool
                                 _set_zip_job_file(job_id, index, "Signed")
                         else:
                             _set_zip_job_file(job_id, index, "Signing")
-                            content = sign_pdf_bytes(source.read(item), pin)
+                            content = sign_pdf_bytes(source.read(item), pin, **({"token_serial": token_serial} if token_serial else {}))
                             _set_zip_job_file(job_id, index, "Signed")
                     else:
                         content = source.read(item)
@@ -310,17 +326,17 @@ async def inspect_accounts_zip(request: Request, x_manifest_only: str = Header(d
 
 
 @app.post("/sign-zip")
-async def sign_zip(request: Request, background_tasks: BackgroundTasks, x_dsc_pin: str = Header(default="")):
+async def sign_zip(request: Request, background_tasks: BackgroundTasks, x_dsc_pin: str = Header(default=""), x_dsc_token: str = Header(default="")):
     """Start local batch signing; status is available per invoice while it runs."""
-    return await _start_zip_job(request, background_tasks, x_dsc_pin)
+    return await _start_zip_job(request, background_tasks, x_dsc_pin, token_serial=x_dsc_token)
 
 
 @app.post("/accounts-zip")
-async def sign_accounts_zip(request: Request, background_tasks: BackgroundTasks, x_dsc_pin: str = Header(default="")):
-    return await _start_zip_job(request, background_tasks, x_dsc_pin, accounts=True)
+async def sign_accounts_zip(request: Request, background_tasks: BackgroundTasks, x_dsc_pin: str = Header(default=""), x_dsc_token: str = Header(default="")):
+    return await _start_zip_job(request, background_tasks, x_dsc_pin, accounts=True, token_serial=x_dsc_token)
 
 
-async def _start_zip_job(request: Request, background_tasks: BackgroundTasks, x_dsc_pin: str, accounts: bool = False):
+async def _start_zip_job(request: Request, background_tasks: BackgroundTasks, x_dsc_pin: str, accounts: bool = False, token_serial: str | None = None):
     if not x_dsc_pin:
         return JSONResponse(status_code=400, content={"detail": "Enter the DSC token PIN."})
     try:
@@ -351,9 +367,9 @@ async def _start_zip_job(request: Request, background_tasks: BackgroundTasks, x_
             "pdf_names": pdf_names, "result": None, "created_at": now,
         }
     if accounts:
-        background_tasks.add_task(_process_zip_job, job_id, archive_bytes, x_dsc_pin, True)
+        background_tasks.add_task(_process_zip_job, job_id, archive_bytes, x_dsc_pin, True, token_serial)
     else:
-        background_tasks.add_task(_process_zip_job, job_id, archive_bytes, x_dsc_pin)
+        background_tasks.add_task(_process_zip_job, job_id, archive_bytes, x_dsc_pin, False, token_serial)
     return JSONResponse(status_code=202, content={"job_id": job_id, "state": "running"})
 
 

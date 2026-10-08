@@ -182,6 +182,16 @@ Accounts accepts up to 50 PDFs and 100 MB of PDF contents per review.
 After replacing the helper executable, stop the old tray helper and start
 the new executable so the browser uses the updated version.
 
+Helper **1.11.0** also supports compact Accounts footers with at least
+20 points between the two lines. DSC selection uses a current signing
+certificate with a matching private key, excluding issuer certificates,
+expired certificates and encryption-only certificates. If multiple signing
+identities remain, it reports an explicit selection error instead of guessing.
+The PIN forms offer a connected DSC device selector, remembered separately
+for EEE, Pallia Billing and Pallia Accounts on this browser. Select the intended
+device and refresh the list after swapping tokens. A disconnected saved
+device never falls back to another token or sends its PIN to another device.
+
 ---
 
 ## Next step: fill in the real TMS selectors

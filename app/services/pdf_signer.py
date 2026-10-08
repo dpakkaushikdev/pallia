@@ -142,7 +142,7 @@ def _find_signature_box(pdf_path: Path) -> tuple[float, float, float, float]:
     then return a box (x1, y1, x2, y2) that fits between them.
 
     Falls back to _SIG_BOX_FALLBACK if either anchor cannot be located or the
-    detected gap is too small to hold the stamp (< 30 pts).
+    detected gap is too small to hold the stamp (< 20 pts).
     """
     try:
         from pypdf import PdfReader
@@ -183,7 +183,7 @@ def _find_signature_box(pdf_path: Path) -> tuple[float, float, float, float]:
                 "Sig anchors — For Pallia y={:.1f}, Auth Signatory y={:.1f}, gap={:.1f} pts",
                 y_for, y_auth, gap,
             )
-            if gap >= 30:
+            if gap >= 20:
                 margin = 4.0
                 x1 = page_width * 0.57
                 x2 = page_width - 15.0
@@ -311,46 +311,15 @@ def sign_invoice_pdf(pdf_path: Path, pin: str) -> Path:
 
     try:
         with session_ctx as session:
-            # Try the configured label first; if not found, fall back to auto-discover.
-            cert_label_to_use: str | None = CERT_LABEL
+            from signing_helper.token_certificate import select_signing_certificate
+
             try:
-                cms_signer = PKCS11Signer(
-                    pkcs11_session=session,
-                    cert_label=cert_label_to_use,
-                )
-                # Force cert resolution now so we catch label-not-found here.
-                _ = cms_signer.signing_cert
-            except Exception as probe_exc:
-                if "Could not find certificate" in str(probe_exc):
-                    # DSC was likely renewed — enumerate and use the first available cert.
-                    try:
-                        import pkcs11 as _p11
-                        available: list[str] = []
-                        for obj in session.get_objects(
-                            {_p11.Attribute.CLASS: _p11.ObjectClass.CERTIFICATE}
-                        ):
-                            try:
-                                lbl = obj[_p11.Attribute.LABEL]
-                                available.append(
-                                    lbl if isinstance(lbl, str)
-                                    else lbl.decode("utf-8", errors="replace")
-                                )
-                            except Exception:
-                                pass
-                        logger.warning(
-                            "Cert label '{}' not found on token. "
-                            "Available labels: {}. Using auto-discover.",
-                            CERT_LABEL, available or ["<none found>"],
-                        )
-                    except Exception:
-                        logger.warning(
-                            "Cert label '{}' not found and could not enumerate token certs.",
-                            CERT_LABEL,
-                        )
-                    cert_label_to_use = None
-                    cms_signer = PKCS11Signer(pkcs11_session=session, cert_label=None)
-                else:
-                    raise
+                cert, key_selector, chain = select_signing_certificate(session, CERT_LABEL)
+            except ValueError as exc:
+                raise SigningError(str(exc)) from exc
+            cms_signer = PKCS11Signer(pkcs11_session=session, signing_cert=cert,
+                                      ca_chain=chain, **key_selector)
+            _ = cms_signer.signing_cert
 
             try:
                 signer_name = _extract_cn(cms_signer.signing_cert)

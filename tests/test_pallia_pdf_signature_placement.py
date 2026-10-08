@@ -100,3 +100,26 @@ def test_accounts_rejects_multiple_pages_in_review_and_before_token_signing(tmp_
     ):
         with pytest.raises(SigningError, match=f"This PDF has {page_count} pages"):
             action()
+
+
+def test_compact_footer_gap_fits_signature_between_both_lines(tmp_path):
+    path = tmp_path / "compact-footer.pdf"
+    pdf = canvas.Canvas(str(path), pagesize=A4)
+    pdf.setFont("Helvetica", 6)
+    pdf.drawString(360, 40.69, "For Pallia Trans Logistics Private Limited")
+    pdf.drawString(360, 14.25, "Authorised Signatory")
+    pdf.save()
+    for box in (app_find_signature_box(path), helper_find_signature_box(path, require_anchors=True)):
+        assert abs(box[1] - 18.25) < 0.01
+        assert abs(box[3] - 36.69) < 0.01
+        assert 14.25 < box[1] < box[3] < 40.69
+
+
+def test_footer_gap_too_small_reports_space_problem_instead_of_missing_lines(tmp_path):
+    path = tmp_path / "tiny-footer.pdf"
+    pdf = canvas.Canvas(str(path), pagesize=A4)
+    pdf.drawString(360, 40, "For Pallia Trans Logistics Private Limited")
+    pdf.drawString(360, 25, "Authorised Signatory")
+    pdf.save()
+    with pytest.raises(SigningError, match="Both footer lines were found"):
+        inspect_signature_box(path.read_bytes())
