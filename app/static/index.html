@@ -4717,7 +4717,7 @@ const EY_FIELDS = {
   eyP2pFields: { p2p_per_minute: "Per minute (Rs)", p2p_per_km: "Per km (Rs)", p2p_grace_minutes: "Grace minutes", p2p_minimum: "Minimum fare (Rs)" },
   eyRentalFields: { extra_km_rate: "Extra km (Rs)", extra_minute_rate: "Extra minute (Rs)", rental_grace_minutes: "Extra-time grace minutes", night_charge: "Rental night charge (Rs)", night_start_hour: "Night starts hour (0–23)", night_start_minute: "Night starts minute (0–59)", night_end_hour: "Night ends hour (0–23)", night_end_minute: "Night ends minute (0–59)" },
   eyUpgradeFields: { medium_upgrade_minutes: "4/40 to 6/60 after total minutes", large_upgrade_minutes: "Upgrade to 8/80 after total minutes", large_upgrade_kms: "Upgrade to 8/80 after total km" },
-  eyTallyFields: { tally_company: "Exact Tally company name", tally_voucher_type: "Tally voucher type", tally_registration: "GST registration name", tally_sales_local: "Local rental ledger", tally_sales_interstate: "Interstate rental ledger", tally_toll: "Toll and parking ledger", tally_cgst: "CGST ledger", tally_sgst: "SGST ledger", tally_igst: "IGST ledger" },
+  eyTallyFields: { tally_company: "Exact Tally company name", tally_voucher_type: "Tally voucher type", tally_registration: "GST registration name", tally_sales_local: "Local rental ledger", tally_sales_interstate: "Interstate rental ledger", tally_toll: "Local toll and parking ledger", tally_toll_interstate: "Interstate toll and parking ledger", tally_cgst: "CGST ledger", tally_sgst: "SGST ledger", tally_igst: "IGST ledger" },
 };
 function eyMessage(text, ok = false) {
   $("#eyMsg").className = "extraction-note " + (ok ? "ok" : "err");

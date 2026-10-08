@@ -17,6 +17,8 @@ def ey_tally_ledgers(rates):
         sales_local=rates.tally_sales_local,
         sales_interstate=rates.tally_sales_interstate,
         toll=rates.tally_toll,
+        toll_interstate=rates.tally_toll_interstate,
+        include_cost_centres=False,
         cgst=rates.tally_cgst,
         sgst=rates.tally_sgst,
         igst=rates.tally_igst,

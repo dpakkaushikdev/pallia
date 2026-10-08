@@ -42,6 +42,7 @@ def _entries(voucher: ET.Element) -> dict[str, Decimal]:
 def test_envelope_targets_the_tally_company():
     root = _parse(render_tally_xml([_voucher()]))
     assert root.findtext("HEADER/TALLYREQUEST") == "Import Data"
+    assert root.findtext(".//REPORTNAME") == "Vouchers"
     assert root.findtext(".//SVCURRENTCOMPANY") == DEFAULT_LEDGERS.company
 
 

@@ -30,6 +30,8 @@ from app.services.ey_clients import ey_tax
 from app.services.ey_csv import parse_ey_csv
 from app.services.ey_fares import calculate_ey_fare, fare_description, apply_ey_fares, generate_ey_calc_csv, parse_ey_overrides
 from app.services.ey_rates import EyRateCard, get_ey_rates, save_ey_rates
+from app.services.ey_tally import ey_tally_ledgers
+from app.services.tally_export import render_tally_xml
 from tests.test_eee_taxi_csv import HEADER, TRIP_1
 
 
@@ -371,6 +373,8 @@ def test_ey_full_flow_pdf_xml_snapshot_and_separate_listing(ey_client):
         "Ernst & Young LLP", "CAR RENTAL -  LOCAL( 5%)", "Toll and Parking",
         "OUTPUT CGST @ 2.5.%", "OUTPUT SGST @ 2.5%",
     ]
+    assert xml.findtext(".//REPORTNAME") == "Vouchers"
+    assert not xml.findall(".//CATEGORYALLOCATIONS.LIST")
     assert xml.findtext(".//BASICSHIPDOCUMENTNO") == "220426-NCR-0418"
     assert xml.findtext(".//SVCURRENTCOMPANY") == "EY Test Haryana Company"
     assert set(n.text for n in xml.findall(".//GSTRATE")) == {"2.5", "5"}
@@ -436,6 +440,7 @@ def test_ey_tally_defaults_upgrade_to_names_from_imported_tally_xml():
     old_defaults = EyRateCard(
         tally_company="", tally_sales_local="CAR RENTAL - LOCAL (5%)",
         tally_toll="Toll & Parking", tally_cgst="OUTPUT CGST @2.5%", tally_sgst="OUTPUT SGST @2.5%",
+        tally_sales_interstate="CAR RENTAL - INTERSTATE (5%)", tally_igst="OUTPUT IGST @5%",
     )
     with SessionLocal() as db:
         save_ey_rates(db, old_defaults, "test")
@@ -447,6 +452,38 @@ def test_ey_tally_defaults_upgrade_to_names_from_imported_tally_xml():
     assert migrated.tally_toll == "Toll and Parking"
     assert migrated.tally_cgst == "OUTPUT CGST @ 2.5.%"
     assert migrated.tally_sgst == "OUTPUT SGST @ 2.5%"
+    assert migrated.tally_sales_interstate == "Car Rental - Interstate"
+    assert migrated.tally_igst == "Output Igst @ 5%"
+    assert migrated.tally_toll_interstate == "Toll & Parking"
+
+
+@pytest.mark.parametrize("gstin,expected_ledgers", [
+    ("07AAEFE1763C1ZU", ["Ernst & Young LLP", "Car Rental - Interstate", "Toll & Parking", "Output Igst @ 5%"]),
+    ("06AAEFE1763C1ZW", ["Ernst & Young LLP", "CAR RENTAL -  LOCAL( 5%)", "Toll and Parking", "OUTPUT CGST @ 2.5.%", "OUTPUT SGST @ 2.5%"]),
+])
+def test_ey_tally_matches_haryana_exports_without_vehicle_cost_centres(gstin, expected_ledgers):
+    rates = EyRateCard()
+    _, [row] = parse_ey_csv(ey_csv(**{"Entity Gst": gstin}), rates)
+    voucher = voucher_for_row(row, "HR/HO/26-27/1164", date(2026, 10, 7), rates, {})
+    xml = ET.fromstring(render_tally_xml([voucher], ey_tally_ledgers(rates)).decode("utf-16"))
+    entries = xml.findall(".//VOUCHER/LEDGERENTRIES.LIST")
+    assert [e.findtext("LEDGERNAME") for e in entries] == expected_ledgers
+    assert sum(Decimal(e.findtext("AMOUNT")) for e in entries) == 0
+    assert not xml.findall(".//CATEGORYALLOCATIONS.LIST")
+    assert xml.findtext(".//REPORTNAME") == "Vouchers"
+    assert xml.findtext(".//CMPGSTIN") == "06AANCA3858Q1ZW"
+
+
+def test_ey_tally_migration_preserves_custom_ledger_names():
+    custom = EyRateCard(tally_sales_interstate="Custom Interstate", tally_igst="Custom IGST",
+                        tally_toll="Custom Local Toll", tally_toll_interstate="Custom Interstate Toll")
+    with SessionLocal() as db:
+        save_ey_rates(db, custom, "test")
+        migrated = get_ey_rates(db)
+    assert migrated.tally_sales_interstate == "Custom Interstate"
+    assert migrated.tally_igst == "Custom IGST"
+    assert migrated.tally_toll == "Custom Local Toll"
+    assert migrated.tally_toll_interstate == "Custom Interstate Toll"
 
 
 def test_batch_requires_a_valid_starting_invoice_suffix(ey_client):

@@ -37,6 +37,8 @@ class TallyLedgers:
     sales_interstate: str = "Car Rental Interstate-18%"
     sales_local: str = "CAR RENTAL LOCAL-18%"
     toll: str = "Toll & Parking"
+    toll_interstate: str | None = None
+    include_cost_centres: bool = True
     igst: str = "Output IGST @18%"
     cgst: str = "OUTPUT CGST @ 9%"
     sgst: str = "OUTPUT SGST @ 9%"
@@ -161,6 +163,18 @@ def _income_entry(v: TallyVoucher, ledger: str, hsn: str, amount: Decimal,
                   ledgers: TallyLedgers, description: tuple[str, ...] = (),
                   invoice_tax_rate: bool = False) -> str:
     amt = _amt(amount)
+    cost_allocation = ""
+    if ledgers.include_cost_centres:
+        cost_allocation = (
+            "<CATEGORYALLOCATIONS.LIST>"
+            + _tag("CATEGORY", ledgers.cost_category)
+            + _tag("ISDEEMEDPOSITIVE", "No")
+            + "<COSTCENTREALLOCATIONS.LIST>"
+            + _tag("NAME", v.cost_centre)
+            + _tag("AMOUNT", amt)
+            + "</COSTCENTREALLOCATIONS.LIST>"
+            + "</CATEGORYALLOCATIONS.LIST>"
+        )
     udf = ""
     if description:
         udf = (
@@ -184,14 +198,7 @@ def _income_entry(v: TallyVoucher, ledger: str, hsn: str, amount: Decimal,
         + _tag("ISPARTYLEDGER", "No")
         + _tag("AMOUNT", amt)
         + _tag("VATEXPAMOUNT", amt)
-        + "<CATEGORYALLOCATIONS.LIST>"
-        + _tag("CATEGORY", ledgers.cost_category)
-        + _tag("ISDEEMEDPOSITIVE", "No")
-        + "<COSTCENTREALLOCATIONS.LIST>"
-        + _tag("NAME", v.cost_centre)
-        + _tag("AMOUNT", amt)
-        + "</COSTCENTREALLOCATIONS.LIST>"
-        + "</CATEGORYALLOCATIONS.LIST>"
+        + cost_allocation
         + _rate_details(ledgers.gst_rate)
         + udf
         + "</LEDGERENTRIES.LIST>"
@@ -223,7 +230,8 @@ def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
 
     entries = [_party_entry(v), _income_entry(v, sales_ledger, sales_hsn, v.fare, ledgers, v.description)]
     if v.toll:
-        entries.append(_income_entry(v, ledgers.toll, ledgers.hsn_toll, v.toll, ledgers, invoice_tax_rate=True))
+        toll_ledger = ledgers.toll if v.is_local else (ledgers.toll_interstate or ledgers.toll)
+        entries.append(_income_entry(v, toll_ledger, ledgers.hsn_toll, v.toll, ledgers, invoice_tax_rate=True))
     if v.is_local:
         entries += [_tax_entry(ledgers.cgst, v.cgst, ledgers.gst_rate), _tax_entry(ledgers.sgst, v.sgst, ledgers.gst_rate)]
     else:
@@ -294,7 +302,7 @@ def render_tally_xml(vouchers: list[TallyVoucher], ledgers: TallyLedgers = DEFAU
         "<ENVELOPE>"
         "<HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER>"
         "<BODY><IMPORTDATA>"
-        "<REQUESTDESC><REPORTNAME>All Masters</REPORTNAME>"
+        "<REQUESTDESC><REPORTNAME>Vouchers</REPORTNAME>"
         f"<STATICVARIABLES>{_tag('SVCURRENTCOMPANY', ledgers.company)}</STATICVARIABLES>"
         "</REQUESTDESC>"
         f"<REQUESTDATA>{body}</REQUESTDATA>"

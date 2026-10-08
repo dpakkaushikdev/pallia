@@ -102,7 +102,7 @@ def voucher_for_row(
         raise ExportProblem(str(exc)) from exc
 
     cost_centre = cost_centres.get(normalize_vehicle_no(row.car_no))
-    if not cost_centre:
+    if not cost_centre and row.client_profile != "ey":
         raise ExportProblem(f"Car {row.car_no} has no cost centre. Add it on Masters -> Cost centres.")
 
     local = row_is_local(row)
@@ -120,7 +120,7 @@ def voucher_for_row(
         cgst=cgst,
         sgst=sgst,
         igst=igst,
-        cost_centre=cost_centre,
+        cost_centre=cost_centre or "",
         description=_description(row, rates),
         buyer_order_no=row.eng_code if row.client_profile == "ey" else None,
         other_references=f"TOTAL KMS {row.total_kms} KM" if row.client_profile == "ey" else "",

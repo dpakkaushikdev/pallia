@@ -46,11 +46,12 @@ class EyRateCard(BaseModel):
     tally_voucher_type: str = Field(default="TAX INVOICE", min_length=1, max_length=128)
     tally_registration: str = Field(default="Haryana Registration", min_length=1, max_length=128)
     tally_sales_local: str = Field(default="CAR RENTAL -  LOCAL( 5%)", min_length=1, max_length=128)
-    tally_sales_interstate: str = Field(default="CAR RENTAL - INTERSTATE (5%)", min_length=1, max_length=128)
+    tally_sales_interstate: str = Field(default="Car Rental - Interstate", min_length=1, max_length=128)
     tally_toll: str = Field(default="Toll and Parking", min_length=1, max_length=128)
+    tally_toll_interstate: str = Field(default="Toll & Parking", min_length=1, max_length=128)
     tally_cgst: str = Field(default="OUTPUT CGST @ 2.5.%", min_length=1, max_length=128)
     tally_sgst: str = Field(default="OUTPUT SGST @ 2.5%", min_length=1, max_length=128)
-    tally_igst: str = Field(default="OUTPUT IGST @5%", min_length=1, max_length=128)
+    tally_igst: str = Field(default="Output Igst @ 5%", min_length=1, max_length=128)
 
     @model_validator(mode="after")
     def check_packages(self):
@@ -93,9 +94,11 @@ def get_ey_rates(db: Session) -> EyRateCard:
     prior_defaults = {
         "tally_company": ("", "EEE-TAXI MOBILITY SOLUTIONS PRIVATE LIMITED( HR)"),
         "tally_sales_local": ("CAR RENTAL - LOCAL (5%)", "CAR RENTAL -  LOCAL( 5%)"),
+        "tally_sales_interstate": ("CAR RENTAL - INTERSTATE (5%)", "Car Rental - Interstate"),
         "tally_toll": ("Toll & Parking", "Toll and Parking"),
         "tally_cgst": ("OUTPUT CGST @2.5%", "OUTPUT CGST @ 2.5.%"),
         "tally_sgst": ("OUTPUT SGST @2.5%", "OUTPUT SGST @ 2.5%"),
+        "tally_igst": ("OUTPUT IGST @5%", "Output Igst @ 5%"),
     }
     for name, (old, new) in prior_defaults.items():
         if values.get(name, old) == old:
