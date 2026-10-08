@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from signer import SigningError, TokenNotFound, WrongPIN, inspect_signature_box, sign_pdf_bytes
 
 PORT = 7777
-VERSION = "1.8.0"   # 1.8: reject multi-page PDFs in Accounts review and signing
+VERSION = "1.9.0"   # 1.9: inspect PDFs inside Accounts ZIP files with strict checks
 MAX_ZIP_BYTES = 100 * 1024 * 1024
 MAX_ZIP_ENTRIES = 500
 MAX_ZIP_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
@@ -244,6 +244,34 @@ async def inspect_sign_zip(request: Request):
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"detail": str(exc)})
     return {"files": [{"filename": name, "status": "Ready"} for name in files], "count": len(files)}
+
+
+@app.post("/accounts-zip/inspect")
+async def inspect_accounts_zip(request: Request):
+    """Unpack Accounts PDFs for individual review; reject unsafe archives."""
+    try:
+        archive_bytes = await _read_zip_request(request)
+        pdf_names = _zip_pdf_manifest(archive_bytes)
+        if len(pdf_names) > 50:
+            raise ValueError("Select an Accounts ZIP containing no more than 50 PDFs.")
+        files = []
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as source:
+            pdf_bytes_total = sum(source.getinfo(name).file_size for name in pdf_names)
+            if pdf_bytes_total > MAX_ZIP_BYTES:
+                raise ValueError("Accounts PDFs inside the ZIP cannot exceed 100 MB total.")
+            for name in pdf_names:
+                item = {"filename": name, "status": "Failed"}
+                try:
+                    pdf_bytes = source.read(name)
+                    box = inspect_signature_box(pdf_bytes)
+                    item.update(status="Ready", signature_box=list(box),
+                                pdf_b64=base64.b64encode(pdf_bytes).decode())
+                except (SigningError, RuntimeError, ValueError, zipfile.BadZipFile, NotImplementedError) as exc:
+                    item["error"] = str(exc)
+                files.append(item)
+    except (ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+    return {"files": files, "count": len(files), "pdf_bytes_total": pdf_bytes_total}
 
 
 @app.post("/sign-zip")

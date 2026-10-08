@@ -1,6 +1,9 @@
 import io
+import base64
 import sys
 import zipfile
+import pytest
+from reportlab.pdfgen import canvas
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -89,3 +92,51 @@ def test_sign_zip_reports_per_invoice_failure(monkeypatch):
     assert job.json()["state"] == "failed"
     assert job.json()["files"] == [{"filename": "invoice.pdf", "status": "Failed", "error": "Incorrect PIN."}]
     assert download.status_code == 409
+
+
+def _accounts_pdf(pages=1, footer=True):
+    data = io.BytesIO()
+    pdf = canvas.Canvas(data)
+    for _ in range(pages):
+        pdf.drawString(50, 600, "Accounts statement")
+        if footer:
+            pdf.drawString(392, 202, "For PALLIA TRANS LOGISTICS PRIVATE LTD")
+            pdf.drawString(499, 137, "Authorised Signatory")
+        pdf.showPage()
+    pdf.save()
+    return data.getvalue()
+
+
+def test_accounts_zip_checks_each_pdf_and_only_returns_ready_pdf_contents():
+    single = _accounts_pdf()
+    source = _zip_bytes([
+        ("accounts/ready.pdf", single),
+        ("accounts/two-pages.pdf", _accounts_pdf(pages=2)),
+        ("missing-footer.pdf", _accounts_pdf(footer=False)),
+        ("readme.txt", b"notes"),
+    ])
+    with TestClient(signing_helper_main.app) as client:
+        response = client.post("/accounts-zip/inspect", content=source)
+    assert response.status_code == 200
+    result = response.json()
+    assert result["count"] == 3
+    ready, multiple, missing = result["files"]
+    assert ready["filename"] == "accounts/ready.pdf"
+    assert ready["status"] == "Ready"
+    assert len(ready["signature_box"]) == 4
+    assert base64.b64decode(ready["pdf_b64"]) == single
+    assert multiple["status"] == "Failed" and "2 pages" in multiple["error"]
+    assert missing["status"] == "Failed" and "Could not locate both" in missing["error"]
+    assert "pdf_b64" not in multiple and "pdf_b64" not in missing
+
+
+@pytest.mark.parametrize("source,reason", [
+    (_zip_bytes([("../outside.pdf", b"pdf")]), "unsafe file path"),
+    (_zip_bytes([("readme.txt", b"notes")]), "No PDF"),
+    (_zip_bytes([(f"{i}.pdf", b"pdf") for i in range(51)]), "no more than 50 PDFs"),
+])
+def test_accounts_zip_rejects_unsafe_empty_and_oversized_pdf_lists(source, reason):
+    with TestClient(signing_helper_main.app) as client:
+        response = client.post("/accounts-zip/inspect", content=source)
+    assert response.status_code == 400
+    assert reason in response.json()["detail"]

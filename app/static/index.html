@@ -863,10 +863,10 @@
       <div class="page-hd"><h1>Accounts</h1></div>
       <div class="card" style="padding:18px 20px;">
         <div class="card-title">Sign Accounts PDFs with DSC</div>
-        <p style="color:#64748b;margin:0 0 12px;">Select the account PDFs. Only 1-page PDFs can be signed. Each signature is positioned between "For Pallia Trans Logistics Private Limited" and "Authorised Signatory" based on that PDF's layout. Files with more pages or missing either footer line are left unsigned and listed in the completion summary.</p>
+        <p style="color:#64748b;margin:0 0 12px;">Select account PDFs or ZIP files containing PDFs. Only 1-page PDFs can be signed. Each signature is positioned between "For Pallia Trans Logistics Private Limited" and "Authorised Signatory" based on that PDF's layout. Files with more pages or missing either footer line are left unsigned and listed in the completion summary. Download signed PDFs from the review table.</p>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-          <input type="file" id="accountsPdfFiles" accept=".pdf,application/pdf" multiple onchange="resetAccountsPdfReview()" />
-          <button class="btn" id="btnReviewAccountsPdfs" onclick="inspectAccountsPdfs()">Review PDFs</button>
+          <input type="file" id="accountsPdfFiles" accept=".pdf,.zip,application/pdf,application/zip,application/x-zip-compressed" multiple onchange="resetAccountsPdfReview()" />
+          <button class="btn" id="btnReviewAccountsPdfs" onclick="inspectAccountsPdfs()">Review files</button>
         </div>
         <div id="accountsPdfStatus" class="meta" style="margin-top:10px;min-height:18px;" aria-live="polite"></div>
         <div id="accountsPdfReview" class="hidden" style="margin-top:14px;"></div>
@@ -2907,6 +2907,8 @@ async function followZipSigningJob(jobId, sourceFile) {
 let accountsPdfItems = [];
 let accountsPdfSigning = false;
 
+function accountsPdfItemName(item) { return item.displayName || item.file.name; }
+
 function resetAccountsPdfReview() {
   accountsPdfItems.forEach(item => { if (item.downloadUrl) URL.revokeObjectURL(item.downloadUrl); });
   accountsPdfItems = [];
@@ -2920,10 +2922,13 @@ function resetAccountsPdfReview() {
 function showAccountsPdfSummary() {
   const signed = accountsPdfItems.filter(item => item.status === "Signed").length;
   const unsigned = accountsPdfItems.filter(item => item.status !== "Signed");
+  const unsignedPdfs = unsigned.filter(item => item.kind !== "archive").length;
+  const rejectedArchives = unsigned.length - unsignedPdfs;
   const summary = $("#accountsPdfSummary");
-  summary.textContent = `${signed} PDF${signed === 1 ? "" : "s"} signed. ${unsigned.length} PDF${unsigned.length === 1 ? "" : "s"} not signed.`;
+  summary.textContent = `${signed} PDF${signed === 1 ? "" : "s"} signed. ${unsignedPdfs} PDF${unsignedPdfs === 1 ? "" : "s"} not signed.`;
+  if (rejectedArchives) summary.textContent += ` ${rejectedArchives} ZIP file${rejectedArchives === 1 ? "" : "s"} could not be reviewed.`;
   if (unsigned.length) {
-    summary.textContent += "\nFiles not signed:\n" + unsigned.map(item => `${item.file.name} — ${item.error || "Signing stopped before this file was processed."}`).join("\n");
+    summary.textContent += "\nFiles not signed:\n" + unsigned.map(item => `${accountsPdfItemName(item)} — ${item.error || "Signing stopped before this file was processed."}`).join("\n");
   }
   summary.classList.remove("hidden");
 }
@@ -2937,9 +2942,9 @@ function renderAccountsPdfReview() {
     const download = item.downloadUrl
       ? `<a class="btn secondary sm" href="${item.downloadUrl}" download="${escapeZipFilename(item.signedName)}">Download Signed</a>` : "";
     const cls = item.status === "Signed" ? "text-ok" : item.status === "Failed" ? "text-err" : "meta";
-    return `<tr><td>${escapeZipFilename(item.file.name)}</td><td id="accountsPdfStatus${index}" class="${cls}">${status}</td><td>${download}</td></tr>`;
+    return `<tr><td>${escapeZipFilename(accountsPdfItemName(item))}</td><td id="accountsPdfStatus${index}" class="${cls}">${status}</td><td>${download}</td></tr>`;
   }).join("");
-  review.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;"><strong>${accountsPdfItems.length} PDF${accountsPdfItems.length === 1 ? "" : "s"} reviewed</strong><button class="btn sm" ${readyCount && !accountsPdfSigning ? "" : "disabled"} onclick="openAccountsSignModal()">Sign ${readyCount} Ready PDF${readyCount === 1 ? "" : "s"} with DSC</button></div><div style="max-height:360px;overflow:auto;border:1px solid var(--line,#e2e8f0);border-radius:8px;"><table class="data-table"><thead><tr><th>PDF file</th><th>Status / signature placement</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  review.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;"><strong>${accountsPdfItems.length} file${accountsPdfItems.length === 1 ? "" : "s"} reviewed</strong><button class="btn sm" ${readyCount && !accountsPdfSigning ? "" : "disabled"} onclick="openAccountsSignModal()">Sign ${readyCount} Ready PDF${readyCount === 1 ? "" : "s"} with DSC</button></div><div style="max-height:360px;overflow:auto;border:1px solid var(--line,#e2e8f0);border-radius:8px;"><table class="data-table"><thead><tr><th>PDF file</th><th>Status / signature placement</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   review.classList.remove("hidden");
 }
 
@@ -2948,10 +2953,10 @@ async function inspectAccountsPdfs() {
   const button = $("#btnReviewAccountsPdfs");
   const status = $("#accountsPdfStatus");
   resetAccountsPdfReview();
-  if (!files.length) { status.textContent = "Select one or more PDFs from the Accounts PDF folder."; return; }
-  if (files.some(file => !file.name.toLowerCase().endsWith(".pdf"))) { status.textContent = "Select PDF files only."; return; }
+  if (!files.length) { status.textContent = "Select one or more PDF or ZIP files from Downloads."; return; }
+  if (files.some(file => !/\.(pdf|zip)$/i.test(file.name))) { status.textContent = "Select PDF or ZIP files only."; return; }
   if (files.length > 50 || files.reduce((sum, file) => sum + file.size, 0) > 100 * 1024 * 1024) {
-    status.textContent = "Select no more than 50 PDFs or 100 MB total."; return;
+    status.textContent = "Select no more than 50 files or 100 MB total."; return;
   }
   button.disabled = true;
   $("#accountsPdfFiles").disabled = true;
@@ -2962,11 +2967,38 @@ async function inspectAccountsPdfs() {
     const helper = await health.json();
     const version = (helper.version || "0").split(".").map(part => parseInt(part, 10) || 0);
     if (version[0] < 1 || (version[0] === 1 && version[1] < 8)) throw new Error("Update PalliaSignHelper.exe to version 1.8.0 or newer for single-page Accounts PDF signing.");
+    if (files.some(file => /\.zip$/i.test(file.name)) && version[0] === 1 && version[1] < 9) throw new Error("Update PalliaSignHelper.exe to version 1.9.0 or newer to review Accounts ZIP files.");
+    let expandedPdfBytes = 0;
     for (const file of files) {
+      if (/\.zip$/i.test(file.name)) {
+        status.textContent = `Reviewing PDFs inside ${file.name}...`;
+        try {
+          const response = await fetch(`${SIGN_HELPER_URL}/accounts-zip/inspect`, {
+            method: "POST", headers: { "Content-Type": "application/zip" }, body: file,
+            signal: AbortSignal.timeout(2 * 60 * 1000)
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.detail || `Could not inspect ${file.name}.`);
+          if (accountsPdfItems.length + result.files.length > 50 || expandedPdfBytes + result.pdf_bytes_total > 100 * 1024 * 1024) throw new Error("Select files containing no more than 50 PDFs or 100 MB of PDFs in total.");
+          expandedPdfBytes += result.pdf_bytes_total;
+          for (const entry of result.files) {
+            const filename = entry.filename.replace(/\\/g, "/").split("/").pop();
+            const pdfFile = entry.status === "Ready" ? new File([accountsPdfBlob(entry.pdf_b64)], filename, { type: "application/pdf" }) : { name: filename };
+            const item = { file: pdfFile, displayName: `${file.name} / ${entry.filename}`, status: entry.status, error: entry.error, signatureBox: entry.signature_box };
+            accountsPdfItems.push(item);
+          }
+        } catch (error) {
+          accountsPdfItems.push({ file, kind: "archive", status: "Failed", error: error.message });
+        }
+        renderAccountsPdfReview();
+        continue;
+      }
       const item = { file, status: "Checking footer" };
       accountsPdfItems.push(item);
       renderAccountsPdfReview();
       try {
+        expandedPdfBytes += file.size;
+        if (accountsPdfItems.length > 50 || expandedPdfBytes > 100 * 1024 * 1024) throw new Error("Select files containing no more than 50 PDFs or 100 MB of PDFs in total.");
         const pdfB64 = _arrayBufferToBase64(await file.arrayBuffer());
         const response = await fetch(`${SIGN_HELPER_URL}/inspect-pdf`, {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -3026,7 +3058,7 @@ async function signAccountsPdfs() {
   for (const item of readyItems) {
     item.status = "Signing";
     renderAccountsPdfReview();
-    $("#accountsPdfStatus").textContent = `Signing ${item.file.name}… Keep the DSC token connected.`;
+    $("#accountsPdfStatus").textContent = `Signing ${accountsPdfItemName(item)}… Keep the DSC token connected.`;
     try {
       const pdfB64 = _arrayBufferToBase64(await item.file.arrayBuffer());
       const response = await fetch(`${SIGN_HELPER_URL}/sign`, {
