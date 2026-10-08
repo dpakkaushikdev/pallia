@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from signer import CertificateSelectionError, SigningError, TokenNotFound, WrongPIN, inspect_signature_box, sign_pdf_bytes
 
 PORT = 7777
-VERSION = "1.11.0"   # 1.11: select the current DSC certificate and fit compact footers
+VERSION = "1.12.0"   # 1.12: plain signature appearance with a two-line signer name
 MAX_ZIP_BYTES = 100 * 1024 * 1024
 MAX_ZIP_ENTRIES = 500
 MAX_ZIP_UNCOMPRESSED_BYTES = 200 * 1024 * 1024

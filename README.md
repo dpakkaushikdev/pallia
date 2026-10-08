@@ -192,6 +192,10 @@ for EEE, Pallia Billing and Pallia Accounts on this browser. Select the intended
 device and refresh the list after swapping tokens. A disconnected saved
 device never falls back to another token or sends its PIN to another device.
 
+Helper **1.12.0** uses a plain black signature appearance with the signer name
+in capitals on two whole-word lines (for example, RAMASHANKAR above SHARMA),
+without the decorative red initial. Certificate details stay in the right column.
+
 ---
 
 ## Next step: fill in the real TMS selectors

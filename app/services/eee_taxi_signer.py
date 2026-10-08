@@ -47,72 +47,9 @@ def _load_font(filename: str, size: int):
 
 
 def _build_appearance_image(signer_name: str, timestamp_str: str):
-    from PIL import Image, ImageDraw
-
-    img = Image.new("RGB", (_IMG_W, _IMG_H), (255, 255, 255))
-    draw = ImageDraw.Draw(img)
-
-    font_name   = _load_font("arialbd.ttf", 48)
-    font_label  = _load_font("arialbd.ttf", 13)
-    font_detail = _load_font("arial.ttf",   13)
-    font_script = _load_font("segoesc.ttf", 42)
-    font_pawn   = _load_font("seguisym.ttf", 88)
-
-    divider_x = _IMG_W * 40 // 100
-
-    pawn_char = "♟"
-    try:
-        pb = draw.textbbox((0, 0), pawn_char, font=font_pawn)
-        pw, ph = pb[2] - pb[0], pb[3] - pb[1]
-    except AttributeError:
-        pw, ph = 75, 80
-    draw.text((_IMG_W // 2 - pw // 2, _IMG_H // 2 - ph // 2),
-              pawn_char, font=font_pawn, fill=(238, 238, 238))
-
-    try:
-        bbox = draw.textbbox((0, 0), signer_name, font=font_name)
-        nw, nh = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    except AttributeError:
-        nw, nh = draw.textsize(signer_name, font=font_name)  # type: ignore[attr-defined]
-
-    if nw > divider_x - 16:
-        shrink = (divider_x - 16) / nw
-        font_name = _load_font("arialbd.ttf", max(18, int(48 * shrink)))
-        try:
-            bbox = draw.textbbox((0, 0), signer_name, font=font_name)
-            nw, nh = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        except AttributeError:
-            nw, nh = draw.textsize(signer_name, font=font_name)  # type: ignore[attr-defined]
-
-    nx = max(8, (divider_x - nw) // 2)
-    ny = (_IMG_H - nh) // 2
-    draw.text((nx, ny), signer_name, font=font_name, fill=(0, 0, 0))
-
-    initial = signer_name[0] if signer_name else "A"
-    try:
-        ib = draw.textbbox((0, 0), initial, font=font_script)
-        iw, ih = ib[2] - ib[0], ib[3] - ib[1]
-    except AttributeError:
-        iw, ih = 30, 40
-    draw.text((nx + nw - iw // 2, ny + nh - ih // 4),
-              initial, font=font_script, fill=(200, 45, 55))
-
-    draw.line([(divider_x, 10), (divider_x, _IMG_H - 10)],
-              fill=(160, 160, 160), width=1)
-
-    rx  = divider_x + 12
-    lh  = 20
-    top = (_IMG_H - lh * 4) // 2
-    parts     = timestamp_str.split(" ", 1)
-    date_part = parts[0]
-    time_part = parts[1] if len(parts) > 1 else ""
-
-    draw.text((rx, top),          "Digitally signed by", font=font_label,  fill=(30, 30, 30))
-    draw.text((rx, top + lh),     signer_name,           font=font_detail, fill=(0,  0,  0))
-    draw.text((rx, top + lh * 2), f"Date: {date_part}",  font=font_detail, fill=(0,  0,  0))
-    draw.text((rx, top + lh * 3), time_part,             font=font_detail, fill=(0,  0,  0))
-
-    return img
+    """Render a plain signature with the name on two whole-word lines."""
+    from signing_helper.appearance import build_appearance_image
+    return build_appearance_image(signer_name, timestamp_str, _load_font)
 
 
 def _find_signature_box(pdf_path: Path) -> tuple[float, float, float, float]:
