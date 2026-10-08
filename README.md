@@ -172,6 +172,16 @@ marker in its temporary signing copy; originals remain unchanged. Rebuild and
 copy the helper after updating this repository; the dashboard checks its
 version before inspection.
 
+Accounts ZIP signing requires helper **1.10.0 or newer**. Accounts reviews
+each PDF for a single page and both Pallia footer lines, then places the
+signature between those lines. Each uploaded ZIP produces a downloadable
+ZIP containing the signed PDFs, unchanged unsigned PDFs and other files,
+and `accounts-signing-summary.txt` with unsigned filenames and reasons.
+The completion screen also shows signed/unsigned counts and reasons.
+Accounts accepts up to 50 PDFs and 100 MB of PDF contents per review.
+After replacing the helper executable, stop the old tray helper and start
+the new executable so the browser uses the updated version.
+
 ---
 
 ## Next step: fill in the real TMS selectors

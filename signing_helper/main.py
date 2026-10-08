@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from signer import SigningError, TokenNotFound, WrongPIN, inspect_signature_box, sign_pdf_bytes
 
 PORT = 7777
-VERSION = "1.9.0"   # 1.9: inspect PDFs inside Accounts ZIP files with strict checks
+VERSION = "1.10.0"   # 1.10: Accounts ZIP output with a report of unsigned PDFs
 MAX_ZIP_BYTES = 100 * 1024 * 1024
 MAX_ZIP_ENTRIES = 500
 MAX_ZIP_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
@@ -188,8 +188,9 @@ def _set_zip_job_file(job_id: str, index: int, status: str, error: str | None = 
             job["files"][index]["error"] = error
 
 
-def _process_zip_job(job_id: str, archive_bytes: bytes, pin: str) -> None:
+def _process_zip_job(job_id: str, archive_bytes: bytes, pin: str, accounts: bool = False) -> None:
     job = _zip_jobs[job_id]
+    stop_error = None
     try:
         with zipfile.ZipFile(io.BytesIO(archive_bytes)) as source:
             pdf_indexes = {name: index for index, name in enumerate(job["pdf_names"])}
@@ -201,17 +202,50 @@ def _process_zip_job(job_id: str, archive_bytes: bytes, pin: str) -> None:
                         continue
                     if item.filename in pdf_indexes:
                         index = pdf_indexes[item.filename]
-                        _set_zip_job_file(job_id, index, "Signing")
-                        content = sign_pdf_bytes(source.read(item), pin)
-                        _set_zip_job_file(job_id, index, "Signed")
+                        if accounts:
+                            content = source.read(item)
+                            try:
+                                # Validate even after a token failure so skipped
+                                # multi-page PDFs retain their specific reason.
+                                inspect_signature_box(content)
+                                if stop_error:
+                                    raise SigningError(f"Signing stopped: {stop_error}")
+                                _set_zip_job_file(job_id, index, "Signing")
+                                content = sign_pdf_bytes(content, pin, require_signature_anchors=True)
+                            except (TokenNotFound, WrongPIN) as exc:
+                                stop_error = str(exc)
+                                _set_zip_job_file(job_id, index, "Failed", stop_error)
+                            except SigningError as exc:
+                                _set_zip_job_file(job_id, index, "Failed", str(exc))
+                            else:
+                                _set_zip_job_file(job_id, index, "Signed")
+                        else:
+                            _set_zip_job_file(job_id, index, "Signing")
+                            content = sign_pdf_bytes(source.read(item), pin)
+                            _set_zip_job_file(job_id, index, "Signed")
                     else:
                         content = source.read(item)
                     signed_archive.writestr(item, content)
+                if accounts:
+                    files = job["files"]
+                    signed_count = sum(item["status"] == "Signed" for item in files)
+                    unsigned = [item for item in files if item["status"] != "Signed"]
+                    report = [f"{signed_count} PDFs signed. {len(unsigned)} PDFs not signed.",
+                              "Unsigned PDFs remain unchanged in this ZIP."]
+                    report += [f"{item['filename']}: {item.get('error', 'Not processed')}" for item in unsigned]
+                    report_name = "accounts-signing-summary.txt"
+                    suffix = 2
+                    while report_name in source.namelist():
+                        report_name = f"accounts-signing-summary-{suffix}.txt"
+                        suffix += 1
+                    signed_archive.writestr(report_name, "\n".join(report))
         with _zip_jobs_lock:
             job = _zip_jobs.get(job_id)
             if job:
                 job["result"] = output.getvalue()
                 job["state"] = "complete"
+                if accounts:
+                    job["signing_stopped"] = stop_error
                 job["finished_at"] = time.time()
     except TokenNotFound as exc:
         error = str(exc)
@@ -247,7 +281,7 @@ async def inspect_sign_zip(request: Request):
 
 
 @app.post("/accounts-zip/inspect")
-async def inspect_accounts_zip(request: Request):
+async def inspect_accounts_zip(request: Request, x_manifest_only: str = Header(default="")):
     """Unpack Accounts PDFs for individual review; reject unsafe archives."""
     try:
         archive_bytes = await _read_zip_request(request)
@@ -264,8 +298,9 @@ async def inspect_accounts_zip(request: Request):
                 try:
                     pdf_bytes = source.read(name)
                     box = inspect_signature_box(pdf_bytes)
-                    item.update(status="Ready", signature_box=list(box),
-                                pdf_b64=base64.b64encode(pdf_bytes).decode())
+                    item.update(status="Ready", signature_box=list(box))
+                    if x_manifest_only != "true":
+                        item["pdf_b64"] = base64.b64encode(pdf_bytes).decode()
                 except (SigningError, RuntimeError, ValueError, zipfile.BadZipFile, NotImplementedError) as exc:
                     item["error"] = str(exc)
                 files.append(item)
@@ -277,11 +312,26 @@ async def inspect_accounts_zip(request: Request):
 @app.post("/sign-zip")
 async def sign_zip(request: Request, background_tasks: BackgroundTasks, x_dsc_pin: str = Header(default="")):
     """Start local batch signing; status is available per invoice while it runs."""
+    return await _start_zip_job(request, background_tasks, x_dsc_pin)
+
+
+@app.post("/accounts-zip")
+async def sign_accounts_zip(request: Request, background_tasks: BackgroundTasks, x_dsc_pin: str = Header(default="")):
+    return await _start_zip_job(request, background_tasks, x_dsc_pin, accounts=True)
+
+
+async def _start_zip_job(request: Request, background_tasks: BackgroundTasks, x_dsc_pin: str, accounts: bool = False):
     if not x_dsc_pin:
         return JSONResponse(status_code=400, content={"detail": "Enter the DSC token PIN."})
     try:
         archive_bytes = await _read_zip_request(request)
         pdf_names = _zip_pdf_manifest(archive_bytes)
+        if accounts:
+            if len(pdf_names) > 50:
+                raise ValueError("Select an Accounts ZIP containing no more than 50 PDFs.")
+            with zipfile.ZipFile(io.BytesIO(archive_bytes)) as source:
+                if sum(source.getinfo(name).file_size for name in pdf_names) > MAX_ZIP_BYTES:
+                    raise ValueError("Accounts PDFs inside the ZIP cannot exceed 100 MB total.")
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"detail": str(exc)})
 
@@ -300,7 +350,10 @@ async def sign_zip(request: Request, background_tasks: BackgroundTasks, x_dsc_pi
             "state": "running", "files": [{"filename": name, "status": "Ready"} for name in pdf_names],
             "pdf_names": pdf_names, "result": None, "created_at": now,
         }
-    background_tasks.add_task(_process_zip_job, job_id, archive_bytes, x_dsc_pin)
+    if accounts:
+        background_tasks.add_task(_process_zip_job, job_id, archive_bytes, x_dsc_pin, True)
+    else:
+        background_tasks.add_task(_process_zip_job, job_id, archive_bytes, x_dsc_pin)
     return JSONResponse(status_code=202, content={"job_id": job_id, "state": "running"})
 
 
@@ -310,7 +363,10 @@ def sign_zip_status(job_id: str):
         job = _zip_jobs.get(job_id)
         if job is None:
             return JSONResponse(status_code=404, content={"detail": "ZIP signing job expired or was not found."})
-        return {"state": job["state"], "files": [dict(item) for item in job["files"]], "error": job.get("error")}
+        result = {"state": job["state"], "files": [dict(item) for item in job["files"]], "error": job.get("error")}
+        if "signing_stopped" in job:
+            result["signing_stopped"] = job["signing_stopped"]
+        return result
 
 
 @app.get("/sign-zip/{job_id}/download")
@@ -320,11 +376,12 @@ def download_signed_zip(job_id: str):
         if job is None:
             return JSONResponse(status_code=404, content={"detail": "ZIP signing job expired or was not found."})
         if job["state"] != "complete":
-            return JSONResponse(status_code=409, content={"detail": "All invoice PDFs must be signed before download."})
+            return JSONResponse(status_code=409, content={"detail": "ZIP signing must finish before download."})
         archive_bytes = job["result"]
-        count = len(job["files"])
+        count = sum(item["status"] == "Signed" for item in job["files"])
+        unsigned_count = len(job["files"]) - count
         _zip_jobs.pop(job_id, None)
-    headers = {"Content-Disposition": 'attachment; filename="pallia_invoices_signed.zip"', "X-Signed-PDF-Count": str(count)}
+    headers = {"Content-Disposition": 'attachment; filename="pallia_invoices_signed.zip"', "X-Signed-PDF-Count": str(count), "X-Unsigned-PDF-Count": str(unsigned_count)}
     return Response(archive_bytes, media_type="application/zip", headers=headers)
 
 

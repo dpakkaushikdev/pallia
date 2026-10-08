@@ -140,3 +140,81 @@ def test_accounts_zip_rejects_unsafe_empty_and_oversized_pdf_lists(source, reaso
         response = client.post("/accounts-zip/inspect", content=source)
     assert response.status_code == 400
     assert reason in response.json()["detail"]
+
+
+def test_accounts_manifest_only_avoids_returning_pdf_payloads():
+    with TestClient(signing_helper_main.app) as client:
+        response = client.post("/accounts-zip/inspect", content=_zip_bytes([("ready.pdf", _accounts_pdf())]),
+                               headers={"X-Manifest-Only": "true"})
+    item = response.json()["files"][0]
+    assert item["status"] == "Ready"
+    assert len(item["signature_box"]) == 4
+    assert "pdf_b64" not in item
+
+
+def test_accounts_zip_signs_only_valid_single_pages_and_preserves_unsigned_originals(monkeypatch):
+    calls = []
+
+    def fake_sign(pdf, pin, require_signature_anchors=False):
+        calls.append((pdf, pin, require_signature_anchors))
+        return pdf + b" signed"
+
+    monkeypatch.setattr(signing_helper_main, "sign_pdf_bytes", fake_sign)
+    ready, multiple, missing = _accounts_pdf(), _accounts_pdf(pages=2), _accounts_pdf(footer=False)
+    source = _zip_bytes([("invoices/ready.pdf", ready), ("invoices/two.pdf", multiple),
+                         ("missing.pdf", missing), ("notes.txt", b"notes"),
+                         ("accounts-signing-summary.txt", b"existing report")])
+    with TestClient(signing_helper_main.app) as client:
+        response = client.post("/accounts-zip", content=source, headers={"X-DSC-PIN": "1234"})
+        assert response.status_code == 202
+        job_id = response.json()["job_id"]
+        status = client.get(f"/sign-zip/{job_id}").json()
+        result = client.get(f"/sign-zip/{job_id}/download")
+    assert calls == [(ready, "1234", True)]
+    assert status["state"] == "complete"
+    assert [item["status"] for item in status["files"]] == ["Signed", "Failed", "Failed"]
+    assert result.headers["x-signed-pdf-count"] == "1"
+    assert result.headers["x-unsigned-pdf-count"] == "2"
+    with zipfile.ZipFile(io.BytesIO(result.content)) as archive:
+        assert archive.read("invoices/ready.pdf") == ready + b" signed"
+        assert archive.read("invoices/two.pdf") == multiple
+        assert archive.read("missing.pdf") == missing
+        assert archive.read("notes.txt") == b"notes"
+        assert archive.read("accounts-signing-summary.txt") == b"existing report"
+        report = archive.read("accounts-signing-summary-2.txt").decode()
+        assert "1 PDFs signed. 2 PDFs not signed." in report
+        assert "invoices/two.pdf:" in report and "2 pages" in report
+        assert "missing.pdf:" in report and "Could not locate both" in report
+
+
+def test_accounts_zip_stops_pin_attempts_and_returns_unsigned_report(monkeypatch):
+    calls = []
+
+    def fail_sign(pdf, pin, require_signature_anchors=False):
+        calls.append(pdf)
+        raise signing_helper_main.WrongPIN("Incorrect PIN.")
+
+    monkeypatch.setattr(signing_helper_main, "sign_pdf_bytes", fail_sign)
+    ready, second, multiple = _accounts_pdf(), _accounts_pdf(), _accounts_pdf(pages=2)
+    source = _zip_bytes([("first.pdf", ready), ("second.pdf", second), ("two.pdf", multiple)])
+    with TestClient(signing_helper_main.app) as client:
+        response = client.post("/accounts-zip", content=source, headers={"X-DSC-PIN": "bad"})
+        job_id = response.json()["job_id"]
+        status = client.get(f"/sign-zip/{job_id}").json()
+        result = client.get(f"/sign-zip/{job_id}/download")
+    assert len(calls) == 1
+    assert status["state"] == "complete" and status["signing_stopped"] == "Incorrect PIN."
+    assert all(item["status"] == "Failed" for item in status["files"])
+    assert "2 pages" in status["files"][2]["error"]
+    with zipfile.ZipFile(io.BytesIO(result.content)) as archive:
+        assert archive.read("first.pdf") == ready
+        assert archive.read("second.pdf") == second
+        assert "0 PDFs signed. 3 PDFs not signed." in archive.read("accounts-signing-summary.txt").decode()
+
+
+def test_accounts_sign_endpoint_enforces_pdf_limit_without_review():
+    with TestClient(signing_helper_main.app) as client:
+        response = client.post("/accounts-zip", content=_zip_bytes([(f"{i}.pdf", b"pdf") for i in range(51)]),
+                               headers={"X-DSC-PIN": "1234"})
+    assert response.status_code == 400
+    assert "no more than 50 PDFs" in response.json()["detail"]

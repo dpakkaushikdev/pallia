@@ -863,7 +863,7 @@
       <div class="page-hd"><h1>Accounts</h1></div>
       <div class="card" style="padding:18px 20px;">
         <div class="card-title">Sign Accounts PDFs with DSC</div>
-        <p style="color:#64748b;margin:0 0 12px;">Select account PDFs or ZIP files containing PDFs. Only 1-page PDFs can be signed. Each signature is positioned between "For Pallia Trans Logistics Private Limited" and "Authorised Signatory" based on that PDF's layout. Files with more pages or missing either footer line are left unsigned and listed in the completion summary. Download signed PDFs from the review table.</p>
+        <p style="color:#64748b;margin:0 0 12px;">Select account PDFs or ZIP files containing PDFs. Only 1-page PDFs can be signed. Each signature is positioned between "For Pallia Trans Logistics Private Limited" and "Authorised Signatory" based on that PDF's layout. Download the signed ZIP after completion. PDFs that cannot be signed remain unchanged in the ZIP, with their filenames and reasons listed here and in the included summary. Standalone PDFs can also be downloaded individually.</p>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
           <input type="file" id="accountsPdfFiles" accept=".pdf,.zip,application/pdf,application/zip,application/x-zip-compressed" multiple onchange="resetAccountsPdfReview()" />
           <button class="btn" id="btnReviewAccountsPdfs" onclick="inspectAccountsPdfs()">Review files</button>
@@ -871,6 +871,7 @@
         <div id="accountsPdfStatus" class="meta" style="margin-top:10px;min-height:18px;" aria-live="polite"></div>
         <div id="accountsPdfReview" class="hidden" style="margin-top:14px;"></div>
         <div id="accountsPdfSummary" class="hidden" style="margin-top:14px;white-space:pre-line;" role="status"></div>
+        <div id="accountsZipDownloads" style="margin-top:14px;"></div>
       </div>
     </div>
 
@@ -2905,13 +2906,17 @@ async function followZipSigningJob(jobId, sourceFile) {
 }
 
 let accountsPdfItems = [];
+let accountsZipGroups = [];
 let accountsPdfSigning = false;
 
 function accountsPdfItemName(item) { return item.displayName || item.file.name; }
 
 function resetAccountsPdfReview() {
   accountsPdfItems.forEach(item => { if (item.downloadUrl) URL.revokeObjectURL(item.downloadUrl); });
+  accountsZipGroups.forEach(group => { if (group.downloadUrl) URL.revokeObjectURL(group.downloadUrl); });
   accountsPdfItems = [];
+  accountsZipGroups = [];
+  $("#accountsZipDownloads").innerHTML = "";
   $("#accountsPdfReview").innerHTML = "";
   $("#accountsPdfReview").classList.add("hidden");
   $("#accountsPdfStatus").textContent = "";
@@ -2967,26 +2972,28 @@ async function inspectAccountsPdfs() {
     const helper = await health.json();
     const version = (helper.version || "0").split(".").map(part => parseInt(part, 10) || 0);
     if (version[0] < 1 || (version[0] === 1 && version[1] < 8)) throw new Error("Update PalliaSignHelper.exe to version 1.8.0 or newer for single-page Accounts PDF signing.");
-    if (files.some(file => /\.zip$/i.test(file.name)) && version[0] === 1 && version[1] < 9) throw new Error("Update PalliaSignHelper.exe to version 1.9.0 or newer to review Accounts ZIP files.");
+    if (files.some(file => /\.zip$/i.test(file.name)) && version[0] === 1 && version[1] < 10) throw new Error("Update PalliaSignHelper.exe to version 1.10.0 or newer for Accounts ZIP signing and downloads.");
     let expandedPdfBytes = 0;
     for (const file of files) {
       if (/\.zip$/i.test(file.name)) {
         status.textContent = `Reviewing PDFs inside ${file.name}...`;
         try {
           const response = await fetch(`${SIGN_HELPER_URL}/accounts-zip/inspect`, {
-            method: "POST", headers: { "Content-Type": "application/zip" }, body: file,
+            method: "POST", headers: { "Content-Type": "application/zip", "X-Manifest-Only": "true" }, body: file,
             signal: AbortSignal.timeout(2 * 60 * 1000)
           });
           const result = await response.json();
           if (!response.ok) throw new Error(result.detail || `Could not inspect ${file.name}.`);
           if (accountsPdfItems.length + result.files.length > 50 || expandedPdfBytes + result.pdf_bytes_total > 100 * 1024 * 1024) throw new Error("Select files containing no more than 50 PDFs or 100 MB of PDFs in total.");
           expandedPdfBytes += result.pdf_bytes_total;
+          const group = { file, items: [] };
           for (const entry of result.files) {
             const filename = entry.filename.replace(/\\/g, "/").split("/").pop();
-            const pdfFile = entry.status === "Ready" ? new File([accountsPdfBlob(entry.pdf_b64)], filename, { type: "application/pdf" }) : { name: filename };
-            const item = { file: pdfFile, displayName: `${file.name} / ${entry.filename}`, status: entry.status, error: entry.error, signatureBox: entry.signature_box };
+            const item = { file: { name: filename }, zipGroup: group, archiveEntry: entry.filename, displayName: `${file.name} / ${entry.filename}`, status: entry.status, error: entry.error, signatureBox: entry.signature_box };
+            group.items.push(item);
             accountsPdfItems.push(item);
           }
+          accountsZipGroups.push(group);
         } catch (error) {
           accountsPdfItems.push({ file, kind: "archive", status: "Failed", error: error.message });
         }
@@ -3044,6 +3051,59 @@ function accountsPdfBlob(base64) {
   return new Blob([bytes], { type: "application/pdf" });
 }
 
+function renderAccountsZipDownloads() {
+  $("#accountsZipDownloads").innerHTML = accountsZipGroups.map(group => {
+    const name = escapeZipFilename(group.file.name);
+    if (group.error) return `<div class="text-err">${name}: ${escapeZipFilename(group.error)}</div>`;
+    if (!group.downloadUrl) return "";
+    const signed = group.items.filter(item => item.status === "Signed").length;
+    return `<div style="margin-bottom:10px;"><a class="btn secondary" href="${group.downloadUrl}" download="${escapeZipFilename(group.downloadName)}">Download ${escapeZipFilename(group.downloadName)}</a><div class="meta">${name}: ${signed} PDFs signed, ${group.items.length - signed} PDFs not signed. Unsigned originals and a summary are included.</div></div>`;
+  }).join("");
+}
+
+async function signAccountsZip(group, pin) {
+  group.error = "";
+  $("#accountsPdfStatus").textContent = `Signing ${group.file.name}… Keep the DSC token connected.`;
+  try {
+    const response = await fetch(`${SIGN_HELPER_URL}/accounts-zip`, {
+      method: "POST", headers: { "Content-Type": "application/zip", "X-DSC-PIN": pin }, body: group.file,
+      signal: AbortSignal.timeout(2 * 60 * 1000)
+    });
+    const started = await response.json();
+    if (!response.ok) throw new Error(started.detail || "Could not start Accounts ZIP signing.");
+    let result;
+    for (let attempt = 0; attempt < 1800; attempt++) {
+      const status = await fetch(`${SIGN_HELPER_URL}/sign-zip/${started.job_id}`, { signal: AbortSignal.timeout(10000) });
+      result = await status.json();
+      if (!status.ok) throw new Error(result.detail || "Could not read ZIP signing progress.");
+      for (const entry of result.files) {
+        const item = group.items.find(item => item.archiveEntry === entry.filename);
+        if (item) { item.status = entry.status; item.error = entry.error; }
+      }
+      renderAccountsPdfReview();
+      if (result.state === "failed") throw new Error(result.error || "Accounts ZIP signing failed.");
+      if (result.state === "complete") break;
+      await new Promise(resolve => setTimeout(resolve, 700));
+    }
+    if (result.state !== "complete") throw new Error("ZIP signing is still running. Keep the helper open and review again after it finishes.");
+    const download = await fetch(`${SIGN_HELPER_URL}/sign-zip/${started.job_id}/download`, { signal: AbortSignal.timeout(2 * 60 * 1000) });
+    if (!download.ok) throw new Error("Signing finished, but the ZIP download failed.");
+    if (group.downloadUrl) URL.revokeObjectURL(group.downloadUrl);
+    group.downloadUrl = URL.createObjectURL(await download.blob());
+    const signed = group.items.some(item => item.status === "Signed");
+    group.downloadName = group.file.name.replace(/\.zip$/i, "") + (signed ? "_signed.zip" : "_processed.zip");
+    renderAccountsZipDownloads();
+    return Boolean(result.signing_stopped);
+  } catch (error) {
+    group.error = error.message;
+    group.items.filter(item => ["Ready", "Signing"].includes(item.status)).forEach(item => {
+      item.status = "Failed"; item.error = error.message;
+    });
+    renderAccountsZipDownloads();
+    return true;
+  }
+}
+
 async function signAccountsPdfs() {
   const pin = $("#accountsSignPin").value;
   const modalStatus = $("#accountsSignModalStatus");
@@ -3053,7 +3113,8 @@ async function signAccountsPdfs() {
   accountsPdfSigning = true;
   $("#accountsPdfFiles").disabled = true;
   $("#btnReviewAccountsPdfs").disabled = true;
-  const readyItems = accountsPdfItems.filter(item => item.status === "Ready");
+  const readyItems = accountsPdfItems.filter(item => item.status === "Ready" && !item.zipGroup);
+  let signingStopped = false;
   closeAccountsSignModal();
   for (const item of readyItems) {
     item.status = "Signing";
@@ -3071,7 +3132,7 @@ async function signAccountsPdfs() {
         item.status = "Failed";
         item.error = result.detail || `Signing failed (${response.status}).`;
         renderAccountsPdfReview();
-        if (response.status === 401 || response.status === 503) break;
+        if (response.status === 401 || response.status === 503) { signingStopped = true; break; }
         continue;
       }
       item.status = "Signed";
@@ -3081,12 +3142,16 @@ async function signAccountsPdfs() {
       item.status = "Failed";
       item.error = error.name === "TimeoutError" ? "Signing timed out." : error.message;
       renderAccountsPdfReview();
-      if (error.name === "TypeError") break;
+      if (error.name === "TypeError" || error.name === "TimeoutError") { signingStopped = true; break; }
     }
     renderAccountsPdfReview();
   }
+  for (const group of accountsZipGroups) {
+    if (signingStopped) break;
+    if (group.items.some(item => item.status === "Ready")) signingStopped = await signAccountsZip(group, pin);
+  }
   const signed = accountsPdfItems.filter(item => item.status === "Signed").length;
-  $("#accountsPdfStatus").textContent = `${signed} PDF${signed === 1 ? "" : "s"} signed. Download signed files from the table; originals remain unchanged.`;
+  $("#accountsPdfStatus").textContent = `${signed} PDF${signed === 1 ? "" : "s"} signed. Download your ZIPs below, or standalone signed PDFs from the table.`;
   showAccountsPdfSummary();
   $("#accountsSignPin").value = "";
   accountsPdfSigning = false;
