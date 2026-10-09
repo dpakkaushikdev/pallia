@@ -169,7 +169,9 @@ Access follows the EEE-Taxi permission, including attachment downloads.
 
 Document entries require **Save** after uploading; saving clears the form for
 another DS/Route entry. The saved list shows ten records per page, total counts,
-and filters for DS/Route, client and updated date (India time). Past-entry edits
+and filters for DS/Route, client and updated date (India time). It lists each
+document name with a view option; viewing a saved attachment does not require
+the edit password. Past-entry edits
 and deletion require the shared Masters edit password. The latest editor/date
 and a separate audit log are stored; deleting source files preserves the audit.
 

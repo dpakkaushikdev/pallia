@@ -560,6 +560,11 @@
     .ed-status-badge.used {background:#ecfdf5;color:#047857;}
     #pane-eee-document-history .ed-table-wrap {max-height:680px;overflow:auto;border:1px solid var(--border);border-radius:8px;}
     #pane-eee-document-history thead th {position:sticky;top:0;z-index:1;background:var(--panel);}
+    .ed-record-docs {display:grid;gap:6px;min-width:210px;max-height:176px;overflow:auto;padding:2px;}
+    .ed-record-doc {display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid var(--border);padding:2px 0 5px;}
+    .ed-record-doc>span {display:grid;gap:2px;min-width:0;}
+    .ed-record-doc>span strong {font-size:11px;color:var(--text);}
+    .ed-record-doc>span small {max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim);}
     #ehEntries input[type="checkbox"],#ehAll {width:16px;height:16px;accent-color:var(--accent);cursor:pointer;}
     @media(max-width:850px) {.ed-entry-form {grid-template-columns:minmax(0,1fr) 150px;} .ed-entry-form .btn {grid-column:1/-1;justify-self:start;} .ed-filters label:first-child {max-width:none;} }
     @media(max-width:520px) {.ed-entry-form {grid-template-columns:1fr;} .ed-filters label {flex:1 1 100%;} .ed-entry-form .btn {width:100%;} }
@@ -943,7 +948,7 @@
  <button class="btn" id="edSearchButton">Apply filters</button><button class="btn secondary" id="edClear">Clear</button></div>
  <div class="meta" id="edCount"></div>
 
- <div style="overflow:auto;"><table class="data-table"><thead><tr><th>DS no/Route No</th><th>Client</th><th>Attachments</th><th>Status</th><th>Updated</th><th>Edited by / date</th><th>Actions</th></tr></thead><tbody id="edEntries"></tbody></table></div>
+ <div style="overflow:auto;"><table class="data-table"><thead><tr><th>DS no/Route No</th><th>Client</th><th>Documents / View</th><th>Status</th><th>Updated</th><th>Edited by / date</th><th>Actions</th></tr></thead><tbody id="edEntries"></tbody></table></div>
  <div style="display:flex;gap:8px;align-items:center;margin-top:12px;"><button class="btn secondary sm" id="edPrevious">Previous</button><span class="meta" id="edPageInfo"></span><button class="btn secondary sm" id="edNext">Next</button></div>
       </div>
     </div>
@@ -954,7 +959,7 @@
  <label>Updated from<input id="ehFrom" type="date"></label><label>Updated to<input id="ehTo" type="date"></label><label>Status<select id="ehFilterStatus"><option value="">All statuses</option><option value="false">Ready</option><option value="true">Used</option></select></label>
  <button class="btn" id="ehSearchButton">Apply filters</button><button class="btn secondary" id="ehClear">Clear</button></div>
  <div class="ed-list-toolbar"><div class="meta" id="ehCount" role="status"></div><div class="ed-bulk-tools"><span class="meta" id="ehSelected">0 selected</span><button class="btn danger sm" id="ehDelete" disabled>Delete selected</button></div></div>
- <div class="ed-table-wrap"><table class="data-table"><thead><tr><th><input type="checkbox" id="ehAll" aria-label="Select all visible entries"></th><th>DS no/Route No</th><th>Client</th><th>Attachments</th><th>Status</th><th>Updated</th><th>Edited by / date</th><th>Actions</th></tr></thead><tbody id="ehEntries"></tbody></table></div>
+ <div class="ed-table-wrap"><table class="data-table"><thead><tr><th><input type="checkbox" id="ehAll" aria-label="Select all visible entries"></th><th>DS no/Route No</th><th>Client</th><th>Documents / View</th><th>Status</th><th>Updated</th><th>Edited by / date</th><th>Actions</th></tr></thead><tbody id="ehEntries"></tbody></table></div>
  <div style="display:flex;gap:8px;align-items:center;margin-top:12px;"><button class="btn secondary sm" id="ehPrevious">Previous</button><span class="meta" id="ehPageInfo"></span><button class="btn secondary sm" id="ehNext">Next</button></div></div></div>
     <div class="tab-pane" id="pane-eee-billing">
       <div class="page-hd">

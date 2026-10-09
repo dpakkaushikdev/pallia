@@ -1,4 +1,4 @@
-const ed = {entry: null, busy: false, offset: 0, total: 0, listVersion: 0, previewUrl: null, password: "", historyOffset: 0, historyTotal: 0, historyVersion: 0};
+const ed = {entry: null, entriesById: {}, busy: false, offset: 0, total: 0, listVersion: 0, previewUrl: null, password: "", historyOffset: 0, historyTotal: 0, historyVersion: 0};
 const edNames = {invoice: "Previously uploaded invoice (remove)", ds: "DS", parking: "Parking", toll_mcd: "Toll / MCD", gps: "GPS", email_screenshot: "Email Screenshot"};
 const edBase = "/api/eee-taxi/documents";
 const edEl = id => document.getElementById(id);
@@ -21,6 +21,14 @@ function edStatus(text, error = false) {
   edEl("edStatus").className = error ? "text-err" : "meta";
 }
 
+function edRecordDocuments(entry) {
+  if (!entry.files.length) return '<span class="meta">No documents</span>';
+  return `<div class="ed-record-docs">${entry.files.map(file => `<div class="ed-record-doc">
+    <span><strong>${edEscape(edNames[file.category] || file.category)}</strong><small title="${edEscape(file.filename)}">${edEscape(file.filename)}</small></span>
+    <button class="btn secondary sm" data-doc-view-entry="${entry.id}" data-doc-file="${file.id}" aria-label="View ${edEscape(file.filename)}">View</button>
+  </div>`).join("")}</div>`;
+}
+
 async function edList(prefix, reset = true) {
   const history = prefix === "eh", offsetKey = history ? "historyOffset" : "offset", totalKey = history ? "historyTotal" : "total";
   const pageSize = history ? 30 : 10;
@@ -35,11 +43,12 @@ async function edList(prefix, reset = true) {
     if (history && edEl("ehFilterStatus").value) params.set("used", edEl("ehFilterStatus").value);
     const data = await api(`${edBase}?${params}`);
     if (version !== ed[versionKey]) return;
+    Object.assign(ed.entriesById, Object.fromEntries(data.entries.map(entry => [entry.id, entry])));
     ed[totalKey] = data.total;
     edEl(prefix+"Entries").innerHTML = data.entries.map(entry => `<tr>
       ${history ? `<td><input type="checkbox" data-doc-select="${entry.id}" aria-label="Select ${edEscape(entry.route_no)}"></td>` : ""}
       <td><button class="btn secondary sm" data-doc-open="${entry.id}">${edEscape(entry.route_no)}</button></td>
-      <td>${entry.client_profile.toUpperCase()}</td><td>${entry.files.length} files</td><td><span class="ed-status-badge ${entry.status}">${entry.status === "used" ? "Used" : "Ready"}</span>${entry.used_invoice_no && entry.status === "used" ? `<br><small>${edEscape(entry.used_invoice_no)}</small>` : ""}</td>
+      <td>${entry.client_profile.toUpperCase()}</td><td>${edRecordDocuments(entry)}</td><td><span class="ed-status-badge ${entry.status}">${entry.status === "used" ? "Used" : "Ready"}</span>${entry.used_invoice_no && entry.status === "used" ? `<br><small>${edEscape(entry.used_invoice_no)}</small>` : ""}</td>
       <td>${new Date(entry.updated_at).toLocaleString("en-IN", {timeZone:"Asia/Kolkata"})}</td><td>${entry.edited_by ? edEscape(entry.edited_by)+"<br>"+new Date(entry.edited_at).toLocaleString("en-IN", {timeZone:"Asia/Kolkata"}) : "-"}</td>
       <td><button class="btn secondary sm" data-doc-edit="${entry.id}">Edit</button> <button class="btn danger sm" data-doc-delete="${entry.id}">Delete</button></td></tr>`).join("") || `<tr><td colspan="8" class="meta">No matching saved entries.</td></tr>`;
     edEl(prefix+"Count").textContent = `Total saved records: ${data.total_all}. Matching records: ${data.total}. Showing up to ${pageSize}.`;
@@ -223,10 +232,11 @@ function edClosePreview() {
   ed.previewUrl = null;
 }
 
-async function edFile(fileId, preview) {
-  if (!ed.entry) return;
-  const file = ed.entry.files.find(file => file.id === fileId);
-  const entryId = ed.entry.id;
+async function edFile(fileId, preview, entryIdOverride = null) {
+  const entryId = entryIdOverride || ed.entry?.id;
+  const source = entryIdOverride ? ed.entriesById[entryIdOverride] : ed.entry;
+  const file = source?.files.find(file => file.id === fileId);
+  if (!entryId || !file) return;
   try {
     const response = await fetch(`${edBase}/${entryId}/files/${fileId}?inline=${preview}`, {headers: authHeaders()});
     if (!response.ok) throw new Error("Could not read document. Refresh the entry and try again.");
@@ -258,7 +268,7 @@ for(const prefix of ["ed","eh"]) {
  edEl(prefix+"Search").addEventListener("keydown",event=>{if(event.key==="Enter")edList(prefix);});
  edEl(prefix+"Previous").addEventListener("click",()=>{const key=prefix==="eh"?"historyOffset":"offset";ed[key]=Math.max(0,ed[key]-(prefix==="eh"?30:10));edList(prefix,false);});
  edEl(prefix+"Next").addEventListener("click",()=>{ed[prefix==="eh"?"historyOffset":"offset"]+=(prefix==="eh"?30:10);edList(prefix,false);});
- edEl(prefix+"Entries").addEventListener("click",event=>{const button=event.target.closest("button");if(!button)return;if(button.dataset.docOpen)edOpen(button.dataset.docOpen);if(button.dataset.docEdit)edOpen(button.dataset.docEdit,true);if(button.dataset.docDelete)edDelete([button.dataset.docDelete],prefix==="eh");});
+ edEl(prefix+"Entries").addEventListener("click",event=>{const button=event.target.closest("button");if(!button)return;if(button.dataset.docViewEntry)edFile(button.dataset.docFile,true,button.dataset.docViewEntry);if(button.dataset.docOpen)edOpen(button.dataset.docOpen);if(button.dataset.docEdit)edOpen(button.dataset.docEdit,true);if(button.dataset.docDelete)edDelete([button.dataset.docDelete],prefix==="eh");});
 }
 function edUpdateSelection() {
  const boxes=Array.from(edEl("ehEntries").querySelectorAll("[data-doc-select]"));
