@@ -1,7 +1,5 @@
 """Snapshot supporting files with an invoice before marking their source used."""
 import io
-import re
-import zipfile
 from datetime import datetime
 
 from sqlalchemy import select, func
@@ -26,12 +24,56 @@ def available_documents(db, route_nos, client_profile):
     return dict(rows)
 
 
-def safe_name(value):
-    return re.sub(r'[^\w .()-]', '_', value).strip(' .')[:180] or 'document'
+def _image_pdf(image_data, page_size):
+    """Turn a screenshot into one full-size invoice-paper PDF page."""
+    from PIL import Image, ImageOps
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas
+
+    with Image.open(io.BytesIO(image_data)) as source:
+        image = ImageOps.exif_transpose(source).convert("RGBA")
+        white = Image.new("RGBA", image.size, "white")
+        white.alpha_composite(image)
+        flattened = io.BytesIO()
+        white.convert("RGB").save(flattened, format="JPEG", quality=92)
+    flattened.seek(0)
+    output = io.BytesIO()
+    page = canvas.Canvas(output, pagesize=page_size, pageCompression=1)
+    page.drawImage(ImageReader(flattened), 0, 0, width=page_size[0], height=page_size[1],
+                   preserveAspectRatio=True, anchor="c")
+    page.showPage()
+    page.save()
+    return output.getvalue()
+
+
+def append_supporting_pages(invoice_pdf, files):
+    """Place the invoice first, followed by DS, parking, toll, GPS and EY email pages."""
+    from pypdf import PdfReader, PdfWriter
+
+    category_order = {"ds": 0, "parking": 1, "toll_mcd": 2, "gps": 3, "email_screenshot": 4}
+    files = sorted(files, key=lambda item: (category_order.get(item.category, 99), item.created_at, item.id))
+    original = PdfReader(io.BytesIO(invoice_pdf))
+    if not original.pages:
+        raise ValueError("The generated invoice PDF has no pages.")
+    page_size = (float(original.pages[0].mediabox.width), float(original.pages[0].mediabox.height))
+    writer = PdfWriter()
+    writer.append(original)
+    for document in files:
+        if document.content_type == "application/pdf":
+            supporting = PdfReader(io.BytesIO(document.data))
+            if not supporting.pages:
+                continue
+            writer.append(supporting)
+        else:
+            image_pdf = _image_pdf(document.data, page_size)
+            writer.append(PdfReader(io.BytesIO(image_pdf)))
+    output = io.BytesIO()
+    writer.write(output)
+    return output.getvalue()
 
 
 def attach_documents(invoice, batch, db):
-    if invoice.document_zip_data:
+    if not invoice.pdf_data:
         return
     route = normalize_route(invoice.route_no)
     if not route:
@@ -44,11 +86,7 @@ def attach_documents(invoice, batch, db):
     files = [file for file in entry.files if file.category != 'invoice'] if entry else []
     if not entry or not files:
         return
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
-        for index, file in enumerate(files, 1):
-            archive.writestr(f'{file.category}/{index:03d}_{safe_name(file.filename)}', file.data)
-    invoice.document_zip_data = buffer.getvalue()
+    invoice.pdf_data = append_supporting_pages(invoice.pdf_data, files)
     entry.used_revision = entry.revision
     entry.used_at = datetime.utcnow()
     entry.used_invoice_no = invoice.invoice_no

@@ -176,8 +176,9 @@ and a separate audit log are stored; deleting source files preserves the audit.
 Invoice generation matches saved documents by client and normalized DS/Route
 number, copies the files into the invoice record, and marks the entry **used**.
 The two billing ZIP downloads contain either invoices only or invoices plus
-supporting files grouped by DS/Route and invoice number. Supporting files remain
-separate from signed PDFs, preserving the original DSC signature. **Document
+supporting pages combined into one PDF per invoice. The invoice is page one,
+followed by DS, parking, toll / MCD, GPS and EY email screenshot pages. These
+pages are added before DSC signing so the signature covers the complete PDF. **Document
 History** shows the latest 30 saved entries, with date/client/status filters and
 checkboxes for password-protected bulk deletion of source uploads; completed invoice attachment copies remain available. Saving later
 edits makes the changed document revision ready for another attachment.

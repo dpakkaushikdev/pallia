@@ -297,6 +297,9 @@ def generate_next_invoice(batch_id: str, db: Session) -> dict:
         inv_rec.sig_box      = [float(v) for v in sig_box] if sig_box else None
         from app.services.eee_taxi_documents import attach_documents
         attach_documents(inv_rec, batch, db)
+        # Append supporting pages before either local dummy stamping or the
+        # user's USB DSC signature. This keeps the signature over every page.
+        pdf_path.write_bytes(inv_rec.pdf_data)
 
         if sign_mode == "dummy":
             signed_path = sign_eee_taxi_pdf_dummy(pdf_path, sig_box=sig_box)
@@ -358,13 +361,9 @@ def build_zip(batch_id: str, db: Session, booking_type: str | None = None, with_
             data = signed_pdf_bytes(inv)
             if data:
                 if with_documents:
-                    from app.services.eee_taxi_documents import safe_name
-                    folder = safe_name(inv.route_no or 'invoice') + '_' + safe_name(inv.invoice_no or inv.id)
-                    zf.writestr(folder + '/' + signed_filename(inv), data)
-                    if inv.document_zip_data:
-                        with zipfile.ZipFile(io.BytesIO(inv.document_zip_data)) as docs:
-                            for name in docs.namelist():
-                                zf.writestr(folder + '/documents/' + name, docs.read(name))
+                    # Supporting pages are already part of the PDF and were
+                    # included before DSC signing during invoice generation.
+                    zf.writestr(signed_filename(inv), data)
                 else:
                     zf.writestr(signed_filename(inv), data)
     return buf.getvalue()
