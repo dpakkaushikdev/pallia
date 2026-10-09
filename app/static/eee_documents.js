@@ -21,10 +21,11 @@ function edStatus(text, error = false) {
   edEl("edStatus").className = error ? "text-err" : "meta";
 }
 
-function edRecordDocuments(entry) {
-  if (!entry.files.length) return '<span class="meta">No documents</span>';
-  return `<div class="ed-record-docs">${entry.files.map(file => `<div class="ed-record-doc">
-    <span><strong>${edEscape(edNames[file.category] || file.category)}</strong><small title="${edEscape(file.filename)}">${edEscape(file.filename)}</small></span>
+function edRecordDocuments(entry, category) {
+  const files = entry.files.filter(file => file.category === category);
+  if (!files.length) return '<span class="meta">NA</span>';
+  return `<div class="ed-record-docs">${files.map(file => `<div class="ed-record-doc">
+    <span title="${edEscape(file.filename)}">${edEscape(file.filename)}</span>
     <button class="btn secondary sm" data-doc-view-entry="${entry.id}" data-doc-file="${file.id}" aria-label="View ${edEscape(file.filename)}">View</button>
   </div>`).join("")}</div>`;
 }
@@ -48,9 +49,9 @@ async function edList(prefix, reset = true) {
     edEl(prefix+"Entries").innerHTML = data.entries.map(entry => `<tr>
       ${history ? `<td><input type="checkbox" data-doc-select="${entry.id}" aria-label="Select ${edEscape(entry.route_no)}"></td>` : ""}
       <td><button class="btn secondary sm" data-doc-open="${entry.id}">${edEscape(entry.route_no)}</button></td>
-      <td>${entry.client_profile.toUpperCase()}</td><td>${edRecordDocuments(entry)}</td><td><span class="ed-status-badge ${entry.status}">${entry.status === "used" ? "Used" : "Ready"}</span>${entry.used_invoice_no && entry.status === "used" ? `<br><small>${edEscape(entry.used_invoice_no)}</small>` : ""}</td>
+      <td>${entry.client_profile.toUpperCase()}</td>${["ds","parking","toll_mcd","gps","email_screenshot"].map(category => `<td>${entry.client_profile === "pwc" && category === "email_screenshot" ? '<span class="meta">—</span>' : edRecordDocuments(entry,category)}</td>`).join("")}<td><span class="ed-status-badge ${entry.status}">${entry.status === "used" ? "Used" : "Ready"}</span>${entry.used_invoice_no && entry.status === "used" ? `<br><small>${edEscape(entry.used_invoice_no)}</small>` : ""}</td>
       <td>${new Date(entry.updated_at).toLocaleString("en-IN", {timeZone:"Asia/Kolkata"})}</td><td>${entry.edited_by ? edEscape(entry.edited_by)+"<br>"+new Date(entry.edited_at).toLocaleString("en-IN", {timeZone:"Asia/Kolkata"}) : "-"}</td>
-      <td><button class="btn secondary sm" data-doc-edit="${entry.id}">Edit</button> <button class="btn danger sm" data-doc-delete="${entry.id}">Delete</button></td></tr>`).join("") || `<tr><td colspan="8" class="meta">No matching saved entries.</td></tr>`;
+      <td><button class="btn secondary sm" data-doc-edit="${entry.id}">Edit</button> <button class="btn danger sm" data-doc-delete="${entry.id}">Delete</button></td></tr>`).join("") || `<tr><td colspan="${history ? 12 : 11}" class="meta">No matching saved entries.</td></tr>`;
     edEl(prefix+"Count").textContent = `Total saved records: ${data.total_all}. Matching records: ${data.total}. Showing up to ${pageSize}.`;
     edEl(prefix+"PageInfo").textContent = data.total ? `${ed[offsetKey]+1}-${Math.min(ed[offsetKey]+pageSize,data.total)} of ${data.total}` : "0 entries";
     edEl(prefix+"Previous").disabled = ed[offsetKey] === 0;
