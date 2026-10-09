@@ -165,6 +165,7 @@ def sign_pdf_bytes(
     sig_box: tuple[float, float, float, float] | list[float] | None = None,
     require_signature_anchors: bool = False,
     token_serial: str | None = None,
+    signing_profile: str | None = None,
 ) -> bytes:
     """Sign PDF bytes using the USB DSC token. Returns signed PDF bytes.
 
@@ -177,6 +178,7 @@ def sign_pdf_bytes(
         WrongPIN: Incorrect PIN.
         SigningError: Any other failure.
     """
+    signing_profile = signing_profile or ("pallia-accounts" if require_signature_anchors else "eee" if sig_box is not None else "pallia-billing")
     pdf_bytes = _strip_trailing_non_pdf_data(pdf_bytes)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir) / "input.pdf"
@@ -200,14 +202,16 @@ def sign_pdf_bytes(
             try:
                 from .token_certificate import select_signing_certificate
                 from .token_device import open_token_session
+                from .token_profile import validate_certificate_profile
             except ImportError:
                 from token_certificate import select_signing_certificate
                 from token_device import open_token_session
+                from token_profile import validate_certificate_profile
         except ImportError as exc:
             raise SigningError("pyhanko not installed.") from exc
 
         try:
-            session_ctx = open_token_session(PKCS11_LIB, pin, token_serial)
+            session_ctx = open_token_session(PKCS11_LIB, pin, token_serial, signing_profile)
         except ValueError as exc:
             raise CertificateSelectionError(str(exc)) from exc
         except Exception as exc:
@@ -223,6 +227,7 @@ def sign_pdf_bytes(
             with session_ctx as session:
                 try:
                     cert, key_selector, chain = select_signing_certificate(session)
+                    validate_certificate_profile(cert, signing_profile)
                 except ValueError as exc:
                     raise CertificateSelectionError(str(exc)) from exc
                 cms_signer = PKCS11Signer(pkcs11_session=session, signing_cert=cert,

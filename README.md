@@ -217,6 +217,14 @@ on their side, following changing vertical positions. Billing ZIP signing
 rejects missing or cramped footer anchors before opening the DSC session.
 Tata and Accounts right-side footer placement remains supported.
 
+Helper **1.14.0** names connected signing certificates and enforces the
+intended signer: EEE = JISHNU NANDA, Pallia Billing (Tata and Mahindra) = VINOD,
+and Pallia Accounts = RAMASHANKAR SHARMA. The public certificate is checked
+before attempting a PIN, and the actual signing certificate is checked again
+before signing. Other-flow devices are disabled in each DSC selector. Token
+refresh queries only currently occupied reader slots, avoiding empty-slot
+errors after a USB device is unplugged.
+
 ---
 
 ## Next step: fill in the real TMS selectors

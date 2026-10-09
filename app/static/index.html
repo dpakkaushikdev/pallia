@@ -2848,14 +2848,24 @@ async function refreshDscTokens(inputId) {
   const select = document.getElementById(inputId + "Token");
   select.disabled = true;
   try {
-    const response = await fetch(`${SIGN_HELPER_URL}/tokens`, {signal: AbortSignal.timeout(15000)});
+    const health = await fetch(`${SIGN_HELPER_URL}/health`, {signal: AbortSignal.timeout(5000)});
+    if (!health.ok || !(await health.json()).supports_signer_profiles) throw new Error("Update PalliaSignHelper to v1.14.0 for signer restrictions.");
+    const profile = dscFields[inputId];
+    const response = await fetch(`${SIGN_HELPER_URL}/tokens?profile=${encodeURIComponent(profile)}`, {signal: AbortSignal.timeout(15000)});
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || "Update the signing helper to v1.11.0.");
     const saved = localStorage.getItem("dsc-device-" + dscFields[inputId]);
-    select.replaceChildren(new Option("Select the intended DSC", ""));
-    for (const token of result.tokens) select.append(new Option(`${token.label} (${token.serial})`, token.serial));
-    if (saved && result.tokens.some(token => token.serial === saved)) select.value = saved;
-    if (!result.tokens.length) select.options[0].textContent = "Connect the DSC and refresh";
+    const requiredSigner = {eee: "JISHNU NANDA", "pallia-billing": "VINOD", "pallia-accounts": "RAMASHANKAR SHARMA"}[profile];
+    select.replaceChildren(new Option(`Select ${requiredSigner} DSC`, ""));
+    for (const token of result.tokens) {
+      const option = new Option(`${token.signer_name} (${token.serial})${token.eligible ? "" : " — for another signing flow"}`, token.serial);
+      option.disabled = !token.eligible;
+      select.append(option);
+    }
+    const eligible = result.tokens.filter(token => token.eligible);
+    if (saved && eligible.some(token => token.serial === saved)) select.value = saved;
+    else if (eligible.length === 1) select.value = eligible[0].serial;
+    if (!eligible.length) select.options[0].textContent = `Connect ${requiredSigner} DSC and refresh`;
   } catch (error) {
     select.replaceChildren(new Option(error.message, ""));
   } finally { select.disabled = false; }
@@ -3229,7 +3239,7 @@ async function signAccountsPdfs() {
       const pdfB64 = _arrayBufferToBase64(await item.file.arrayBuffer());
       const response = await fetch(`${SIGN_HELPER_URL}/sign`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pdf_b64: pdfB64, pin, token_serial: tokenSerial, sig_box: item.signatureBox, require_signature_anchors: true }),
+        body: JSON.stringify({ pdf_b64: pdfB64, pin, token_serial: tokenSerial, signing_profile: "pallia-accounts", sig_box: item.signatureBox, require_signature_anchors: true }),
         signal: AbortSignal.timeout(2 * 60 * 1000)
       });
       const result = await response.json();
@@ -3317,7 +3327,7 @@ async function doSignPdf() {
     const signRes = await fetch(`${SIGN_HELPER_URL}/sign`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pdf_b64: pdfB64, pin, token_serial: selectedDsc("pinInput") }),
+      body: JSON.stringify({ pdf_b64: pdfB64, pin, token_serial: selectedDsc("pinInput"), signing_profile: "pallia-billing" }),
     });
     if (signRes.status === 401) throw new Error("Incorrect PIN. Please try again.");
     if (signRes.status === 503) throw new Error("USB token not found. Make sure the DSC pendrive is connected.");
@@ -3724,7 +3734,7 @@ async function eetSignOne(inv) {
     signRes = await fetch(`${SIGN_HELPER_URL}/sign`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pdf_b64: pdfB64, pin: _eetPin, token_serial: _eetTokenSerial, sig_box: inv.sig_box || null }),
+      body: JSON.stringify({ pdf_b64: pdfB64, pin: _eetPin, token_serial: _eetTokenSerial, signing_profile: "eee", sig_box: inv.sig_box || null }),
     });
   } catch (_) {
     throw eetFatalSignError("Signing helper stopped responding. Start PalliaSignHelper.exe and click Retry.");

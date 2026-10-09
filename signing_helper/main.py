@@ -16,7 +16,7 @@ import time
 import uuid
 import zipfile
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import uvicorn
 from loguru import logger
@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from signer import CertificateSelectionError, SigningError, TokenNotFound, WrongPIN, inspect_signature_box, sign_pdf_bytes
 
 PORT = 7777
-VERSION = "1.13.0"   # 1.13: anchor-based left/right placement for Mahindra and Tata
+VERSION = "1.14.0"   # 1.14: enforce the intended signer per flow and refresh present tokens
 MAX_ZIP_BYTES = 100 * 1024 * 1024
 MAX_ZIP_ENTRIES = 500
 MAX_ZIP_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
@@ -81,6 +81,7 @@ class SignRequest(BaseModel):
     sig_box: Optional[list[float]] = None
     require_signature_anchors: bool = False
     token_serial: Optional[str] = None
+    signing_profile: Optional[Literal["eee", "pallia-billing", "pallia-accounts"]] = None
 
 
 class InspectPdfRequest(BaseModel):
@@ -102,15 +103,17 @@ def health():
         "version": VERSION,
         "supports_sig_box": True,
         "supports_token_selection": True,
+        "supports_signer_profiles": True,
     }
 
 
 @app.get("/tokens")
-def list_tokens():
+def list_tokens(profile: Optional[Literal["eee", "pallia-billing", "pallia-accounts"]] = None):
+    from token_profile import describe_token
     from token_device import connected_tokens, token_serial
     from signer import PKCS11_LIB
     try:
-        return {"tokens": [{"serial": token_serial(token), "label": token.label.strip()}
+        return {"tokens": [{"serial": token_serial(token), "label": token.label.strip(), **describe_token(token, profile)}
                            for token in connected_tokens(PKCS11_LIB)]}
     except Exception:
         return JSONResponse(status_code=503, content={"detail": "Cannot read DSC devices. Check the USB connection and token driver."})
@@ -128,6 +131,7 @@ def sign(body: SignRequest):
             pdf_bytes, body.pin, sig_box=body.sig_box,
             require_signature_anchors=body.require_signature_anchors,
             **({"token_serial": body.token_serial} if body.token_serial else {}),
+            **({"signing_profile": body.signing_profile} if body.signing_profile else {}),
         )
     except TokenNotFound as exc:
         return JSONResponse(status_code=503, content={"detail": str(exc)})
