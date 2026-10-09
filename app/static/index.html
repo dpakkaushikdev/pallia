@@ -546,6 +546,23 @@
       .content-header, .tab-pane { padding-left: 16px; padding-right: 16px; }
     }
 
+    .ed-entry-form {display:grid;grid-template-columns:minmax(320px,480px) 170px max-content;gap:16px;align-items:end;margin-top:20px;}
+    .ed-entry-form .field-group {min-width:0;}
+    .ed-entry-form input,.ed-entry-form select,.ed-filters input,.ed-filters select {width:100%;height:42px;box-sizing:border-box;font-size:13px;}
+    .ed-entry-form .btn,.ed-filters .btn {height:42px;white-space:nowrap;}
+    .ed-filters {display:flex;align-items:end;gap:14px;flex-wrap:wrap;margin:20px 0 16px;}
+    .ed-filters label {display:flex;flex-direction:column;gap:7px;font-size:12px;font-weight:500;flex:0 1 170px;min-width:140px;}
+    .ed-filters label:first-child {flex:1 1 320px;max-width:480px;}
+    .ed-filters label:first-child input {min-width:0;}
+    .ed-list-toolbar {display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:16px 0;}
+    .ed-bulk-tools {display:flex;align-items:center;gap:12px;}
+    .ed-status-badge {display:inline-flex;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:600;background:#eff6ff;color:#1d4ed8;}
+    .ed-status-badge.used {background:#ecfdf5;color:#047857;}
+    #pane-eee-document-history .ed-table-wrap {max-height:680px;overflow:auto;border:1px solid var(--border);border-radius:8px;}
+    #pane-eee-document-history thead th {position:sticky;top:0;z-index:1;background:var(--panel);}
+    #ehEntries input[type="checkbox"],#ehAll {width:16px;height:16px;accent-color:var(--accent);cursor:pointer;}
+    @media(max-width:850px) {.ed-entry-form {grid-template-columns:minmax(0,1fr) 150px;} .ed-entry-form .btn {grid-column:1/-1;justify-self:start;} .ed-filters label:first-child {max-width:none;} }
+    @media(max-width:520px) {.ed-entry-form {grid-template-columns:1fr;} .ed-filters label {flex:1 1 100%;} .ed-entry-form .btn {width:100%;} }
     .ed-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:16px;}
     .ed-doc-card {border:1px solid var(--border);border-radius:10px;padding:16px;background:var(--panel);min-width:0;}
     .ed-card-title {display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;}
@@ -905,7 +922,7 @@
       <div class="card" style="padding:20px;">
         <div class="card-title">Document</div>
         <p class="meta">Create a DS/Route entry, then attach its documents. Upload PDFs or images from your PC, or paste screenshots into a category with Ctrl+V. Multiple files are supported; maximum 3 MB per file.</p>
-        <form id="edForm" style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-top:16px;">
+        <form id="edForm" class="ed-entry-form">
           <div class="field-group"><label class="field" for="edRoute">DS no/Route No</label><input type="text" id="edRoute" placeholder="Enter DS or Route number" maxlength="64" required></div>
           <div class="field-group"><label class="field" for="edClient">Client</label><select id="edClient"><option value="ey">EY</option><option value="pwc">PWC</option></select></div>
           <button class="btn" id="edSave" type="submit">Open / Create entry</button>
@@ -919,11 +936,11 @@
       </div>
       <div class="card" style="padding:20px;margin-top:16px;">
         <div class="card-title">Saved document entries</div>
-<div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap;align-items:end;">
- <label>DS no/Route No<input id="edSearch" maxlength="64" placeholder="Find DS/Route number"></label>
+<div class="ed-filters">
+ <label>DS no/Route No<input type="text" id="edSearch" maxlength="64" placeholder="Find DS/Route number"></label>
  <label>Client<select id="edFilterClient"><option value="">All clients</option><option value="ey">EY</option><option value="pwc">PWC</option></select></label>
  <label>Updated from<input id="edFrom" type="date"></label><label>Updated to<input id="edTo" type="date"></label>
- <button class="btn secondary sm" id="edSearchButton">Search</button></div>
+ <button class="btn" id="edSearchButton">Apply filters</button><button class="btn secondary" id="edClear">Clear</button></div>
  <div class="meta" id="edCount"></div>
 
  <div style="overflow:auto;"><table class="data-table"><thead><tr><th>DS no/Route No</th><th>Client</th><th>Attachments</th><th>Status</th><th>Updated</th><th>Edited by / date</th><th>Actions</th></tr></thead><tbody id="edEntries"></tbody></table></div>
@@ -931,14 +948,13 @@
       </div>
     </div>
 
-<div class="tab-pane" id="pane-eee-document-history"><div class="card" style="padding:20px;"><div class="card-title">Document History</div><p class="meta">Used documents have been copied to their invoice. Delete used source entries to free space; invoice copies remain available.</p><div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap;align-items:end;">
- <label>DS no/Route No<input id="ehSearch" maxlength="64" placeholder="Find DS/Route number"></label>
+<div class="tab-pane" id="pane-eee-document-history"><div class="card" style="padding:20px;"><div class="card-title">Document History</div><p class="meta">Latest 30 saved entries, including ready and used documents. Select records to delete their source uploads; existing invoice copies remain available. Date filters use India time.</p><div class="ed-filters">
+ <label>DS no/Route No<input type="text" id="ehSearch" maxlength="64" placeholder="Find DS/Route number"></label>
  <label>Client<select id="ehFilterClient"><option value="">All clients</option><option value="ey">EY</option><option value="pwc">PWC</option></select></label>
- <label>Updated from<input id="ehFrom" type="date"></label><label>Updated to<input id="ehTo" type="date"></label>
- <button class="btn secondary sm" id="ehSearchButton">Search</button></div>
- <div class="meta" id="ehCount"></div>
- <button class="btn danger sm" id="ehDelete">Delete selected used entries</button>
- <div style="overflow:auto;"><table class="data-table"><thead><tr><th><input type="checkbox" id="ehAll" aria-label="Select all visible entries"></th><th>DS no/Route No</th><th>Client</th><th>Attachments</th><th>Status</th><th>Updated</th><th>Edited by / date</th><th>Actions</th></tr></thead><tbody id="ehEntries"></tbody></table></div>
+ <label>Updated from<input id="ehFrom" type="date"></label><label>Updated to<input id="ehTo" type="date"></label><label>Status<select id="ehFilterStatus"><option value="">All statuses</option><option value="false">Ready</option><option value="true">Used</option></select></label>
+ <button class="btn" id="ehSearchButton">Apply filters</button><button class="btn secondary" id="ehClear">Clear</button></div>
+ <div class="ed-list-toolbar"><div class="meta" id="ehCount" role="status"></div><div class="ed-bulk-tools"><span class="meta" id="ehSelected">0 selected</span><button class="btn danger sm" id="ehDelete" disabled>Delete selected</button></div></div>
+ <div class="ed-table-wrap"><table class="data-table"><thead><tr><th><input type="checkbox" id="ehAll" aria-label="Select all visible entries"></th><th>DS no/Route No</th><th>Client</th><th>Attachments</th><th>Status</th><th>Updated</th><th>Edited by / date</th><th>Actions</th></tr></thead><tbody id="ehEntries"></tbody></table></div>
  <div style="display:flex;gap:8px;align-items:center;margin-top:12px;"><button class="btn secondary sm" id="ehPrevious">Previous</button><span class="meta" id="ehPageInfo"></span><button class="btn secondary sm" id="ehNext">Next</button></div></div></div>
     <div class="tab-pane" id="pane-eee-billing">
       <div class="page-hd">

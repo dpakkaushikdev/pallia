@@ -237,3 +237,31 @@ def test_document_startup_migration_keeps_old_saved_entries(monkeypatch):
         assert tuple(row) == ('DS-OLD',1,1,1,0)
         assert 'document_zip_data' in {column['name'] for column in inspect(connection).get_columns('eee_taxi_invoices')}
     engine.dispose()
+
+
+def test_history_thirty_latest_all_statuses_date_filter_and_bulk_delete(client, admin, edit_password):
+    from datetime import datetime, timedelta
+    from app.models import EeeTaxiDocumentFile
+    from hashlib import sha256
+    ids=[]
+    with SessionLocal() as db:
+        for index in range(32):
+            entry=EeeTaxiDocumentEntry(client_profile="pwc",route_no=f"HISTORY-{index:02}",created_by="admin@test.com",is_saved=True,edit_protected=True,updated_at=datetime(2026,10,9,6)+timedelta(minutes=index),revision=1,used_revision=1 if index%2 else 0)
+            entry.files.append(EeeTaxiDocumentFile(category="ds",filename="ds.png",content_type="image/png",size=len(png()),sha256=sha256(png()).hexdigest(),data=png(),uploaded_by="admin@test.com"))
+            db.add(entry);db.flush();ids.append(entry.id)
+        db.commit()
+    params={"search":"HISTORY-","limit":30,"updated_from":"2026-10-09","updated_to":"2026-10-09"}
+    result=client.get(URL,params=params,headers=admin)
+    assert result.status_code == 200,result.text
+    data=result.json()
+    assert data["total"] == 32 and data["page_size"] == 30 and len(data["entries"]) == 30
+    assert data["entries"][0]["route_no"] == "HISTORY-31"
+    assert {entry["status"] for entry in data["entries"]} == {"ready","used"}
+    assert len(client.get(URL,params={**params,"offset":30},headers=admin).json()["entries"]) == 2
+    assert client.get(URL,params={**params,"used":True},headers=admin).json()["total"] == 16
+    assert client.get(URL,params={**params,"used":False},headers=admin).json()["total"] == 16
+    assert client.get(URL,params={**params,"updated_from":"2026-10-10","updated_to":"2026-10-10"},headers=admin).json()["total"] == 0
+    body={"ids":ids[-3:],"used_only":False,"edit_password":edit_password}
+    assert client.post(URL+"/bulk-delete",json={**body,"edit_password":"wrong"},headers=admin).status_code == 403
+    assert client.post(URL+"/bulk-delete",json=body,headers=admin).json()["deleted"] == 3
+    assert client.get(URL,params=params,headers=admin).json()["total"] == 29

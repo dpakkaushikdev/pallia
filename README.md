@@ -177,8 +177,8 @@ number, copies the files into the invoice record, and marks the entry **used**.
 The two billing ZIP downloads contain either invoices only or invoices plus
 supporting files grouped by DS/Route and invoice number. Supporting files remain
 separate from signed PDFs, preserving the original DSC signature. **Document
-History** lists used entries for password-protected bulk deletion of source
-uploads; completed invoice attachment copies remain available. Saving later
+History** shows the latest 30 saved entries, with date/client/status filters and
+checkboxes for password-protected bulk deletion of source uploads; completed invoice attachment copies remain available. Saving later
 edits makes the changed document revision ready for another attachment.
 
 ### Installing the signing helper on a PC

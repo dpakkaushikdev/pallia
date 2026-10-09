@@ -100,6 +100,7 @@ def entry_dict(entry):
 def list_entries(client_profile: Literal["ey", "pwc"] | None = None, search: str = Query("", max_length=64),
                  updated_from: date | None = None, updated_to: date | None = None,
                  used: bool | None = None, offset: int = Query(0, ge=0),
+                 limit: int = Query(10, ge=1, le=30),
                  _: User = Depends(eee_user), db: Session = Depends(get_db)):
     if updated_from and updated_to and updated_from > updated_to:
         raise HTTPException(400, "From date must be on or before To date.")
@@ -120,8 +121,8 @@ def list_entries(client_profile: Literal["ey", "pwc"] | None = None, search: str
     total_all = db.scalar(select(func.count()).select_from(EeeTaxiDocumentEntry).where(EeeTaxiDocumentEntry.is_saved.is_(True)))
     rows = db.scalars(select(EeeTaxiDocumentEntry).where(condition)
                       .order_by(EeeTaxiDocumentEntry.updated_at.desc(), EeeTaxiDocumentEntry.id)
-                      .offset(offset).limit(10)).all()
-    return {"entries": [entry_dict(row) for row in rows], "total": total, "total_all": total_all, "page_size": 10}
+                      .offset(offset).limit(limit)).all()
+    return {"entries": [entry_dict(row) for row in rows], "total": total, "total_all": total_all, "page_size": limit}
 
 
 @router.post("/bulk-delete")
