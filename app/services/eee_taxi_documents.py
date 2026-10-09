@@ -19,7 +19,7 @@ def available_documents(db, route_nos, client_profile):
         return {}
     rows = db.execute(select(EeeTaxiDocumentEntry.route_no, func.count(EeeTaxiDocumentFile.id))
         .join(EeeTaxiDocumentFile, EeeTaxiDocumentFile.entry_id == EeeTaxiDocumentEntry.id)
-        .where(EeeTaxiDocumentEntry.is_saved.is_(True),
+        .where(EeeTaxiDocumentEntry.is_saved.is_(True), EeeTaxiDocumentFile.category != 'invoice',
                EeeTaxiDocumentEntry.client_profile == client_profile,
                EeeTaxiDocumentEntry.route_no.in_(routes))
         .group_by(EeeTaxiDocumentEntry.route_no)).all()
@@ -41,11 +41,12 @@ def attach_documents(invoice, batch, db):
         EeeTaxiDocumentEntry.route_no == route,
         EeeTaxiDocumentEntry.is_saved.is_(True),
     ).with_for_update())
-    if not entry or not entry.files:
+    files = [file for file in entry.files if file.category != 'invoice'] if entry else []
+    if not entry or not files:
         return
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
-        for index, file in enumerate(entry.files, 1):
+        for index, file in enumerate(files, 1):
             archive.writestr(f'{file.category}/{index:03d}_{safe_name(file.filename)}', file.data)
     invoice.document_zip_data = buffer.getvalue()
     entry.used_revision = entry.revision

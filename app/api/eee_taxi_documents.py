@@ -21,7 +21,7 @@ from app.services.auth import require_permission
 router = APIRouter(prefix="/api/eee-taxi/documents", tags=["eee-taxi-documents"])
 eee_user = require_permission("eee_taxi")
 MAX_FILE_BYTES = 3 * 1024 * 1024
-CATEGORIES = ["invoice", "ds", "parking", "toll_mcd", "gps"]
+CATEGORIES = ["ds", "parking", "toll_mcd", "gps"]
 
 
 class EntryIn(BaseModel):
@@ -85,10 +85,15 @@ def entry_dict(entry):
               "content_type": f.content_type, "size": f.size,
               "uploaded_by": f.uploaded_by, "created_at": f.created_at.isoformat() + "Z"}
              for f in entry.files]
-    missing = [cat for cat in categories(entry.client_profile) if not any(f["category"] == cat for f in files)]
+    entry_categories = categories(entry.client_profile)
+    # Keep previously uploaded invoice files visible so users can remove them,
+    # while new entries no longer offer Invoice as an upload category.
+    if any(f["category"] == "invoice" for f in files):
+        entry_categories = ["invoice"] + entry_categories
+    missing = [cat for cat in entry_categories if not any(f["category"] == cat for f in files)]
     return {"id": entry.id, "client_profile": entry.client_profile, "route_no": entry.route_no,
             "created_by": entry.created_by, "updated_at": entry.updated_at.isoformat() + "Z",
-            "categories": categories(entry.client_profile), "files": files, "missing": missing,
+            "categories": entry_categories, "files": files, "missing": missing,
             "is_saved": entry.is_saved, "edit_protected": entry.edit_protected,
             "edited_by": entry.edited_by, "edited_at": entry.edited_at.isoformat() + "Z" if entry.edited_at else None,
             "status": "used" if entry.used_revision >= entry.revision else "ready" if entry.is_saved else "draft",
@@ -148,6 +153,8 @@ def create_entry(body: EntryIn, user: User = Depends(eee_user), db: Session = De
             EeeTaxiDocumentEntry.client_profile == body.client_profile,
             EeeTaxiDocumentEntry.route_no == body.route_no))
     entry = existing()
+    if entry is not None and entry.is_saved:
+        raise HTTPException(409, "Duplicate entry: documents are already saved for this client and DS/Route number. To edit them, open the record in Saved document entries and choose Edit.")
     if entry is None:
         entry = EeeTaxiDocumentEntry(**body.model_dump(), created_by=user.email)
         db.add(entry)
@@ -160,7 +167,20 @@ def create_entry(body: EntryIn, user: User = Depends(eee_user), db: Session = De
             entry = existing()
             if entry is None:
                 raise
+            if entry.is_saved:
+                raise HTTPException(409, "Duplicate entry: documents are already saved for this client and DS/Route number. To edit them, open the record in Saved document entries and choose Edit.")
     return entry_dict(entry)
+
+
+@router.post("/{entry_id}/cancel")
+def cancel_entry(entry_id: str, user: User = Depends(eee_user), db: Session = Depends(get_db)):
+    entry = entry_or_404(db, entry_id)
+    if entry.is_saved or entry.edit_protected:
+        raise HTTPException(409, "Saved entries cannot be canceled. Open the entry from Saved document entries to edit it.")
+    audit(db, entry, "cancelled", user.email, {"files": len(entry.files), "bytes": sum(f.size for f in entry.files)})
+    db.delete(entry)
+    db.commit()
+    return {"cancelled": entry_id}
 
 
 @router.post("/{entry_id}/save")

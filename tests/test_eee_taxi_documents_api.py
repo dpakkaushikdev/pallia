@@ -63,9 +63,10 @@ def test_client_categories_and_shared_route_number_stay_separate(client, admin):
     ey = create(client, admin)
     pwc = create(client, admin, "pwc")
     assert ey["id"] != pwc["id"]
-    assert ey["categories"] == ["invoice", "ds", "parking", "toll_mcd", "gps", "email_screenshot"]
-    assert pwc["categories"] == ["invoice", "ds", "parking", "toll_mcd", "gps"]
+    assert ey["categories"] == ["ds", "parking", "toll_mcd", "gps", "email_screenshot"]
+    assert pwc["categories"] == ["ds", "parking", "toll_mcd", "gps"]
     assert upload(client, admin, pwc, "email_screenshot").status_code == 400
+    assert upload(client, admin, pwc, "invoice").status_code == 400
     assert create(client, admin, route=" ds-101 ")["id"] == ey["id"]
 
 
@@ -93,6 +94,24 @@ def test_screenshot_persists_and_duplicate_paste_is_idempotent(client, admin):
     assert download.headers["content-type"] == "image/png"
     assert "attachment" in download.headers["content-disposition"]
     assert "inline" in client.get(url + "?inline=true", headers=admin).headers["content-disposition"]
+
+
+def test_saved_duplicate_requires_saved_entries_edit_and_draft_can_cancel(client, admin):
+    entry=create(client,admin,route="DUPLICATE-CANCEL")
+    uploaded=upload(client,admin,entry)
+    assert client.post(f"{URL}/{entry['id']}/save",json={},headers=admin).status_code == 200
+    duplicate=client.post(URL,json={"client_profile":"ey","route_no":"duplicate-cancel"},headers=admin)
+    assert duplicate.status_code == 409
+    assert "Duplicate entry" in duplicate.json()["detail"]
+    assert "Saved document entries" in duplicate.json()["detail"]
+    assert client.get(f"{URL}/{entry['id']}",headers=admin).json()["files"][0]["id"] == uploaded.json()["files"][0]["id"]
+    assert client.post(f"{URL}/{entry['id']}/cancel",headers=admin).status_code == 409
+    draft=create(client,admin,route="DRAFT-CANCEL")
+    upload(client,admin,draft)
+    assert client.post(f"{URL}/{draft['id']}/cancel",headers=admin).json()["cancelled"] == draft["id"]
+    assert client.get(f"{URL}/{draft['id']}",headers=admin).status_code == 404
+    audit_events=client.get(f"{URL}/{draft['id']}/audit",headers=admin).json()["events"]
+    assert "cancelled" in [event["action"] for event in audit_events]
 
 
 def test_attachment_cannot_be_downloaded_under_another_entry(client, admin):
