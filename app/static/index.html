@@ -1795,13 +1795,13 @@ function buildSidebar() {
   eeeSubNav.id = "eeeSubNav";
 
   const eeeSubs = [
-    { id: "eee-documents", label: "Document", icon: _ico('<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>') },
-    { id: "eee-document-history", label: "Document History", icon: _ico('<path d="M3 3h18v18H3z"/>') },
     { id: "eee-billing",    label: "Billing",    icon: _ico('<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>') },
     { id: "eee-operations", label: "Operations", icon: _ico('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>') },
     { id: "eee-history",    label: "Invoice History", icon: _ico('<path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 5 6.3L3 8"/><path d="M12 7v5l4 2"/>') },
     { id: "eee-tally",      label: "Tally Export", icon: _ico('<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>') },
     { id: "eee-rates",      label: "Masters",    icon: _ico('<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>') },
+    { id: "eee-documents", label: "Document", icon: _ico('<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>') },
+    { id: "eee-document-history", label: "Document History", icon: _ico('<path d="M3 3h18v18H3z"/>') },
   ];
   eeeSubs.forEach(sub => {
     const subBtn = document.createElement("button");
@@ -1820,13 +1820,13 @@ function buildSidebar() {
 }
 
 const EEE_SUB_DEFS = [
-  { id: "eee-document-history", label: "EEE-Taxi — Document History" },
-  { id: "eee-documents", label: "EEE-Taxi — Document" },
   { id: "eee-billing",    label: "EEE-Taxi — Billing" },
   { id: "eee-operations", label: "EEE-Taxi — Operations" },
   { id: "eee-history",    label: "EEE-Taxi — Invoice History" },
   { id: "eee-tally",      label: "EEE-Taxi — Tally Export" },
   { id: "eee-rates",      label: "EEE-Taxi — Masters" },
+  { id: "eee-documents", label: "EEE-Taxi — Document" },
+  { id: "eee-document-history", label: "EEE-Taxi — Document History" },
 ];
 
 function switchTab(tabId) {
