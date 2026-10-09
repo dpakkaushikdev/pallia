@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
 from loguru import logger
@@ -138,8 +138,10 @@ if STATIC_DIR.exists():
 @app.get("/")
 def index():
     """Serve the single-page UI."""
-    # no-cache: the browser re-checks on every load, so UI updates appear without a hard refresh
-    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+    # Serverless builds can give files identical timestamps. FileResponse's
+    # size/timestamp ETag then stays unchanged after a same-length UI edit.
+    return Response((STATIC_DIR / "index.html").read_bytes(), media_type="text/html",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.get("/healthz")
