@@ -46,12 +46,17 @@ def _image_pdf(image_data, page_size):
     return output.getvalue()
 
 
+def ordered_documents(files):
+    """Sort supporting attachments into invoice packet order."""
+    category_order = {"ds": 0, "parking": 1, "toll_mcd": 2, "gps": 3, "email_screenshot": 4}
+    return sorted(files, key=lambda item: (category_order.get(item.category, 99), item.created_at, item.id))
+
+
 def append_supporting_pages(invoice_pdf, files):
     """Place the invoice first, followed by DS, parking, toll, GPS and EY email pages."""
     from pypdf import PdfReader, PdfWriter
 
-    category_order = {"ds": 0, "parking": 1, "toll_mcd": 2, "gps": 3, "email_screenshot": 4}
-    files = sorted(files, key=lambda item: (category_order.get(item.category, 99), item.created_at, item.id))
+    files = ordered_documents(files)
     original = PdfReader(io.BytesIO(invoice_pdf))
     if not original.pages:
         raise ValueError("The generated invoice PDF has no pages.")

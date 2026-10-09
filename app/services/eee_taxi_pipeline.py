@@ -367,3 +367,33 @@ def build_zip(batch_id: str, db: Session, booking_type: str | None = None, with_
                 else:
                     zf.writestr(signed_filename(inv), data)
     return buf.getvalue()
+
+
+def build_documents_zip(batch_id: str, db: Session, booking_type: str | None = None) -> bytes:
+    """Return one PDF per signed invoice, containing only its supporting documents."""
+    from pypdf import PdfReader, PdfWriter
+
+    query = db.query(EeeTaxiInvoice).filter(
+        EeeTaxiInvoice.batch_id == batch_id,
+        EeeTaxiInvoice.status == EeeTaxiInvoiceStatus.DONE,
+    )
+    if booking_type is not None:
+        query = query.filter(EeeTaxiInvoice.booking_type == booking_type)
+    invoices = query.order_by(EeeTaxiInvoice.row_index).all()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for invoice in invoices:
+            signed_data = signed_pdf_bytes(invoice)
+            if not signed_data:
+                continue
+            reader = PdfReader(io.BytesIO(signed_data))
+            if len(reader.pages) <= 1:
+                continue
+            writer = PdfWriter()
+            for page in reader.pages[1:]:
+                writer.add_page(page)
+            output = io.BytesIO()
+            writer.write(output)
+            safe_invoice_no = (invoice.invoice_no or invoice.id).replace("/", "-").replace("\\", "-")
+            zf.writestr(f"{safe_invoice_no}.pdf", output.getvalue())
+    return buf.getvalue()

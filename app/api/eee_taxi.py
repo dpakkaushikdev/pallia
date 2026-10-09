@@ -18,6 +18,7 @@ from app.services.eee_taxi_csv import financial_year, format_invoice_no, parse_e
 from app.services.eee_taxi_fare_check import STATUS_OK, apply_card_fares, check_p2p_fares
 from app.services.eee_taxi_pipeline import (
     build_zip,
+    build_documents_zip,
     finalize_batch_status,
     generate_next_invoice,
     has_signed_pdf,
@@ -499,6 +500,21 @@ def download_all(batch_id: str, with_documents: bool = False):
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/batch/{batch_id}/download-documents")
+def download_documents(batch_id: str):
+    """ZIP of one ordered, documents-only PDF per invoice."""
+    with SessionLocal() as db:
+        batch = db.get(EeeTaxiBatch, batch_id)
+        if batch is None:
+            raise HTTPException(status_code=404, detail="Batch not found.")
+        if batch.status not in _DOWNLOADABLE:
+            raise HTTPException(status_code=409, detail="Batch not yet completed.")
+        zip_bytes = build_documents_zip(batch_id, db)
+    filename = f"eee_taxi_documents_{batch_id[:8]}.zip"
+    return Response(content=zip_bytes, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @router.get("/batch/{batch_id}/download-p2p")

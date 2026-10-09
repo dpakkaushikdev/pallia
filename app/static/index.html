@@ -1078,6 +1078,8 @@
                         style="display:none;" onclick="eetDownloadDocuments()">Invoices with documents ZIP</button>
                 <button id="eetDownloadAllBtn" class="btn secondary sm"
                         style="display:none;" onclick="eetDownloadAll()">Invoices only ZIP</button>
+                <button id="eetDownloadDocumentsOnlyBtn" class="btn secondary sm"
+                        style="display:none;" onclick="eetDownloadDocumentsOnly()">Documents only ZIP</button>
               </div>
             </div>
             <div id="eetReview"></div>
@@ -3472,7 +3474,7 @@ function eetReset() {
   _eetExcluded = new Set();
   document.getElementById("eetReview").innerHTML = "";
   eetUpdateReviewTotals();
-  ["eetDownloadAllBtn","eetDownloadDocumentsBtn"].forEach(id => {
+  ["eetDownloadAllBtn","eetDownloadDocumentsBtn","eetDownloadDocumentsOnlyBtn"].forEach(id => {
     document.getElementById(id).style.display = "none";
   });
 }
@@ -3579,7 +3581,7 @@ async function eetProceed() {
   _eetPin = signMode === "usb" ? pin : "";
   _eetTokenSerial = tokenSerial;
   document.getElementById("eetInvoiceList").innerHTML = "";
-  ["eetDownloadAllBtn","eetDownloadDocumentsBtn"].forEach(id => {
+  ["eetDownloadAllBtn","eetDownloadDocumentsBtn","eetDownloadDocumentsOnlyBtn"].forEach(id => {
     document.getElementById(id).style.display = "none";
   });
   document.getElementById("eetBatchSummary").textContent = "Submitting batch...";
@@ -3635,6 +3637,7 @@ function eetPollBatch() {
         if (d.status !== "failed") {
           document.getElementById("eetDownloadAllBtn").style.display = "";
           document.getElementById("eetDownloadDocumentsBtn").style.display = "";
+          document.getElementById("eetDownloadDocumentsOnlyBtn").style.display = "";
 
         }
       }
@@ -3914,6 +3917,7 @@ function eetDownloadOne(invoiceId) {
 
 function eetDownloadAll()    { if (_eetBatchId) downloadWithAuth("/api/eee-taxi/batch/" + _eetBatchId + "/download-all", "eee_taxi_invoices.zip"); }
 function eetDownloadDocuments()    { if (_eetBatchId) downloadWithAuth("/api/eee-taxi/batch/" + _eetBatchId + "/download-all?with_documents=true", "eee_taxi_with_documents.zip"); }
+function eetDownloadDocumentsOnly() { if (_eetBatchId) downloadWithAuth("/api/eee-taxi/batch/" + _eetBatchId + "/download-documents", "eee_taxi_documents.zip"); }
 
 
 // Set today as default invoice date on tab load
