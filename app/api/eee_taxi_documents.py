@@ -1,5 +1,5 @@
 """Shared EEE document records; attachments persist with the application's DB."""
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from hashlib import sha256
 import io
@@ -106,22 +106,21 @@ def entry_dict(entry):
 
 @router.get("")
 def list_entries(client_profile: Literal["ey", "pwc"] | None = None, search: str = Query("", max_length=64),
-                 updated_from: date | None = None, updated_to: date | None = None,
+                 document_date_from: date | None = None, document_date_to: date | None = None,
                  used: bool | None = None, offset: int = Query(0, ge=0),
                  limit: int = Query(10, ge=1, le=30),
                  _: User = Depends(eee_user), db: Session = Depends(get_db)):
-    if updated_from and updated_to and updated_from > updated_to:
+    if document_date_from and document_date_to and document_date_from > document_date_to:
         raise HTTPException(400, "From date must be on or before To date.")
     condition = EeeTaxiDocumentEntry.is_saved.is_(True)
     if client_profile:
         condition &= EeeTaxiDocumentEntry.client_profile == client_profile
     if search.strip():
         condition &= EeeTaxiDocumentEntry.route_no.contains(search.strip().upper(), autoescape=True)
-    india_offset = timedelta(hours=5, minutes=30)
-    if updated_from:
-        condition &= EeeTaxiDocumentEntry.updated_at >= datetime.combine(updated_from, time.min) - india_offset
-    if updated_to:
-        condition &= EeeTaxiDocumentEntry.updated_at < datetime.combine(updated_to + timedelta(days=1), time.min) - india_offset
+    if document_date_from:
+        condition &= EeeTaxiDocumentEntry.document_date >= document_date_from
+    if document_date_to:
+        condition &= EeeTaxiDocumentEntry.document_date <= document_date_to
     used_condition = EeeTaxiDocumentEntry.used_revision >= EeeTaxiDocumentEntry.revision
     if used is not None:
         condition &= used_condition if used else ~used_condition

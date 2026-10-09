@@ -44,7 +44,10 @@ async function edList(prefix, reset = true) {
   const version = ++ed[versionKey];
   try {
     const params = new URLSearchParams({search: edEl(prefix+"Search").value, offset: ed[offsetKey], limit: pageSize});
-    for (const [key, id] of [["client_profile", "FilterClient"], ["updated_from", "From"], ["updated_to", "To"]]) {
+    const dateFilters = history
+      ? [["document_date_from", "From"], ["document_date_to", "To"]]
+      : [["updated_from", "From"], ["updated_to", "To"]];
+    for (const [key, id] of [["client_profile", "FilterClient"], ...dateFilters]) {
       const value = edEl(prefix+id).value; if (value) params.set(key,value);
     }
     if (history && edEl("ehFilterStatus").value) params.set("used", edEl("ehFilterStatus").value);
