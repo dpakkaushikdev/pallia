@@ -126,7 +126,7 @@ function edRender() {
 function edSetBusy(busy) {
   ed.busy = busy;
   edUpdateSelection();
-  for (const id of ["edClient", "edRoute", "edSave", "edSearch", "edSearchButton", "edNew", "edEdit"]) edEl(id).disabled = busy;
+  for (const id of ["edClient", "edRoute", "edSave", "edSearch", "edSearchButton", "edEdit"]) edEl(id).disabled = busy;
   edEl("edPrevious").disabled = busy || ed.offset === 0;
   edEl("edNext").disabled = busy || ed.offset + 10 >= ed.total;
   edEl("edRoute").disabled = busy || edLocked();
@@ -235,7 +235,6 @@ async function edFile(fileId, preview) {
 edEl("edForm").addEventListener("submit", edCreate);
 edEl("edFinish").addEventListener("click",edFinish);
 edEl("edEdit").addEventListener("click",async()=>{try {await edUnlock(); edSetBusy(false);} catch(error){edStatus(error.message,true);}});
-edEl("edNew").addEventListener("click",()=>{if(ed.entry && !ed.entry.is_saved && !confirm("This entry is unfinished. Leave it and start the next entry?"))return;ed.entry=null;ed.password="";edEl("edRoute").value="";edRender();edSetBusy(false);edStatus("");});
 for(const prefix of ["ed","eh"]) {
  for (const suffix of ["FilterClient","From","To",...(prefix==="eh"?["FilterStatus"]:[])]) edEl(prefix+suffix).addEventListener("change",()=>edList(prefix));
  edEl(prefix+"Clear").addEventListener("click",()=>{for(const suffix of ["Search","FilterClient","From","To",...(prefix==="eh"?["FilterStatus"]:[])])edEl(prefix+suffix).value="";edList(prefix);});
