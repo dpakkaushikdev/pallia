@@ -1,5 +1,6 @@
 """Shared EEE document records; attachments persist with the application's DB."""
 from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 from hashlib import sha256
 import io
 from typing import Literal
@@ -27,6 +28,7 @@ CATEGORIES = ["ds", "parking", "toll_mcd", "gps"]
 class EntryIn(BaseModel):
     client_profile: Literal["ey", "pwc"]
     route_no: str = Field(min_length=1, max_length=64)
+    document_date: date = Field(default_factory=lambda: datetime.now(ZoneInfo("Asia/Kolkata")).date())
 
     @field_validator("route_no", mode="before")
     @classmethod
@@ -92,6 +94,7 @@ def entry_dict(entry):
         entry_categories = ["invoice"] + entry_categories
     missing = [cat for cat in entry_categories if not any(f["category"] == cat for f in files)]
     return {"id": entry.id, "client_profile": entry.client_profile, "route_no": entry.route_no,
+            "document_date": entry.document_date.isoformat() if entry.document_date else None,
             "created_by": entry.created_by, "updated_at": entry.updated_at.isoformat() + "Z",
             "categories": entry_categories, "files": files, "missing": missing,
             "is_saved": entry.is_saved, "edit_protected": entry.edit_protected,
@@ -203,8 +206,9 @@ def update_entry(entry_id: str, body: EntryUpdate, user: User = Depends(eee_user
     authorize_edit(db, entry, body.edit_password, user)
     if any(file.category not in categories(body.client_profile) for file in entry.files):
         raise HTTPException(400, "Remove Email Screenshot before changing this entry to PWC.")
-    old = {"client_profile": entry.client_profile, "route_no": entry.route_no}
-    entry.client_profile, entry.route_no = body.client_profile, body.route_no
+    old = {"client_profile": entry.client_profile, "route_no": entry.route_no,
+           "document_date": entry.document_date.isoformat() if entry.document_date else None}
+    entry.client_profile, entry.route_no, entry.document_date = body.client_profile, body.route_no, body.document_date
     changed(db, entry, user, "edited", {"previous": old})
     try:
         db.commit()

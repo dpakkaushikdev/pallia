@@ -86,7 +86,7 @@ def _widen_varchar_columns(conn, inspector) -> None:
 
 def _migrate_existing_db() -> None:
     """Add columns introduced after initial deploy without dropping existing data."""
-    from sqlalchemy import JSON, DateTime, LargeBinary, inspect, text
+    from sqlalchemy import JSON, Date, DateTime, LargeBinary, inspect, text
 
     with engine.connect() as conn:
         inspector = inspect(conn)
@@ -145,8 +145,10 @@ def _migrate_existing_db() -> None:
 
         if "eee_taxi_document_entries" in inspector.get_table_names():
             existing = {c["name"] for c in inspector.get_columns("eee_taxi_document_entries")}
+            date_type = Date().compile(dialect=engine.dialect)
             datetime_type = DateTime().compile(dialect=engine.dialect)
             for column, definition in {
+                "document_date": date_type,
                 "is_saved": "BOOLEAN NOT NULL DEFAULT TRUE",
                 "edit_protected": "BOOLEAN NOT NULL DEFAULT TRUE",
                 "edited_by": "VARCHAR(255)", "edited_at": datetime_type,

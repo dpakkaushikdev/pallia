@@ -4,6 +4,11 @@ const edBase = "/api/eee-taxi/documents";
 const edEl = id => document.getElementById(id);
 const edEscape = value => String(value).replace(/[&<>"']/g, ch => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[ch]));
 
+function edToday() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Kolkata", year:"numeric", month:"2-digit", day:"2-digit"}).formatToParts(new Date()).map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 function edReset() {
   ed.listVersion++; ed.historyVersion++;
   edEl("ehEntries").replaceChildren();
@@ -13,6 +18,7 @@ function edReset() {
   edRender();
   edEl("edEntries").replaceChildren();
   edEl("edRoute").value = "";
+  edEl("edDocumentDate").value = edToday();
   edStatus("");
 }
 
@@ -49,9 +55,9 @@ async function edList(prefix, reset = true) {
     edEl(prefix+"Entries").innerHTML = data.entries.map(entry => `<tr>
       ${history ? `<td><input type="checkbox" data-doc-select="${entry.id}" aria-label="Select ${edEscape(entry.route_no)}"></td>` : ""}
       <td><button class="btn secondary sm" data-doc-open="${entry.id}">${edEscape(entry.route_no)}</button></td>
-      <td>${entry.client_profile.toUpperCase()}</td>${["ds","parking","toll_mcd","gps","email_screenshot"].map(category => `<td>${entry.client_profile === "pwc" && category === "email_screenshot" ? '<span class="meta">—</span>' : edRecordDocuments(entry,category)}</td>`).join("")}<td><span class="ed-status-badge ${entry.status}">${entry.status === "used" ? "Used" : "Ready"}</span>${entry.used_invoice_no && entry.status === "used" ? `<br><small>${edEscape(entry.used_invoice_no)}</small>` : ""}</td>
+      <td>${entry.client_profile.toUpperCase()}</td><td>${entry.document_date ? new Date(`${entry.document_date}T00:00:00`).toLocaleDateString("en-IN", {timeZone:"Asia/Kolkata"}) : "—"}</td>${["ds","parking","toll_mcd","gps","email_screenshot"].map(category => `<td>${entry.client_profile === "pwc" && category === "email_screenshot" ? '<span class="meta">—</span>' : edRecordDocuments(entry,category)}</td>`).join("")}<td><span class="ed-status-badge ${entry.status}">${entry.status === "used" ? "Used" : "Ready"}</span>${entry.used_invoice_no && entry.status === "used" ? `<br><small>${edEscape(entry.used_invoice_no)}</small>` : ""}</td>
       <td>${new Date(entry.updated_at).toLocaleString("en-IN", {timeZone:"Asia/Kolkata"})}</td><td>${entry.edited_by ? edEscape(entry.edited_by)+"<br>"+new Date(entry.edited_at).toLocaleString("en-IN", {timeZone:"Asia/Kolkata"}) : "-"}</td>
-      <td><button class="btn secondary sm" data-doc-edit="${entry.id}">Edit</button> <button class="btn danger sm" data-doc-delete="${entry.id}">Delete</button></td></tr>`).join("") || `<tr><td colspan="${history ? 12 : 11}" class="meta">No matching saved entries.</td></tr>`;
+      <td><button class="btn secondary sm" data-doc-edit="${entry.id}">Edit</button> <button class="btn danger sm" data-doc-delete="${entry.id}">Delete</button></td></tr>`).join("") || `<tr><td colspan="${history ? 13 : 12}" class="meta">No matching saved entries.</td></tr>`;
     edEl(prefix+"Count").textContent = `Total saved records: ${data.total_all}. Matching records: ${data.total}. Showing up to ${pageSize}.`;
     edEl(prefix+"PageInfo").textContent = data.total ? `${ed[offsetKey]+1}-${Math.min(ed[offsetKey]+pageSize,data.total)} of ${data.total}` : "0 entries";
     edEl(prefix+"Previous").disabled = ed[offsetKey] === 0;
@@ -85,11 +91,11 @@ async function edFinish() {
   if(ed.busy || !ed.entry || edLocked()) return;
   edSetBusy(true);
   try {
-    const route=edEl("edRoute").value.trim(), profile=edEl("edClient").value;
-    if(route.toUpperCase() !== ed.entry.route_no || profile !== ed.entry.client_profile)
-      ed.entry=await api(`${edBase}/${ed.entry.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({route_no:route,client_profile:profile,edit_password:ed.password})});
+    const route=edEl("edRoute").value.trim(), profile=edEl("edClient").value, documentDate=edEl("edDocumentDate").value;
+    if(route.toUpperCase() !== ed.entry.route_no || profile !== ed.entry.client_profile || documentDate !== ed.entry.document_date)
+      ed.entry=await api(`${edBase}/${ed.entry.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({route_no:route,client_profile:profile,document_date:documentDate,edit_password:ed.password})});
     await api(`${edBase}/${ed.entry.id}/save`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({edit_password:ed.password})});
-    ed.entry=null; ed.password=""; edEl("edRoute").value=""; edRender();
+    ed.entry=null; ed.password=""; edEl("edRoute").value=""; edEl("edDocumentDate").value=edToday(); edRender();
     edStatus("Saved. Enter the next DS no/Route No."); await edLoad(); await edHistoryLoad();
   } catch(error) { edStatus(error.message,true); }
   finally { edSetBusy(false); edEl("edRoute").focus(); }
@@ -101,7 +107,7 @@ async function edDelete(ids, history=false) {
   edSetBusy(true);
   try {
     const result=await api(`${edBase}/bulk-delete`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids,used_only:history && edEl("ehFilterStatus").value === "true",edit_password:password})});
-    if(ed.entry && ids.includes(ed.entry.id)) { ed.entry=null; ed.password=""; edEl("edRoute").value=""; edRender(); }
+    if(ed.entry && ids.includes(ed.entry.id)) { ed.entry=null; ed.password=""; edEl("edRoute").value=""; edEl("edDocumentDate").value=edToday(); edRender(); }
     edStatus(`Deleted ${result.deleted} entries; freed ${Math.ceil(result.freed_bytes/1024)} KB of source uploads.`);
     await edLoad(); await edHistoryLoad();
     if(history) edEl("ehCount").textContent += ` Deleted ${result.deleted} entries; freed ${Math.ceil(result.freed_bytes/1024)} KB.`;
@@ -114,6 +120,7 @@ function edRender() {
   edEl("edEditor").hidden = !entry;
   edEl("edRoute").disabled = ed.busy || edLocked();
   edEl("edClient").disabled = ed.busy || edLocked();
+  edEl("edDocumentDate").disabled = ed.busy || edLocked();
   if (!entry) return;
   edEl("edFinish").disabled = ed.busy || edLocked();
   edEl("edFinish").hidden = edLocked();
@@ -137,11 +144,12 @@ function edRender() {
 function edSetBusy(busy) {
   ed.busy = busy;
   edUpdateSelection();
-  for (const id of ["edClient", "edRoute", "edSave", "edSearch", "edSearchButton", "edEdit"]) edEl(id).disabled = busy;
+  for (const id of ["edClient", "edRoute", "edDocumentDate", "edSave", "edSearch", "edSearchButton", "edEdit"]) edEl(id).disabled = busy;
   edEl("edPrevious").disabled = busy || ed.offset === 0;
   edEl("edNext").disabled = busy || ed.offset + 10 >= ed.total;
   edEl("edRoute").disabled = busy || edLocked();
   edEl("edClient").disabled = busy || edLocked();
+  edEl("edDocumentDate").disabled = busy || edLocked();
   edEl("edFinish").disabled = busy || edLocked();
   edEl("edCards").querySelectorAll('input,button[data-doc-remove]').forEach(input => input.disabled = busy || edLocked());
 }
@@ -155,8 +163,9 @@ async function edCreate(event) {
   edSetBusy(true);
   try {
     ed.password = "";
-    ed.entry = await api(edBase, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({client_profile: edEl("edClient").value, route_no: route})});
+    ed.entry = await api(edBase, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({client_profile: edEl("edClient").value, route_no: route, document_date: edEl("edDocumentDate").value})});
     edEl("edRoute").value = ed.entry.route_no;
+    edEl("edDocumentDate").value = ed.entry.document_date || edToday();
     edRender();
     edStatus("Attach documents, then click Save to finish. Past entries require Edit with password.");
     await edLoad();
@@ -171,7 +180,7 @@ async function edCancel() {
   edSetBusy(true);
   try {
     await api(`${edBase}/${id}/cancel`,{method:"POST"});
-    ed.entry=null; ed.password=""; edEl("edRoute").value=""; edRender();
+    ed.entry=null; ed.password=""; edEl("edRoute").value=""; edEl("edDocumentDate").value=edToday(); edRender();
     edStatus("New entry canceled."); await edLoad();
   } catch(error) { edStatus(error.message,true); }
   finally { edSetBusy(false); edEl("edRoute").focus(); }
@@ -185,6 +194,7 @@ async function edOpen(id, edit=false) {
     ed.entry = await api(`${edBase}/${id}`);
     edEl("edRoute").value = ed.entry.route_no;
     edEl("edClient").value = ed.entry.client_profile;
+    edEl("edDocumentDate").value = ed.entry.document_date || edToday();
     edRender(); edStatus("Saved entry opened. Use Edit with password to make changes.");
     if(edit && edLocked()) await edUnlock();
     switchTab("eee-documents");

@@ -315,6 +315,7 @@ class EeeTaxiDocumentEntry(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
     client_profile: Mapped[str] = mapped_column(String(16), index=True)
     route_no: Mapped[str] = mapped_column(String(64), index=True)
+    document_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_by: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
