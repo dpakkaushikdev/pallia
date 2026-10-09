@@ -18,6 +18,7 @@ from app.services.eee_taxi_cost_centres import get_cost_centre_state, normalize_
 from app.services.eee_taxi_csv import EeeTaxiRow
 from app.services.eee_taxi_pdf import compute_tax
 from app.services.eee_taxi_profiles import row_client, row_tax
+from app.services.eee_taxi_documents import available_documents, normalize_route
 
 _TOLERANCE = Decimal("0.01")
 
@@ -37,6 +38,7 @@ class ReviewRow:
     total: Decimal
     warnings: tuple[str, ...]
     eng_code: str = ""
+    document_count: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -53,6 +55,8 @@ class ReviewRow:
             "total": f"{self.total:.2f}",
             "warnings": list(self.warnings),
             "eng_code": self.eng_code,
+            "document_count": self.document_count,
+            "document_status": "Available" if self.document_count else "NA",
         }
 
 
@@ -106,6 +110,7 @@ def review_rows(db: Session, rows: list[EeeTaxiRow], client_master=None, client_
     repeats = Counter(r.route_no.strip() for r in rows if r.route_no.strip())
     invoiced = _invoiced_routes(db, set(repeats), client_profile)
     cost_centres = {c.vehicle_no for c in get_cost_centre_state(db).rows}
+    documents = available_documents(db, (row.route_no for row in rows), client_profile)
     out: list[ReviewRow] = []
     for row in rows:
         base = row.tax_base + row.parking
@@ -125,5 +130,6 @@ def review_rows(db: Session, rows: list[EeeTaxiRow], client_master=None, client_
             total=total,
             warnings=tuple(_row_warnings(row, total, repeats, invoiced, cost_centres, client_master)),
             eng_code=row.eng_code,
+            document_count=documents.get(normalize_route(row.route_no), 0),
         ))
     return out

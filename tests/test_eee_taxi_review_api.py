@@ -115,3 +115,58 @@ def test_only_admin_can_delete_an_invoice(client, admin):
     with SessionLocal() as db:
         assert db.get(EeeTaxiInvoice, inv_id) is None
         assert db.get(EeeTaxiBatch, batch["batch_id"]) is None  # last invoice gone, so the batch goes too
+
+
+@pytest.mark.parametrize("extension", ["csv", "xlsx"])
+def test_upload_review_document_availability_is_optional_and_client_specific(client, admin, extension):
+    import csv
+    import io
+    from PIL import Image
+    from openpyxl import Workbook
+    from app.models import EeeTaxiDocumentEntry
+    image=io.BytesIO()
+    Image.new("RGB",(10,10),"blue").save(image,"PNG")
+    document_ids=[]
+    def document(profile,route,saved=True):
+        created=client.post("/api/eee-taxi/documents",json={"client_profile":profile,"route_no":route},headers=admin)
+        assert created.status_code == 200,created.text
+        entry_id=created.json()["id"];document_ids.append(entry_id)
+        assert client.post(f"/api/eee-taxi/documents/{entry_id}/files",data={"category":"ds"},files={"file":("ds.png",image.getvalue(),"image/png")},headers=admin).status_code == 200
+        if saved:
+            assert client.post(f"/api/eee-taxi/documents/{entry_id}/save",json={},headers=admin).status_code == 200
+        return entry_id
+    upload_bytes=CSV
+    if extension == "xlsx":
+        workbook=Workbook()
+        for row in csv.reader(io.StringIO(CSV.decode())):
+            workbook.active.append(row)
+        buffer=io.BytesIO();workbook.save(buffer);upload_bytes=buffer.getvalue()
+    def preview():
+        response=client.post("/api/eee-taxi/preview",files={"csv_file":("trips."+extension,upload_bytes)},headers=admin)
+        assert response.status_code == 200,response.text
+        return response.json()["rows"]
+    try:
+        # No source documents: calculate and the full review still succeed.
+        calculated=client.post("/api/eee-taxi/calculate",files={"csv_file":("trips."+extension,upload_bytes)},headers=admin)
+        assert calculated.status_code == 200,calculated.text
+        baseline=preview()
+        assert [row["document_status"] for row in baseline] == ["NA","NA"]
+        document("pwc"," ggn-0qrt ")
+        document("ey","GGN-OYFS")
+        document("pwc","GGN-OYFS",saved=False)
+        rows=preview()
+        assert rows[0]["document_status"] == "Available" and rows[0]["document_count"] == 1
+        assert rows[1]["document_status"] == "NA" and rows[1]["document_count"] == 0
+        assert rows[0]["warnings"] == baseline[0]["warnings"]
+        assert rows[1]["warnings"] == baseline[1]["warnings"]
+        # Generate the NA row too: documents never become a prerequisite.
+        batch=client.post("/api/eee-taxi/batch",files={"csv_file":("trips."+extension,upload_bytes)},data={"invoice_date":"2026-10-09","start_suffix":"1550","sign_mode":"dummy","exclude_rows":"0"},headers=admin)
+        assert batch.status_code == 200,batch.text
+        generated=client.post(f"/api/eee-taxi/batch/{batch.json()['batch_id']}/generate-next",headers=admin)
+        assert generated.status_code == 200 and generated.json()["generated"]["status"] == "done",generated.text
+    finally:
+        with SessionLocal() as db:
+            for entry_id in document_ids:
+                entry=db.get(EeeTaxiDocumentEntry,entry_id)
+                if entry is not None: db.delete(entry)
+            db.commit()

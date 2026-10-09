@@ -4,8 +4,26 @@ import re
 import zipfile
 from datetime import datetime
 
-from sqlalchemy import select
-from app.models import EeeTaxiDocumentEntry, EeeTaxiDocumentAudit
+from sqlalchemy import select, func
+from app.models import EeeTaxiDocumentEntry, EeeTaxiDocumentAudit, EeeTaxiDocumentFile
+
+
+def normalize_route(value):
+    return ' '.join((value or '').split()).upper()
+
+
+def available_documents(db, route_nos, client_profile):
+    """Count saved matching files in one query, without loading file contents."""
+    routes = {normalize_route(route) for route in route_nos} - {''}
+    if not routes:
+        return {}
+    rows = db.execute(select(EeeTaxiDocumentEntry.route_no, func.count(EeeTaxiDocumentFile.id))
+        .join(EeeTaxiDocumentFile, EeeTaxiDocumentFile.entry_id == EeeTaxiDocumentEntry.id)
+        .where(EeeTaxiDocumentEntry.is_saved.is_(True),
+               EeeTaxiDocumentEntry.client_profile == client_profile,
+               EeeTaxiDocumentEntry.route_no.in_(routes))
+        .group_by(EeeTaxiDocumentEntry.route_no)).all()
+    return dict(rows)
 
 
 def safe_name(value):
@@ -15,7 +33,7 @@ def safe_name(value):
 def attach_documents(invoice, batch, db):
     if invoice.document_zip_data:
         return
-    route = ' '.join((invoice.route_no or '').split()).upper()
+    route = normalize_route(invoice.route_no)
     if not route:
         return
     entry = db.scalar(select(EeeTaxiDocumentEntry).where(

@@ -4782,6 +4782,7 @@ function eetRenderReview() {
     return `<tr class="${out ? "removed" : ""} ${r.warnings.length ? "warn" : ""}">
       <td class="inv">${rcEsc(r.route_no || "—")}${r.eng_code ? `<div class="meta">Eng Code: ${rcEsc(r.eng_code)}</div>` : ""}${warn}</td>
       <td>${rcEsc(new Date(r.trip_date + "T00:00:00").toLocaleDateString("en-IN"))}</td>
+      <td>${r.document_count ? `<span class="text-ok">Available</span><div class="meta">${r.document_count} file${r.document_count === 1 ? "" : "s"}</div>` : '<span class="meta">NA</span>'}</td>
       <td>${rcEsc(r.guest_name)}<div class="meta" style="font-size:11px;">${rcEsc(r.entity_name)}</div></td>
       <td>${r.booking_type === "rental" ? "Rental" : "P2P"}</td>
       <td class="inv">${rcEsc(r.car_no)}</td>
@@ -4799,7 +4800,7 @@ function eetRenderReview() {
       </div>
       ${warned ? `<p class="tx-problem" style="margin:-6px 0 10px;">${warned} trip(s) have something to check (shown in red). Remove them, or fix the CSV and upload it again.</p>` : ""}
       <div style="overflow:auto;"><table class="data-table" id="eetReviewTable"><thead><tr>
-        <th>DS no / Route No</th><th>Date</th><th>Guest / Client</th><th>Type</th><th>Car</th>
+        <th>DS no / Route No</th><th>Date</th><th>Document</th><th>Guest / Client</th><th>Type</th><th>Car</th>
         <th style="text-align:right;">Fare (₹)</th><th style="text-align:right;">Toll (₹)</th>
         <th style="text-align:right;">GST (₹)</th><th style="text-align:right;">Total (₹)</th><th></th>
       </tr></thead><tbody>${rows}</tbody></table></div>
