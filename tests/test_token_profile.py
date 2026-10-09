@@ -52,6 +52,9 @@ def test_empty_driver_slots_are_not_probed(monkeypatch):
     calls = []
 
     class Library:
+        def reinitialize(self):
+            calls.append("refresh")
+
         def get_slots(self, **kwargs):
             calls.append(kwargs)
             return []
@@ -59,4 +62,43 @@ def test_empty_driver_slots_are_not_probed(monkeypatch):
     monkeypatch.setattr(pkcs11, "lib", lambda _: Library())
     from signing_helper.token_device import connected_tokens
     assert connected_tokens("driver") == []
-    assert calls == [{"token_present": True}]
+    assert calls == ["refresh", {"token_present": True}]
+
+
+def test_refresh_observes_token_swap_in_the_same_process(monkeypatch):
+    import pkcs11
+    from signing_helper.token_device import connected_tokens
+
+    class Library:
+        current = "JISHNU NANDA"
+        cached = current
+
+        def reinitialize(self):
+            self.cached = self.current
+
+        def get_slots(self, **kwargs):
+            return [SimpleNamespace(get_token=lambda: self.cached)]
+
+    library = Library()
+    monkeypatch.setattr(pkcs11, "lib", lambda _: library)
+    assert connected_tokens("driver") == ["JISHNU NANDA"]
+    library.current = "VINOD"
+    assert connected_tokens("driver") == ["VINOD"]
+
+
+def test_refresh_waits_for_active_signing_operation():
+    import threading
+    from signing_helper.token_device import TOKEN_LOCK, token_operation
+
+    entered = threading.Event()
+
+    @token_operation
+    def refresh():
+        entered.set()
+
+    with TOKEN_LOCK:
+        thread = threading.Thread(target=refresh)
+        thread.start()
+        assert not entered.wait(.05)
+    thread.join(timeout=2)
+    assert entered.is_set()

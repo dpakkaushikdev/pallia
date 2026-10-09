@@ -17,6 +17,11 @@ from pathlib import Path
 
 from loguru import logger
 
+try:
+    from .token_device import token_operation
+except ImportError:
+    from token_device import token_operation
+
 PKCS11_LIB = r"C:\Windows\System32\CryptoIDA_pkcs11.dll"
 
 # A4 lower-right authorisation box, in PDF points (origin at bottom-left).
@@ -159,6 +164,7 @@ def _extract_cn(cert) -> str:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+@token_operation
 def sign_pdf_bytes(
     pdf_bytes: bytes,
     pin: str,

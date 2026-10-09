@@ -1,12 +1,30 @@
 """Enumerate DSC devices without logging in; never guess between devices."""
+from functools import wraps
+from threading import RLock
+
+TOKEN_LOCK = RLock()
 
 
+def token_operation(function):
+    """Keep driver refresh from invalidating any in-progress signing session."""
+    @wraps(function)
+    def locked(*args, **kwargs):
+        with TOKEN_LOCK:
+            return function(*args, **kwargs)
+    return locked
+
+
+@token_operation
 def connected_tokens(lib_location):
     import pkcs11
 
     # Empty reader slots can raise SlotIDInvalid after a USB token is removed.
     # Ask the driver only for slots where a token is currently present.
-    return [slot.get_token() for slot in pkcs11.lib(lib_location).get_slots(token_present=True)]
+    library = pkcs11.lib(lib_location)
+    # CryptoID caches the previous USB device in a long-running process.
+    # All callers keep TOKEN_LOCK until their public/signing session closes.
+    library.reinitialize()
+    return [slot.get_token() for slot in library.get_slots(token_present=True)]
 
 
 def token_serial(token):

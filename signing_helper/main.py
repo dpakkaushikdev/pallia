@@ -26,9 +26,10 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from signer import CertificateSelectionError, SigningError, TokenNotFound, WrongPIN, inspect_signature_box, sign_pdf_bytes
+from token_device import token_operation
 
 PORT = 7777
-VERSION = "1.14.0"   # 1.14: enforce the intended signer per flow and refresh present tokens
+VERSION = "1.15.0"   # 1.15: refresh CryptoID after token swaps without disrupting signing
 MAX_ZIP_BYTES = 100 * 1024 * 1024
 MAX_ZIP_ENTRIES = 500
 MAX_ZIP_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
@@ -108,6 +109,7 @@ def health():
 
 
 @app.get("/tokens")
+@token_operation
 def list_tokens(profile: Optional[Literal["eee", "pallia-billing", "pallia-accounts"]] = None):
     from token_profile import describe_token
     from token_device import connected_tokens, token_serial

@@ -225,6 +225,10 @@ before signing. Other-flow devices are disabled in each DSC selector. Token
 refresh queries only currently occupied reader slots, avoiding empty-slot
 errors after a USB device is unplugged.
 
+Helper **1.15.0** refreshes the CryptoID driver when listing or selecting a
+token, so USB swaps replace the previous cached signer. Refresh and signing
+share a lock: the driver is never reset while a PDF is being signed.
+
 ---
 
 ## Next step: fill in the real TMS selectors
