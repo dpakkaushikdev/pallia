@@ -126,6 +126,8 @@ def _migrate_existing_db() -> None:
             conn.commit()
         if "eee_taxi_invoices" in inspector.get_table_names():
             existing = {c["name"] for c in inspector.get_columns("eee_taxi_invoices")}
+            if "document_zip_data" not in existing:
+                conn.execute(text(f"ALTER TABLE eee_taxi_invoices ADD COLUMN document_zip_data {binary_type}"))
             if "pdf_data" not in existing:
                 conn.execute(text(f"ALTER TABLE eee_taxi_invoices ADD COLUMN pdf_data {binary_type}"))
             if "signed_pdf_data" not in existing:
@@ -139,6 +141,20 @@ def _migrate_existing_db() -> None:
             if "tally_exported_at" not in existing:
                 datetime_type = DateTime().compile(dialect=engine.dialect)
                 conn.execute(text(f"ALTER TABLE eee_taxi_invoices ADD COLUMN tally_exported_at {datetime_type}"))
+            conn.commit()
+
+        if "eee_taxi_document_entries" in inspector.get_table_names():
+            existing = {c["name"] for c in inspector.get_columns("eee_taxi_document_entries")}
+            datetime_type = DateTime().compile(dialect=engine.dialect)
+            for column, definition in {
+                "is_saved": "BOOLEAN NOT NULL DEFAULT TRUE",
+                "edit_protected": "BOOLEAN NOT NULL DEFAULT TRUE",
+                "edited_by": "VARCHAR(255)", "edited_at": datetime_type,
+                "revision": "INTEGER NOT NULL DEFAULT 1", "used_revision": "INTEGER NOT NULL DEFAULT 0",
+                "used_at": datetime_type, "used_invoice_no": "VARCHAR(64)",
+            }.items():
+                if column not in existing:
+                    conn.execute(text(f"ALTER TABLE eee_taxi_document_entries ADD COLUMN {column} {definition}"))
             conn.commit()
 
         _widen_varchar_columns(conn, inspect(conn))

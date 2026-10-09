@@ -292,6 +292,7 @@ class EeeTaxiInvoice(Base):
     # (Vercel's disk is per-instance and ephemeral). Disk paths are a fallback.
     pdf_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     signed_pdf_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    document_zip_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
     # Signature box (x1, y1, x2, y2) in PDF points, captured at generation time
     # and handed to the local signing helper so the stamp lands in the footer.
     sig_box: Mapped[list | None] = mapped_column(JSON, nullable=True)
@@ -317,10 +318,30 @@ class EeeTaxiDocumentEntry(Base):
     created_by: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    is_saved: Mapped[bool] = mapped_column(Boolean, default=False)
+    edit_protected: Mapped[bool] = mapped_column(Boolean, default=False)
+    edited_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    used_revision: Mapped[int] = mapped_column(Integer, default=0)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    used_invoice_no: Mapped[str | None] = mapped_column(String(64), nullable=True)
     files: Mapped[list["EeeTaxiDocumentFile"]] = relationship(
         back_populates="entry", cascade="all, delete-orphan", lazy="selectin",
         order_by="EeeTaxiDocumentFile.created_at",
     )
+
+
+class EeeTaxiDocumentAudit(Base):
+    __tablename__ = "eee_taxi_document_audit"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    entry_id: Mapped[str] = mapped_column(String(32), index=True)
+    client_profile: Mapped[str] = mapped_column(String(16))
+    route_no: Mapped[str] = mapped_column(String(64))
+    action: Mapped[str] = mapped_column(String(32))
+    actor: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class EeeTaxiDocumentFile(Base):

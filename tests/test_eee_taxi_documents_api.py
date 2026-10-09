@@ -130,7 +130,110 @@ def test_bad_or_oversize_files_are_rejected(client, admin):
 
 def test_search_filters_client_and_escapes_wildcards(client, admin):
     ey = create(client, admin, route="DS%_100")
+    upload(client, admin, ey)
+    assert client.post(f"{URL}/{ey['id']}/save", json={}, headers=admin).status_code == 200
     create(client, admin, "pwc", "DS%_100")
     result = client.get(URL, params={"client_profile": "ey", "search": "%_"}, headers=admin).json()
     assert result["total"] == 1
     assert result["entries"][0]["id"] == ey["id"]
+
+
+@pytest.fixture
+def edit_password(client, admin):
+    password = "DocsEdit123"
+    assert client.post("/api/eee-taxi/rates/password/reset", json={"new_password": password}, headers=admin).status_code == 200
+    return password
+
+
+def test_save_password_edit_and_audit(client, admin, edit_password):
+    entry = create(client, admin, route="SAVE-EDIT")
+    assert client.post(f"{URL}/{entry['id']}/save", json={}, headers=admin).status_code == 400
+    upload(client, admin, entry)
+    assert client.get(URL, params={"search":"SAVE-EDIT"}, headers=admin).json()["total"] == 0
+    saved = client.post(f"{URL}/{entry['id']}/save", json={}, headers=admin).json()
+    assert saved["status"] == "ready" and saved["edit_protected"]
+    assert upload(client, admin, entry, "gps").status_code == 403
+    update = {"client_profile":"ey", "route_no":"SAVE-EDIT-NEW", "edit_password":"wrong"}
+    assert client.put(f"{URL}/{entry['id']}", json=update, headers=admin).status_code == 403
+    update["edit_password"] = edit_password
+    edited=client.put(f"{URL}/{entry['id']}", json=update, headers=admin).json()
+    assert edited["edited_by"] == "admin@test.com" and edited["edited_at"] and edited["status"] == "draft"
+    assert client.post(f"{URL}/{entry['id']}/save", json={"edit_password":edit_password}, headers=admin).status_code == 200
+    events=client.get(f"{URL}/{entry['id']}/audit",headers=admin).json()["events"]
+    assert "edited" in [event["action"] for event in events]
+    assert client.post(f"{URL}/{entry['id']}/delete",json={},headers=admin).status_code == 403
+
+
+def test_ten_rows_count_and_date_filters(client, admin):
+    from datetime import datetime
+    for index in range(12):
+        entry=create(client, admin, "pwc", f"PAGE-{index:02}")
+        upload(client, admin, entry)
+        client.post(f"{URL}/{entry['id']}/save",json={},headers=admin).raise_for_status()
+        with SessionLocal() as db:
+            db.get(EeeTaxiDocumentEntry, entry["id"]).updated_at=datetime(2026,10,8,18,30)
+            db.commit()
+    params={"search":"PAGE-","client_profile":"pwc","updated_from":"2026-10-09","updated_to":"2026-10-09"}
+    first=client.get(URL,params=params,headers=admin).json()
+    assert first["total"] == 12 and len(first["entries"]) == 10 and first["total_all"] >= 12
+    second=client.get(URL,params={**params,"offset":10},headers=admin).json()
+    assert len(second["entries"]) == 2
+    assert not set(e["id"] for e in first["entries"]) & set(e["id"] for e in second["entries"])
+    assert client.get(URL,params={**params,"updated_to":"2026-10-08"},headers=admin).status_code == 400
+    assert client.get(URL,params={"search":"PAGE-","updated_to":"2026-10-08"},headers=admin).json()["total"] == 0
+
+
+def test_invoice_document_copy_survives_bulk_cleanup(client, admin, edit_password):
+    import zipfile
+    from datetime import date
+    from app.models import EeeTaxiBatch, EeeTaxiInvoice, EeeTaxiInvoiceStatus, EeeTaxiDocumentFile
+    from app.services.eee_taxi_documents import attach_documents
+    from app.services.eee_taxi_pipeline import build_zip
+    ey=create(client,admin,"ey","ZIP-ROUTE")
+    pwc=create(client,admin,"pwc","ZIP-ROUTE")
+    for entry in [ey,pwc]:
+        upload(client,admin,entry)
+        client.post(f"{URL}/{entry['id']}/save",json={},headers=admin).raise_for_status()
+    with SessionLocal() as db:
+        batch=EeeTaxiBatch(invoice_date=date(2026,10,9),start_suffix=1,client_profile="ey",created_by="admin@test.com")
+        db.add(batch);db.flush()
+        invoice=EeeTaxiInvoice(batch_id=batch.id,row_index=0,route_no=" zip-route ",invoice_no="EEE/001",status=EeeTaxiInvoiceStatus.DONE,signed_pdf_data=b"%PDF-signed-unchanged")
+        db.add(invoice);db.flush();attach_documents(invoice,batch,db);db.commit()
+        batch_id=batch.id
+        assert db.get(EeeTaxiDocumentEntry,ey["id"]).used_revision == 1
+        assert db.get(EeeTaxiDocumentEntry,pwc["id"]).used_revision == 0
+    body={"ids":[ey["id"],pwc["id"]],"edit_password":edit_password}
+    assert client.post(URL+"/bulk-delete",json=body,headers=admin).status_code == 409
+    assert client.get(f"{URL}/{ey['id']}",headers=admin).status_code == 200
+    assert client.post(URL+"/bulk-delete",json={**body,"ids":[ey["id"]],"edit_password":"wrong"},headers=admin).status_code == 403
+    deleted=client.post(URL+"/bulk-delete",json={**body,"ids":[ey["id"]]},headers=admin)
+    assert deleted.status_code == 200 and deleted.json()["freed_bytes"] == len(png())
+    with SessionLocal() as db:
+        assert db.query(EeeTaxiDocumentFile).filter_by(entry_id=ey["id"]).count() == 0
+        for with_docs in [False,True]:
+            archive=zipfile.ZipFile(io.BytesIO(build_zip(batch_id,db,with_documents=with_docs)))
+            assert len(archive.namelist()) == (2 if with_docs else 1)
+            pdf_name=next(name for name in archive.namelist() if name.endswith('.pdf'))
+            assert archive.read(pdf_name) == b"%PDF-signed-unchanged"
+            if with_docs:
+                assert archive.read(next(name for name in archive.namelist() if '/documents/' in name)) == png()
+        db.delete(db.get(EeeTaxiBatch,batch_id));db.commit()
+    assert "deleted" in [event["action"] for event in client.get(f"{URL}/{ey['id']}/audit",headers=admin).json()["events"]]
+
+
+def test_document_startup_migration_keeps_old_saved_entries(monkeypatch):
+    from sqlalchemy import create_engine, inspect, text
+    import app.database as database
+    engine=create_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE eee_taxi_document_entries (id VARCHAR(32) PRIMARY KEY, route_no VARCHAR(64))"))
+        connection.execute(text("INSERT INTO eee_taxi_document_entries VALUES ('old', 'DS-OLD')"))
+        connection.execute(text("CREATE TABLE eee_taxi_invoices (id VARCHAR(32) PRIMARY KEY)"))
+    monkeypatch.setattr(database,"engine",engine)
+    database._migrate_existing_db()
+    database._migrate_existing_db()
+    with engine.connect() as connection:
+        row=connection.execute(text("SELECT route_no,is_saved,edit_protected,revision,used_revision FROM eee_taxi_document_entries")).one()
+        assert tuple(row) == ('DS-OLD',1,1,1,0)
+        assert 'document_zip_data' in {column['name'] for column in inspect(connection).get_columns('eee_taxi_invoices')}
+    engine.dispose()

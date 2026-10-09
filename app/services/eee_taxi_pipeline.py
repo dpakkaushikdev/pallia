@@ -295,6 +295,8 @@ def generate_next_invoice(batch_id: str, db: Session) -> dict:
         inv_rec.pdf_path     = str(pdf_path)
         inv_rec.pdf_data     = pdf_path.read_bytes()
         inv_rec.sig_box      = [float(v) for v in sig_box] if sig_box else None
+        from app.services.eee_taxi_documents import attach_documents
+        attach_documents(inv_rec, batch, db)
 
         if sign_mode == "dummy":
             signed_path = sign_eee_taxi_pdf_dummy(pdf_path, sig_box=sig_box)
@@ -335,7 +337,7 @@ def generate_next_invoice(batch_id: str, db: Session) -> dict:
     }
 
 
-def build_zip(batch_id: str, db: Session, booking_type: str | None = None) -> bytes:
+def build_zip(batch_id: str, db: Session, booking_type: str | None = None, with_documents: bool = False) -> bytes:
     """Return a ZIP archive of signed PDFs in the batch.
 
     booking_type=None  → all invoices
@@ -355,5 +357,14 @@ def build_zip(batch_id: str, db: Session, booking_type: str | None = None) -> by
         for inv in invoices:
             data = signed_pdf_bytes(inv)
             if data:
-                zf.writestr(signed_filename(inv), data)
+                if with_documents:
+                    from app.services.eee_taxi_documents import safe_name
+                    folder = safe_name(inv.route_no or 'invoice') + '_' + safe_name(inv.invoice_no or inv.id)
+                    zf.writestr(folder + '/' + signed_filename(inv), data)
+                    if inv.document_zip_data:
+                        with zipfile.ZipFile(io.BytesIO(inv.document_zip_data)) as docs:
+                            for name in docs.namelist():
+                                zf.writestr(folder + '/documents/' + name, docs.read(name))
+                else:
+                    zf.writestr(signed_filename(inv), data)
     return buf.getvalue()

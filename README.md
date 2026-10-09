@@ -161,9 +161,25 @@ PWC entries have the same categories except Email Screenshot. Each category
 accepts multiple PDFs, PNG, JPG or WebP images (up to 3 MB per file). Click a
 category's paste area and press Ctrl+V to attach a clipboard screenshot, or
 choose **Upload from PC**. Attachments save immediately in the database and
-can be viewed, downloaded or removed when the entry is reopened. The saved
-entry list supports DS/Route searches and shows which categories are missing.
+can be viewed or downloaded when the entry is reopened. Finish with **Save**
+to make an entry eligible for invoice matching. Past entries require the Masters
+edit password before changing or removing attachments.
 Access follows the EEE-Taxi permission, including attachment downloads.
+
+Document entries require **Save** after uploading; saving clears the form for
+another DS/Route entry. The saved list shows ten records per page, total counts,
+and filters for DS/Route, client and updated date (India time). Past-entry edits
+and deletion require the shared Masters edit password. The latest editor/date
+and a separate audit log are stored; deleting source files preserves the audit.
+
+Invoice generation matches saved documents by client and normalized DS/Route
+number, copies the files into the invoice record, and marks the entry **used**.
+The two billing ZIP downloads contain either invoices only or invoices plus
+supporting files grouped by DS/Route and invoice number. Supporting files remain
+separate from signed PDFs, preserving the original DSC signature. **Document
+History** lists used entries for password-protected bulk deletion of source
+uploads; completed invoice attachment copies remain available. Saving later
+edits makes the changed document revision ready for another attachment.
 
 ### Installing the signing helper on a PC
 

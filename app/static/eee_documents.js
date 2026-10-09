@@ -1,12 +1,14 @@
-const ed = {entry: null, busy: false, offset: 0, total: 0, listVersion: 0, previewUrl: null};
+const ed = {entry: null, busy: false, offset: 0, total: 0, listVersion: 0, previewUrl: null, password: "", historyOffset: 0, historyTotal: 0, historyVersion: 0};
 const edNames = {invoice: "Invoice", ds: "DS", parking: "Parking", toll_mcd: "Toll / MCD", gps: "GPS", email_screenshot: "Email Screenshot"};
 const edBase = "/api/eee-taxi/documents";
 const edEl = id => document.getElementById(id);
 const edEscape = value => String(value).replace(/[&<>"']/g, ch => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[ch]));
 
 function edReset() {
-  ed.listVersion++;
-  ed.entry = null;
+  ed.listVersion++; ed.historyVersion++;
+  edEl("ehEntries").replaceChildren();
+  edEl("ehCount").textContent = "";
+  ed.entry = null; ed.password = "";
   edClosePreview();
   edRender();
   edEl("edEntries").replaceChildren();
@@ -19,27 +21,94 @@ function edStatus(text, error = false) {
   edEl("edStatus").className = error ? "text-err" : "meta";
 }
 
-async function edLoad(reset = true) {
-  if (reset) ed.offset = 0;
-  const version = ++ed.listVersion;
+async function edList(prefix, reset = true) {
+  const history = prefix === "eh", offsetKey = history ? "historyOffset" : "offset", totalKey = history ? "historyTotal" : "total";
+  const versionKey = history ? "historyVersion" : "listVersion";
+  if (reset) ed[offsetKey] = 0;
+  const version = ++ed[versionKey];
   try {
-    const params = new URLSearchParams({client_profile: edEl("edClient").value, search: edEl("edSearch").value, offset: ed.offset});
+    const params = new URLSearchParams({search: edEl(prefix+"Search").value, offset: ed[offsetKey]});
+    for (const [key, id] of [["client_profile", "FilterClient"], ["updated_from", "From"], ["updated_to", "To"]]) {
+      const value = edEl(prefix+id).value; if (value) params.set(key,value);
+    }
+    if (history) params.set("used", "true");
     const data = await api(`${edBase}?${params}`);
-    if (version !== ed.listVersion) return;
-    ed.total = data.total;
-    edEl("edEntries").innerHTML = data.entries.length ? data.entries.map(entry =>
-      `<tr><td><button class="btn secondary sm" data-doc-open="${entry.id}">${edEscape(entry.route_no)}</button></td><td>${entry.client_profile.toUpperCase()}</td><td>${entry.files.length} file${entry.files.length === 1 ? "" : "s"}</td><td>${entry.missing.length ? `${entry.categories.length - entry.missing.length}/${entry.categories.length} categories` : '<span class="text-ok">Complete</span>'}</td><td>${new Date(entry.updated_at).toLocaleString("en-IN")}</td></tr>`
-    ).join("") : '<tr><td colspan="5" class="meta">No document entries yet. Enter a DS/Route number above to begin.</td></tr>';
-    edEl("edPageInfo").textContent = ed.total ? `${ed.offset + 1}–${Math.min(ed.offset + 50, ed.total)} of ${ed.total}` : "0 entries";
-    edEl("edPrevious").disabled = ed.busy || ed.offset === 0;
-    edEl("edNext").disabled = ed.busy || ed.offset + 50 >= ed.total;
-  } catch (error) { if (version === ed.listVersion) edStatus(error.message, true); }
+    if (version !== ed[versionKey]) return;
+    ed[totalKey] = data.total;
+    edEl(prefix+"Entries").innerHTML = data.entries.map(entry => `<tr>
+      ${history ? `<td><input type="checkbox" data-doc-select="${entry.id}" aria-label="Select ${edEscape(entry.route_no)}"></td>` : ""}
+      <td><button class="btn secondary sm" data-doc-open="${entry.id}">${edEscape(entry.route_no)}</button></td>
+      <td>${entry.client_profile.toUpperCase()}</td><td>${entry.files.length} files</td><td>${entry.status}${entry.used_invoice_no && entry.status === "used" ? `<br><small>${edEscape(entry.used_invoice_no)}</small>` : ""}</td>
+      <td>${new Date(entry.updated_at).toLocaleString("en-IN")}</td><td>${entry.edited_by ? edEscape(entry.edited_by)+"<br>"+new Date(entry.edited_at).toLocaleString("en-IN") : "-"}</td>
+      <td><button class="btn secondary sm" data-doc-edit="${entry.id}">Edit</button> <button class="btn danger sm" data-doc-delete="${entry.id}">Delete</button></td></tr>`).join("") || `<tr><td colspan="8" class="meta">No matching saved entries.</td></tr>`;
+    edEl(prefix+"Count").textContent = `Total saved records: ${data.total_all}. Matching records: ${data.total}. Showing up to 10.`;
+    edEl(prefix+"PageInfo").textContent = data.total ? `${ed[offsetKey]+1}-${Math.min(ed[offsetKey]+10,data.total)} of ${data.total}` : "0 entries";
+    edEl(prefix+"Previous").disabled = ed[offsetKey] === 0;
+    edEl(prefix+"Next").disabled = ed[offsetKey]+10 >= data.total;
+    if (history) edEl("ehAll").checked = false;
+  } catch(error) { edStatus(error.message,true); if(history) edEl("ehCount").textContent=error.message; }
+}
+function edLoad(reset=true) { return edList("ed",reset); }
+function edHistoryLoad(reset=true) { return edList("eh",reset); }
+function edLocked() { return !!(ed.entry?.edit_protected && !ed.password); }
+function edAskPassword(message) {
+  return new Promise(resolve => {
+    const modal=document.createElement('div'); modal.className='modal-backdrop';
+    modal.innerHTML=`<div class="modal"><h3>${edEscape(message)}</h3><label>Masters edit password<input type="password" autocomplete="off" maxlength="128"></label><div style="margin-top:16px"><button class="btn" data-ok>Continue</button> <button class="btn secondary" data-cancel>Cancel</button></div></div>`;
+    document.body.append(modal);
+    const input=modal.querySelector('input');
+    const finish=value=>{modal.remove();resolve(value);};
+    modal.querySelector('[data-ok]').onclick=()=>finish(input.value);
+    modal.querySelector('[data-cancel]').onclick=()=>finish(null);
+    input.onkeydown=event=>{if(event.key==='Enter')finish(input.value);if(event.key==='Escape')finish(null);};
+    input.focus();
+  });
+}
+async function edUnlock() {
+  const password = await edAskPassword("Unlock document editing");
+  if (!password) return false;
+  await api("/api/eee-taxi/rates/unlock", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password})});
+  ed.password=password; edRender(); return true;
+}
+async function edFinish() {
+  if(ed.busy || !ed.entry || edLocked()) return;
+  edSetBusy(true);
+  try {
+    const route=edEl("edRoute").value.trim(), profile=edEl("edClient").value;
+    if(route.toUpperCase() !== ed.entry.route_no || profile !== ed.entry.client_profile)
+      ed.entry=await api(`${edBase}/${ed.entry.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({route_no:route,client_profile:profile,edit_password:ed.password})});
+    await api(`${edBase}/${ed.entry.id}/save`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({edit_password:ed.password})});
+    ed.entry=null; ed.password=""; edEl("edRoute").value=""; edRender();
+    edStatus("Saved. Enter the next DS no/Route No."); await edLoad(); await edHistoryLoad();
+  } catch(error) { edStatus(error.message,true); }
+  finally { edSetBusy(false); edEl("edRoute").focus(); }
+}
+async function edDelete(ids, history=false) {
+  if(ed.busy || !ids.length) return;
+  if(!confirm(`Delete ${ids.length} document entry/entries and their uploaded files? Invoice copies will remain.`)) return;
+  const password=await edAskPassword("Delete document entries"); if(!password) return;
+  edSetBusy(true);
+  try {
+    const result=await api(`${edBase}/bulk-delete`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids,used_only:history,edit_password:password})});
+    if(ed.entry && ids.includes(ed.entry.id)) { ed.entry=null; ed.password=""; edEl("edRoute").value=""; edRender(); }
+    edStatus(`Deleted ${result.deleted} entries; freed ${Math.ceil(result.freed_bytes/1024)} KB of source uploads.`);
+    await edLoad(); await edHistoryLoad();
+    if(history) edEl("ehCount").textContent += ` Deleted ${result.deleted} entries; freed ${Math.ceil(result.freed_bytes/1024)} KB.`;
+  } catch(error) { edStatus(error.message,true); if(history) edEl("ehCount").textContent=error.message; }
+  finally { edSetBusy(false); }
 }
 
 function edRender() {
   const entry = ed.entry;
   edEl("edEditor").hidden = !entry;
+  edEl("edRoute").disabled = ed.busy || edLocked();
+  edEl("edClient").disabled = ed.busy || edLocked();
   if (!entry) return;
+  edEl("edFinish").disabled = ed.busy || edLocked();
+  edEl("edFinish").hidden = edLocked();
+  edEl("edEdit").hidden = !edLocked();
+  edEl("edRoute").disabled = ed.busy || edLocked();
+  edEl("edClient").disabled = ed.busy || edLocked();
   edEl("edEntryTitle").textContent = `${entry.client_profile.toUpperCase()} · ${entry.route_no}`;
   edEl("edCompleteness").textContent = entry.missing.length
     ? `Missing: ${entry.missing.map(category => edNames[category]).join(", ")}`
@@ -48,17 +117,20 @@ function edRender() {
     const files = entry.files.filter(file => file.category === category);
     return `<section class="ed-doc-card"><div class="ed-card-title"><strong>${edNames[category]}</strong><span class="meta">${files.length} attached</span></div>
       <div class="ed-paste" tabindex="0" role="textbox" aria-label="Paste screenshot for ${edNames[category]}" data-doc-paste="${category}">Click here and press Ctrl+V to paste a screenshot</div>
-      <label class="btn secondary sm ed-upload-label">Upload from PC<input type="file" data-doc-upload="${category}" accept="application/pdf,image/png,image/jpeg,image/webp" multiple ${ed.busy ? "disabled" : ""}></label>
-      <ul class="ed-file-list">${files.map(file => `<li><span title="${edEscape(file.filename)}">${edEscape(file.filename)} <small class="meta">(${Math.ceil(file.size / 1024)} KB)</small></span><div><button class="btn sm" data-doc-view="${file.id}">View</button> <button class="btn secondary sm" data-doc-download="${file.id}">Download</button> <button class="btn danger sm" data-doc-remove="${file.id}" ${ed.busy ? "disabled" : ""}>Remove</button></div></li>`).join("") || '<li class="meta">No files added.</li>'}</ul></section>`;
+      <label class="btn secondary sm ed-upload-label">Upload from PC<input type="file" data-doc-upload="${category}" accept="application/pdf,image/png,image/jpeg,image/webp" multiple ${ed.busy || edLocked() ? "disabled" : ""}></label>
+      <ul class="ed-file-list">${files.map(file => `<li><span title="${edEscape(file.filename)}">${edEscape(file.filename)} <small class="meta">(${Math.ceil(file.size / 1024)} KB)</small></span><div><button class="btn sm" data-doc-view="${file.id}">View</button> <button class="btn secondary sm" data-doc-download="${file.id}">Download</button> <button class="btn danger sm" data-doc-remove="${file.id}" ${ed.busy || edLocked() ? "disabled" : ""}>Remove</button></div></li>`).join("") || '<li class="meta">No files added.</li>'}</ul></section>`;
   }).join("");
 }
 
 function edSetBusy(busy) {
   ed.busy = busy;
-  for (const id of ["edClient", "edRoute", "edSave", "edSearch", "edSearchButton"]) edEl(id).disabled = busy;
+  for (const id of ["edClient", "edRoute", "edSave", "edSearch", "edSearchButton", "edNew", "edEdit"]) edEl(id).disabled = busy;
   edEl("edPrevious").disabled = busy || ed.offset === 0;
-  edEl("edNext").disabled = busy || ed.offset + 50 >= ed.total;
-  edEl("edCards").querySelectorAll('input,button[data-doc-remove]').forEach(input => input.disabled = busy);
+  edEl("edNext").disabled = busy || ed.offset + 10 >= ed.total;
+  edEl("edRoute").disabled = busy || edLocked();
+  edEl("edClient").disabled = busy || edLocked();
+  edEl("edFinish").disabled = busy || edLocked();
+  edEl("edCards").querySelectorAll('input,button[data-doc-remove]').forEach(input => input.disabled = busy || edLocked());
 }
 
 async function edCreate(event) {
@@ -68,37 +140,41 @@ async function edCreate(event) {
   if (!route) { edStatus("Enter the DS no/Route No first.", true); return; }
   edSetBusy(true);
   try {
+    ed.password = "";
     ed.entry = await api(edBase, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({client_profile: edEl("edClient").value, route_no: route})});
     edEl("edRoute").value = ed.entry.route_no;
     edRender();
-    edStatus("Entry saved. Upload documents or paste screenshots into their categories.");
+    edStatus("Attach documents, then click Save to finish. Past entries require Edit with password.");
     await edLoad();
   } catch (error) { edStatus(error.message, true); }
   finally { edSetBusy(false); }
 }
 
-async function edOpen(id) {
+async function edOpen(id, edit=false) {
   if (ed.busy) return;
   edSetBusy(true);
   try {
+    ed.password="";
     ed.entry = await api(`${edBase}/${id}`);
     edEl("edRoute").value = ed.entry.route_no;
     edEl("edClient").value = ed.entry.client_profile;
-    edRender(); edStatus("Saved entry opened. Attachments save as you add them.");
+    edRender(); edStatus("Saved entry opened. Use Edit with password to make changes.");
+    if(edit && edLocked()) await edUnlock();
+    switchTab("eee-documents");
     edEl("edEditor").scrollIntoView({behavior: "smooth", block: "start"});
   } catch (error) { edStatus(error.message, true); }
   finally { edSetBusy(false); }
 }
 
 async function edUpload(category, files) {
-  if (ed.busy || !ed.entry || !files.length) return;
+  if (ed.busy || !ed.entry || edLocked() || !files.length) return;
   const entryId = ed.entry.id;
   edSetBusy(true);
   let saved = 0;
   try {
     for (const file of files) {
       if (file.size > 3 * 1024 * 1024) throw new Error(`${file.name}: each document must be 3 MB or smaller.`);
-      const data = new FormData(); data.append("category", category); data.append("file", file, file.name);
+      const data = new FormData(); data.append("edit_password",ed.password); data.append("category", category); data.append("file", file, file.name);
       edStatus(`Saving ${edNames[category]}: ${file.name}…`);
       ed.entry = await api(`${edBase}/${entryId}/files`, {method: "POST", body: data});
       saved++;
@@ -113,11 +189,11 @@ async function edUpload(category, files) {
 }
 
 async function edRemove(fileId) {
-  if (ed.busy || !ed.entry) return;
+  if (ed.busy || !ed.entry || edLocked()) return;
   if (!confirm("Remove this attachment from the document entry?")) return;
   edSetBusy(true);
   try {
-    ed.entry = await api(`${edBase}/${ed.entry.id}/files/${fileId}`, {method: "DELETE"});
+    ed.entry = await api(`${edBase}/${ed.entry.id}/files/${fileId}`, {method: "DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({edit_password:ed.password})});
     edRender(); edStatus("Attachment removed."); await edLoad(false);
   } catch (error) { edStatus(error.message, true); }
   finally { edSetBusy(false); }
@@ -155,12 +231,18 @@ async function edFile(fileId, preview) {
 }
 
 edEl("edForm").addEventListener("submit", edCreate);
-edEl("edClient").addEventListener("change", () => { ed.entry = null; edRender(); edStatus(""); edLoad(); });
-edEl("edSearchButton").addEventListener("click", () => edLoad());
-edEl("edSearch").addEventListener("keydown", event => { if (event.key === "Enter") edLoad(); });
-edEl("edPrevious").addEventListener("click", () => { ed.offset = Math.max(0, ed.offset - 50); edLoad(false); });
-edEl("edNext").addEventListener("click", () => { ed.offset += 50; edLoad(false); });
-edEl("edEntries").addEventListener("click", event => { const button = event.target.closest("[data-doc-open]"); if (button) edOpen(button.dataset.docOpen); });
+edEl("edFinish").addEventListener("click",edFinish);
+edEl("edEdit").addEventListener("click",async()=>{try {await edUnlock(); edSetBusy(false);} catch(error){edStatus(error.message,true);}});
+edEl("edNew").addEventListener("click",()=>{if(ed.entry && !ed.entry.is_saved && !confirm("This entry is unfinished. Leave it and start the next entry?"))return;ed.entry=null;ed.password="";edEl("edRoute").value="";edRender();edSetBusy(false);edStatus("");});
+for(const prefix of ["ed","eh"]) {
+ edEl(prefix+"SearchButton").addEventListener("click",()=>edList(prefix));
+ edEl(prefix+"Search").addEventListener("keydown",event=>{if(event.key==="Enter")edList(prefix);});
+ edEl(prefix+"Previous").addEventListener("click",()=>{const key=prefix==="eh"?"historyOffset":"offset";ed[key]=Math.max(0,ed[key]-10);edList(prefix,false);});
+ edEl(prefix+"Next").addEventListener("click",()=>{ed[prefix==="eh"?"historyOffset":"offset"]+=10;edList(prefix,false);});
+ edEl(prefix+"Entries").addEventListener("click",event=>{const button=event.target.closest("button");if(!button)return;if(button.dataset.docOpen)edOpen(button.dataset.docOpen);if(button.dataset.docEdit)edOpen(button.dataset.docEdit,true);if(button.dataset.docDelete)edDelete([button.dataset.docDelete],prefix==="eh");});
+}
+edEl("ehAll").addEventListener("change",()=>edEl("ehEntries").querySelectorAll("[data-doc-select]").forEach(box=>box.checked=edEl("ehAll").checked));
+edEl("ehDelete").addEventListener("click",()=>edDelete(Array.from(edEl("ehEntries").querySelectorAll("[data-doc-select]:checked")).map(box=>box.dataset.docSelect),true));
 edEl("edCards").addEventListener("change", event => {
   if (event.target.matches("[data-doc-upload]")) edUpload(event.target.dataset.docUpload, Array.from(event.target.files));
 });

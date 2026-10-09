@@ -1,5 +1,5 @@
 """Shared EEE document records; attachments persist with the application's DB."""
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from hashlib import sha256
 import io
 from typing import Literal
@@ -14,7 +14,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import EeeTaxiDocumentEntry, EeeTaxiDocumentFile, User
+from app.models import EeeTaxiDocumentEntry, EeeTaxiDocumentFile, EeeTaxiDocumentAudit, User
+from app.api.eee_taxi_rates import check_edit_password
 from app.services.auth import require_permission
 
 router = APIRouter(prefix="/api/eee-taxi/documents", tags=["eee-taxi-documents"])
@@ -35,12 +36,45 @@ class EntryIn(BaseModel):
         return " ".join(value.split()).upper()
 
 
+class PasswordIn(BaseModel):
+    edit_password: str = Field(default="", max_length=128)
+
+
+class EntryUpdate(EntryIn):
+    edit_password: str = Field(default="", max_length=128)
+
+
+class BulkDeleteIn(PasswordIn):
+    ids: list[str] = Field(min_length=1, max_length=100)
+    used_only: bool = True
+
+
+def audit(db, entry, action, actor, details=None):
+    db.add(EeeTaxiDocumentAudit(entry_id=entry.id, client_profile=entry.client_profile,
+        route_no=entry.route_no, action=action, actor=actor, details=details))
+
+
+def authorize_edit(db, entry, password, user):
+    if entry.edit_protected:
+        check_edit_password(db, password, user)
+
+
+def changed(db, entry, user, action, details=None):
+    entry.updated_at = datetime.utcnow()
+    if entry.edit_protected:
+        entry.edited_by = user.email
+        entry.edited_at = entry.updated_at
+        entry.revision += 1
+    entry.is_saved = False
+    audit(db, entry, action, user.email, details)
+
+
 def categories(profile):
     return CATEGORIES + (["email_screenshot"] if profile == "ey" else [])
 
 
 def entry_or_404(db, entry_id):
-    entry = db.get(EeeTaxiDocumentEntry, entry_id)
+    entry = db.scalar(select(EeeTaxiDocumentEntry).where(EeeTaxiDocumentEntry.id == entry_id).with_for_update())
     if entry is None:
         raise HTTPException(404, "Document entry not found.")
     return entry
@@ -54,20 +88,56 @@ def entry_dict(entry):
     missing = [cat for cat in categories(entry.client_profile) if not any(f["category"] == cat for f in files)]
     return {"id": entry.id, "client_profile": entry.client_profile, "route_no": entry.route_no,
             "created_by": entry.created_by, "updated_at": entry.updated_at.isoformat() + "Z",
-            "categories": categories(entry.client_profile), "files": files, "missing": missing}
+            "categories": categories(entry.client_profile), "files": files, "missing": missing,
+            "is_saved": entry.is_saved, "edit_protected": entry.edit_protected,
+            "edited_by": entry.edited_by, "edited_at": entry.edited_at.isoformat() + "Z" if entry.edited_at else None,
+            "status": "used" if entry.used_revision >= entry.revision else "ready" if entry.is_saved else "draft",
+            "used_at": entry.used_at.isoformat() + "Z" if entry.used_at else None,
+            "used_invoice_no": entry.used_invoice_no, "revision": entry.revision}
 
 
 @router.get("")
-def list_entries(client_profile: Literal["ey", "pwc"] = "ey", search: str = Query("", max_length=64),
-                 offset: int = Query(0, ge=0), _: User = Depends(eee_user), db: Session = Depends(get_db)):
-    condition = (EeeTaxiDocumentEntry.client_profile == client_profile)
+def list_entries(client_profile: Literal["ey", "pwc"] | None = None, search: str = Query("", max_length=64),
+                 updated_from: date | None = None, updated_to: date | None = None,
+                 used: bool | None = None, offset: int = Query(0, ge=0),
+                 _: User = Depends(eee_user), db: Session = Depends(get_db)):
+    if updated_from and updated_to and updated_from > updated_to:
+        raise HTTPException(400, "From date must be on or before To date.")
+    condition = EeeTaxiDocumentEntry.is_saved.is_(True)
+    if client_profile:
+        condition &= EeeTaxiDocumentEntry.client_profile == client_profile
     if search.strip():
         condition &= EeeTaxiDocumentEntry.route_no.contains(search.strip().upper(), autoescape=True)
+    india_offset = timedelta(hours=5, minutes=30)
+    if updated_from:
+        condition &= EeeTaxiDocumentEntry.updated_at >= datetime.combine(updated_from, time.min) - india_offset
+    if updated_to:
+        condition &= EeeTaxiDocumentEntry.updated_at < datetime.combine(updated_to + timedelta(days=1), time.min) - india_offset
+    used_condition = EeeTaxiDocumentEntry.used_revision >= EeeTaxiDocumentEntry.revision
+    if used is not None:
+        condition &= used_condition if used else ~used_condition
     total = db.scalar(select(func.count()).select_from(EeeTaxiDocumentEntry).where(condition))
+    total_all = db.scalar(select(func.count()).select_from(EeeTaxiDocumentEntry).where(EeeTaxiDocumentEntry.is_saved.is_(True)))
     rows = db.scalars(select(EeeTaxiDocumentEntry).where(condition)
                       .order_by(EeeTaxiDocumentEntry.updated_at.desc(), EeeTaxiDocumentEntry.id)
-                      .offset(offset).limit(50)).all()
-    return {"entries": [entry_dict(row) for row in rows], "total": total}
+                      .offset(offset).limit(10)).all()
+    return {"entries": [entry_dict(row) for row in rows], "total": total, "total_all": total_all, "page_size": 10}
+
+
+@router.post("/bulk-delete")
+def bulk_delete(body: BulkDeleteIn, user: User = Depends(eee_user), db: Session = Depends(get_db)):
+    check_edit_password(db, body.edit_password, user)
+    rows = db.scalars(select(EeeTaxiDocumentEntry).where(EeeTaxiDocumentEntry.id.in_(set(body.ids))).with_for_update()).all()
+    if len(rows) != len(set(body.ids)):
+        raise HTTPException(404, "An entry was already deleted. Refresh the list.")
+    if body.used_only and any(row.used_revision < row.revision for row in rows):
+        raise HTTPException(409, "Bulk cleanup can delete only used entries. Refresh the history.")
+    freed = sum(file.size for row in rows for file in row.files)
+    for row in rows:
+        audit(db, row, "deleted", user.email, {"files": len(row.files), "bytes": sum(f.size for f in row.files)})
+        db.delete(row)
+    db.commit()
+    return {"deleted": len(rows), "freed_bytes": freed}
 
 
 @router.post("")
@@ -81,6 +151,8 @@ def create_entry(body: EntryIn, user: User = Depends(eee_user), db: Session = De
         entry = EeeTaxiDocumentEntry(**body.model_dump(), created_by=user.email)
         db.add(entry)
         try:
+            db.flush()
+            audit(db, entry, "created", user.email)
             db.commit()
         except IntegrityError:
             db.rollback()
@@ -88,6 +160,56 @@ def create_entry(body: EntryIn, user: User = Depends(eee_user), db: Session = De
             if entry is None:
                 raise
     return entry_dict(entry)
+
+
+@router.post("/{entry_id}/save")
+def save_entry(entry_id: str, body: PasswordIn, user: User = Depends(eee_user), db: Session = Depends(get_db)):
+    entry = entry_or_404(db, entry_id)
+    authorize_edit(db, entry, body.edit_password, user)
+    if not entry.files:
+        raise HTTPException(400, "Attach at least one document before saving.")
+    entry.is_saved = True
+    entry.edit_protected = True
+    entry.updated_at = datetime.utcnow()
+    audit(db, entry, "saved", user.email, {"revision": entry.revision})
+    db.commit()
+    return entry_dict(entry)
+
+
+@router.put("/{entry_id}")
+def update_entry(entry_id: str, body: EntryUpdate, user: User = Depends(eee_user), db: Session = Depends(get_db)):
+    entry = entry_or_404(db, entry_id)
+    authorize_edit(db, entry, body.edit_password, user)
+    if any(file.category not in categories(body.client_profile) for file in entry.files):
+        raise HTTPException(400, "Remove Email Screenshot before changing this entry to PWC.")
+    old = {"client_profile": entry.client_profile, "route_no": entry.route_no}
+    entry.client_profile, entry.route_no = body.client_profile, body.route_no
+    changed(db, entry, user, "edited", {"previous": old})
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "An entry already exists for this client and DS/Route number.") from exc
+    return entry_dict(entry)
+
+
+@router.post("/{entry_id}/delete")
+def delete_entry(entry_id: str, body: PasswordIn, user: User = Depends(eee_user), db: Session = Depends(get_db)):
+    entry = entry_or_404(db, entry_id)
+    check_edit_password(db, body.edit_password, user)
+    freed = sum(file.size for file in entry.files)
+    audit(db, entry, "deleted", user.email, {"files": len(entry.files), "bytes": freed})
+    db.delete(entry)
+    db.commit()
+    return {"deleted": entry_id, "freed_bytes": freed}
+
+
+@router.get("/{entry_id}/audit")
+def read_audit(entry_id: str, _: User = Depends(eee_user), db: Session = Depends(get_db)):
+    rows = db.scalars(select(EeeTaxiDocumentAudit).where(EeeTaxiDocumentAudit.entry_id == entry_id)
+                      .order_by(EeeTaxiDocumentAudit.created_at.desc())).all()
+    return {"events": [{"action": row.action, "actor": row.actor,
+                       "date": row.created_at.isoformat() + "Z", "details": row.details} for row in rows]}
 
 
 @router.get("/{entry_id}")
@@ -119,8 +241,9 @@ def validate_file(data):
 
 @router.post("/{entry_id}/files")
 def upload_file(entry_id: str, category: str = Form(...), file: UploadFile = File(...),
-                user: User = Depends(eee_user), db: Session = Depends(get_db)):
+                edit_password: str = Form(""), user: User = Depends(eee_user), db: Session = Depends(get_db)):
     entry = entry_or_404(db, entry_id)
+    authorize_edit(db, entry, edit_password, user)
     if category not in categories(entry.client_profile):
         raise HTTPException(400, "This document category does not apply to the selected client.")
     data = file.file.read(MAX_FILE_BYTES + 1)
@@ -135,7 +258,7 @@ def upload_file(entry_id: str, category: str = Form(...), file: UploadFile = Fil
     if not any(f.category == category and f.sha256 == digest for f in entry.files):
         entry.files.append(EeeTaxiDocumentFile(category=category, filename=filename,
             content_type=content_type, size=len(data), sha256=digest, data=data, uploaded_by=user.email))
-        entry.updated_at = datetime.utcnow()
+        changed(db, entry, user, "file_added", {"category": category, "filename": filename})
         try:
             db.commit()
         except IntegrityError:
@@ -164,13 +287,14 @@ def download_file(entry_id: str, file_id: str, inline: bool = False,
 
 
 @router.delete("/{entry_id}/files/{file_id}")
-def delete_file(entry_id: str, file_id: str, _: User = Depends(eee_user), db: Session = Depends(get_db)):
+def delete_file(entry_id: str, file_id: str, body: PasswordIn = PasswordIn(), user: User = Depends(eee_user), db: Session = Depends(get_db)):
     entry = entry_or_404(db, entry_id)
+    authorize_edit(db, entry, body.edit_password, user)
     file = db.get(EeeTaxiDocumentFile, file_id)
     if file is None or file.entry_id != entry_id:
         raise HTTPException(404, "Document not found.")
     db.delete(file)
-    entry.updated_at = datetime.utcnow()
+    changed(db, entry, user, "file_removed", {"filename": file.filename, "category": file.category})
     db.commit()
     db.expire(entry, ["files"])
     return entry_dict(entry)

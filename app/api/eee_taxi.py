@@ -483,7 +483,7 @@ _DOWNLOADABLE = (
 )
 
 @router.get("/batch/{batch_id}/download-all")
-def download_all(batch_id: str):
+def download_all(batch_id: str, with_documents: bool = False):
     """ZIP of all signed PDFs (both P2P and Rental)."""
     with SessionLocal() as db:
         batch = db.get(EeeTaxiBatch, batch_id)
@@ -491,9 +491,9 @@ def download_all(batch_id: str):
             raise HTTPException(status_code=404, detail="Batch not found.")
         if batch.status not in _DOWNLOADABLE:
             raise HTTPException(status_code=409, detail="Batch not yet completed.")
-        zip_bytes = build_zip(batch_id, db)
+        zip_bytes = build_zip(batch_id, db, with_documents=with_documents)
 
-    filename = f"eee_taxi_all_{batch_id[:8]}.zip"
+    filename = f"eee_taxi_{'with_documents' if with_documents else 'invoices'}_{batch_id[:8]}.zip"
     return Response(
         content=zip_bytes,
         media_type="application/zip",
