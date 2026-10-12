@@ -97,6 +97,12 @@ def _migrate_existing_db() -> None:
             if "full_name" not in existing:
                 conn.execute(text("ALTER TABLE users ADD COLUMN full_name VARCHAR(128)"))
             conn.commit()
+        if "external_api_events" in inspector.get_table_names():
+            existing = {c["name"] for c in inspector.get_columns("external_api_events")}
+            if "user_id" not in existing:
+                conn.execute(text("ALTER TABLE external_api_events ADD COLUMN user_id VARCHAR(32) REFERENCES users(id) ON DELETE SET NULL"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_external_api_events_user_id ON external_api_events (user_id)"))
+            conn.commit()
         if "eee_taxi_rate_card" in inspector.get_table_names():
             existing = {c["name"] for c in inspector.get_columns("eee_taxi_rate_card")}
             if "edit_password_hash" not in existing:

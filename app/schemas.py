@@ -172,6 +172,7 @@ class ExternalApiSummaryOut(BaseModel):
     by_api: list[ExternalApiStatOut]
     by_day: list[ExternalApiDayStatOut]
     recent: list[dict]
+    by_user: list[dict] = Field(default_factory=list)
 
 
 class BillingUserStatOut(BaseModel):

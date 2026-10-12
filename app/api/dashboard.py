@@ -214,7 +214,27 @@ def external_api_summary(
         for r in recent_rows
     ]
 
-    return ExternalApiSummaryOut(by_api=by_api, by_day=by_day, recent=recent)
+    user_rows = db.execute(
+        select(
+            User.email,
+            User.full_name,
+            func.count(ExternalApiEvent.id).label("total"),
+            func.sum(func.cast(ExternalApiEvent.success, Integer)).label("ok"),
+        )
+        .join(User, User.id == ExternalApiEvent.user_id)
+        .where(ExternalApiEvent.api_name == "surepass")
+        .where(ExternalApiEvent.created_at >= from_dt)
+        .where(ExternalApiEvent.created_at <= to_dt)
+        .group_by(User.id, User.email, User.full_name)
+        .order_by(func.count(ExternalApiEvent.id).desc())
+    ).all()
+    by_user = [
+        {"email": r.email, "full_name": r.full_name, "total_calls": r.total,
+         "successful": int(r.ok or 0), "failed": r.total - int(r.ok or 0)}
+        for r in user_rows
+    ]
+
+    return ExternalApiSummaryOut(by_api=by_api, by_day=by_day, recent=recent, by_user=by_user)
 
 
 @router.get("/billing", response_model=BillingDashboardOut)

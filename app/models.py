@@ -143,6 +143,7 @@ class ExternalApiEvent(Base):
     api_name: Mapped[str] = mapped_column(String(32), nullable=False, index=True)   # "gemini", "ollama", "easyocr"
     model: Mapped[str | None] = mapped_column(String(64), nullable=True)             # e.g. "gemini-2.5-flash"
     success: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     lr_id: Mapped[str | None] = mapped_column(ForeignKey("lrs.id", ondelete="SET NULL"), nullable=True, index=True)

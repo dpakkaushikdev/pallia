@@ -928,9 +928,9 @@
         <div class="sec-hd"><div><div class="card-title">Select vehicles to verify</div><div id="pVerifyStatus" class="meta" role="status">Loading Pallia Vehicle Master...</div></div><button class="btn" id="pVerifyRun" onclick="pVerifyRun()" disabled>Verify selected</button></div>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:12px 0;">
           <input type="search" id="pVerifySearch" placeholder="Search registration" oninput="pVerifyRender()" aria-label="Search Pallia vehicles" style="max-width:320px;">
-          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="pVerifyAll" onchange="pVerifyToggleAll(this.checked)"> Select visible</label>
           <span class="meta" id="pVerifySelected">0 selected</span>
         </div>
+        <div class="card" style="padding:12px;margin-bottom:12px;"><div class="card-title">Selected vehicles</div><div id="pVerifySelectedList" class="vehicle-tag-list" style="margin-top:8px;"><span class="meta">No vehicles selected.</span></div></div>
         <div id="pVerifyVehicles" class="card" style="padding:8px;max-height:420px;overflow:auto;"></div>
       </div>
       <div class="card"><div class="card-title">Verification results</div><p class="meta">Each vehicle lookup may incur a Surepass charge. Each run is limited to 3 vehicles. The downloaded CSV contains the Surepass response fields for each vehicle, including any lookup error.</p><div id="pVerifyResult" class="meta" role="status">No verification has been run in this session.</div></div>
@@ -939,10 +939,13 @@
     <div class="tab-pane" id="pane-pallia-master">
       <div class="page-hd"><div><h1>Pallia — Vehicle Master</h1><div class="meta">Shared Pallia fleet registrations used by Vehicle Verification. Separate from the EEE-Taxi vehicle master.</div></div></div>
       <div class="card">
-        <div class="sec-hd"><div class="card-title">Pallia vehicles</div><div style="display:flex;gap:8px;align-items:center;"><input type="text" id="pMasterInput" maxlength="20" placeholder="e.g. DL08AB1234" onkeydown="if(event.key==='Enter'){event.preventDefault();pMasterAdd();}"><button class="btn sm" onclick="pMasterAdd()">Add vehicle</button></div></div>
-        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin:12px 0;"><label class="field" for="pMasterBulk" style="flex:1;min-width:260px;margin:0;">Add a list (comma or line separated)<textarea id="pMasterBulk" rows="2" placeholder="DL08AB1234, HR55AT4021"></textarea></label><button class="btn secondary sm" onclick="pMasterBulkAdd()">Add list</button></div>
+        <div class="sec-hd"><div class="card-title">Pallia fleet vehicles</div><div style="display:flex;gap:8px;align-items:center;"><span id="pMasterCount" class="meta"></span><label class="btn secondary sm" for="pMasterCsv">Import CSV (replace master)</label><input type="file" id="pMasterCsv" accept=".csv,text/csv" class="hidden" onchange="pMasterImportCsv(this)"></div></div>
+        <p class="meta">CSV columns supported: exc, Registration No, registration_date, Make, Model. You can also add or delete vehicles below. Changes apply to everyone after saving.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;align-items:end;margin:12px 0;">
+          <label class="field">Registration No<input type="text" id="pMasterInput" maxlength="20" placeholder="e.g. DL08AB1234"></label><label class="field">Registration date<input type="date" id="pMasterDate"></label><label class="field">Make<input type="text" id="pMasterMake" maxlength="128"></label><label class="field">Model<input type="text" id="pMasterModel" maxlength="128"></label><button class="btn sm" onclick="pMasterAdd()">Add vehicle</button>
+        </div>
         <div id="pMasterStatus" class="meta" role="status" style="margin:8px 0 12px;">Loading Pallia Vehicle Master...</div>
-        <div id="pMasterVehicles" class="vehicle-tag-list"></div>
+        <div style="overflow:auto;max-height:560px;"><table class="data-table"><thead><tr><th>Exc</th><th>Registration No</th><th>Registration date</th><th>Make</th><th>Model</th><th>Action</th></tr></thead><tbody id="pMasterVehicles"></tbody></table></div>
         <div style="margin-top:16px;display:flex;gap:8px;align-items:center;"><button class="btn" id="pMasterSave" onclick="pMasterSave()" disabled>Save Pallia Vehicle Master</button><button class="btn secondary" onclick="pMasterLoad()">Discard changes</button></div>
       </div>
     </div>
@@ -1417,7 +1420,7 @@
 
       <div class="grid-2" style="gap:16px;margin-bottom:16px;">
         <div class="card" style="padding:18px 20px;">
-          <div class="card-title">Extraction Calls per Day</div>
+          <div class="card-title">API Calls per Day</div>
           <div id="apiDayChart" class="bar-chart"></div>
         </div>
         <div class="card" style="padding:18px 20px;">
@@ -1430,11 +1433,17 @@
       </div>
 
       <div class="card" style="padding:18px 20px;">
-        <div class="card-title">Recent Extraction Calls</div>
+        <div class="card-title">Recent API Calls</div>
         <table class="data-table" id="apiRecentTable">
           <thead><tr><th>Time</th><th>API</th><th>Model</th><th>Result</th><th>Duration</th><th>Error</th></tr></thead>
           <tbody></tbody>
         </table>
+      </div>
+
+      <div class="card" style="padding:18px 20px;margin-top:16px;">
+        <div class="card-title">Surepass calls by user</div>
+        <p class="meta">One call is counted for each vehicle submitted to verification, including failed lookups.</p>
+        <table class="data-table" id="apiUserCallsTable"><thead><tr><th>User</th><th>Total calls</th><th>Successful</th><th>Failed</th></tr></thead><tbody></tbody></table>
       </div>
     </div>
 
@@ -1556,7 +1565,7 @@
   </div>
 </div>
 <script src="/static/eee_documents.js"></script>
-<script src="/static/pallia_verification.js"></script>
+<script src="/static/pallia_verification.js?v=20261012-1"></script>
 
 <script>
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -1954,7 +1963,7 @@ async function refreshApiDashboard() {
 
     // Stat cards
     $("#apiStatGrid").innerHTML = [
-      { label: "Total AI Calls", value: totalCalls, cls: "accent" },
+      { label: "Total API Calls", value: totalCalls, cls: "accent" },
       { label: "Successful", value: totalOk, cls: "ok" },
       { label: "Failed", value: totalFailed, cls: totalFailed > 0 ? "warn" : "" },
       { label: "Success Rate", value: successRate + "%", cls: successRate >= 90 ? "ok" : "warn" },
@@ -1971,7 +1980,7 @@ async function refreshApiDashboard() {
             <div class="bar-count">${d.count}</div>
           </div>`;
         }).join("")
-      : `<div class="meta" style="padding:16px;">No extraction calls in this date range.</div>`;
+      : `<div class="meta" style="padding:16px;">No API calls in this date range.</div>`;
 
     // By API table
     $("#apiByApiTable tbody").innerHTML = data.by_api.map(a => `<tr>
@@ -1992,6 +2001,12 @@ async function refreshApiDashboard() {
       <td class="meta">${r.duration_ms != null ? r.duration_ms + " ms" : "–"}</td>
       <td class="meta" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.error_message || ''}">${r.error_message || "–"}</td>
     </tr>`).join("") || `<tr><td colspan="6" class="placeholder">No recent calls.</td></tr>`;
+
+    $("#apiUserCallsTable tbody").innerHTML = (data.by_user || []).map(user => `<tr>
+      <td><strong>${user.full_name || user.email}</strong><div class="meta">${user.email}</div></td>
+      <td>${user.total_calls}</td><td style="color:var(--ok)">${user.successful}</td>
+      <td style="color:${user.failed ? 'var(--err)' : 'var(--muted)'}">${user.failed}</td>
+    </tr>`).join("") || `<tr><td colspan="4" class="placeholder">No Surepass calls recorded in this date range.</td></tr>`;
   } catch(e) { console.error("api dashboard", e); }
 }
 
