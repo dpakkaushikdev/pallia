@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     auth_jwt_secret: str = "changeme"
     auth_token_expire_minutes: int = 480
 
+    # --- External verification APIs ---
+    auth_token_surepass: str = ""
+
     # --- Supabase ---
     supabase_url: str = ""
     supabase_key: str = ""

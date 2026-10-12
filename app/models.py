@@ -403,6 +403,16 @@ class EeeTaxiVehicleMaster(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class PalliaVehicleMaster(Base):
+    """Pallia fleet registrations for verification and other Pallia workflows."""
+    __tablename__ = "pallia_vehicle_master"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    vehicles: Mapped[list] = mapped_column(JSON, default=list)
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class EeeTaxiClient(Base):
     """One buyer entity/GSTIN/address, separated by the PWC or EY profile."""
     __tablename__ = "eee_taxi_clients"
