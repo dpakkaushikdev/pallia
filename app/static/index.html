@@ -924,6 +924,24 @@
 
     <div class="tab-pane" id="pane-pallia-verification">
       <div class="page-hd"><div><h1>Pallia — Vehicle Verification</h1><div class="meta">Verify up to 3 selected Pallia fleet registrations with Surepass and download the full response as CSV.</div></div></div>
+      <div class="grid-2" style="gap:16px;margin-bottom:16px;">
+        <div class="card" style="padding:20px;">
+          <div class="card-title">Surepass wallet balance</div>
+          <div style="font-size:30px;font-weight:700;margin:10px 0;">&#8377;56,237.03</div>
+          <div class="meta">Manual balance snapshot; it is not synced with Surepass.</div>
+        </div>
+        <div class="card" style="padding:20px;">
+          <div class="card-title">API rate per hit</div>
+          <table class="data-table"><thead><tr><th>API</th><th>Rate per hit</th></tr></thead><tbody>
+            <tr><td>RC Verification</td><td>&#8377;4</td></tr>
+            <tr><td>Aadhaar PAN Link</td><td class="meta">Not set</td></tr>
+            <tr><td>Bank Verification</td><td class="meta">Not set</td></tr>
+            <tr><td>Company Details</td><td class="meta">Not set</td></tr>
+            <tr><td>Corporate CIN</td><td class="meta">Not set</td></tr>
+            <tr><td>Corporate GSTIN</td><td class="meta">Not set</td></tr>
+          </tbody></table>
+        </div>
+      </div>
       <div class="card" style="margin-bottom:16px;">
         <label class="field" for="pVerifyApi" style="max-width:420px;">Verification API
           <select id="pVerifyApi" onchange="pVerifyApiChange()">
