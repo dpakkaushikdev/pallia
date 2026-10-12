@@ -924,7 +924,21 @@
 
     <div class="tab-pane" id="pane-pallia-verification">
       <div class="page-hd"><div><h1>Pallia — Vehicle Verification</h1><div class="meta">Verify up to 3 selected Pallia fleet registrations with Surepass and download the full response as CSV.</div></div></div>
-      <div class="card">
+      <div class="card" style="margin-bottom:16px;">
+        <label class="field" for="pVerifyApi" style="max-width:420px;">Verification API
+          <select id="pVerifyApi" onchange="pVerifyApiChange()">
+            <option value="rc-v2">RC Verification</option>
+            <option value="aadhaar-pan-link">Aadhaar PAN Link</option>
+            <option value="bank-verification">Bank Verification</option>
+            <option value="company-details">Company Details</option>
+            <option value="corporate-cin">Corporate CIN</option>
+            <option value="corporate-gstin">Corporate GSTIN</option>
+          </select>
+        </label>
+        <p id="pVerifyApiDescription" class="meta" style="margin:8px 0 0;">Checks a vehicle registration and returns the details available from the RC Verification API. Each lookup may incur a Surepass charge.</p>
+      </div>
+      <div id="pVerifyComingSoon" class="card" hidden role="status">This API is listed for selection, but its input form and integration are not available yet.</div>
+      <div class="card" id="pVerifyRcPanel">
         <div class="sec-hd"><div><div class="card-title">Select vehicles to verify</div><div id="pVerifyStatus" class="meta" role="status">Loading Pallia Vehicle Master...</div></div><button class="btn" id="pVerifyRun" onclick="pVerifyRun()" disabled>Verify selected</button></div>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:12px 0;">
           <input type="search" id="pVerifySearch" placeholder="Search registration" oninput="pVerifyRender()" aria-label="Search Pallia vehicles" style="max-width:320px;">
@@ -933,7 +947,7 @@
         <div class="card" style="padding:12px;margin-bottom:12px;"><div class="card-title">Selected vehicles</div><div id="pVerifySelectedList" class="vehicle-tag-list" style="margin-top:8px;"><span class="meta">No vehicles selected.</span></div></div>
         <div id="pVerifyVehicles" class="card" style="padding:8px;max-height:420px;overflow:auto;"></div>
       </div>
-      <div class="card"><div class="card-title">Verification results</div><p class="meta">Each vehicle lookup may incur a Surepass charge. Each run is limited to 3 vehicles. The downloaded CSV contains the Surepass response fields for each vehicle, including any lookup error.</p><div id="pVerifyResult" class="meta" role="status">No verification has been run in this session.</div></div>
+      <div class="card" id="pVerifyRcResults"><div class="card-title">Verification results</div><p class="meta">Each vehicle lookup may incur a Surepass charge. Each run is limited to 3 vehicles. The downloaded CSV contains the Surepass response fields for each vehicle, including any lookup error.</p><div id="pVerifyResult" class="meta" role="status">No verification has been run in this session.</div></div>
     </div>
 
     <div class="tab-pane" id="pane-pallia-master">
@@ -1565,7 +1579,7 @@
   </div>
 </div>
 <script src="/static/eee_documents.js"></script>
-<script src="/static/pallia_verification.js?v=20261012-1"></script>
+<script src="/static/pallia_verification.js?v=20261012-2"></script>
 
 <script>
 // ── Helpers ──────────────────────────────────────────────────────────────────

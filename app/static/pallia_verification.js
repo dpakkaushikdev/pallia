@@ -5,6 +5,27 @@ let pMasterSavedVehicles = [];
 let pMasterSurepassConfigured = false;
 let pVerifySelected = new Set();
 let pVerifyBusy = false;
+const PALLIA_API_DESCRIPTIONS = {
+  "rc-v2": "Checks a vehicle registration and returns the details available from the RC Verification API. Each lookup may incur a Surepass charge.",
+  "aadhaar-pan-link": "Checks whether an Aadhaar number is linked with a PAN. Its input form and verification flow will be added later.",
+  "bank-verification": "Checks bank account information through a verification service. Its required inputs and response flow will be added later.",
+  "company-details": "Looks up available profile information for a company. The required lookup input and response flow will be added later.",
+  "corporate-cin": "Looks up corporate registration information using a Corporate Identification Number (CIN). Its input form will be added later.",
+  "corporate-gstin": "Looks up company GST registration information using a corporate GSTIN. Its input form will be added later."
+};
+
+function pVerifyApiChange() {
+  const api = document.getElementById("pVerifyApi")?.value || "rc-v2";
+  const isRc = api === "rc-v2";
+  const description = document.getElementById("pVerifyApiDescription");
+  const rcPanel = document.getElementById("pVerifyRcPanel");
+  const rcResults = document.getElementById("pVerifyRcResults");
+  const comingSoon = document.getElementById("pVerifyComingSoon");
+  if (description) description.textContent = PALLIA_API_DESCRIPTIONS[api] || "Description not available.";
+  if (rcPanel) rcPanel.hidden = !isRc;
+  if (rcResults) rcResults.hidden = !isRc;
+  if (comingSoon) comingSoon.hidden = isRc;
+}
 
 function pNormalizeVehicle(value) { return String(value || "").replace(/[\s-]+/g, "").toUpperCase(); }
 function pVehicleNo(item) { return typeof item === "string" ? pNormalizeVehicle(item) : pNormalizeVehicle(item?.registration_no); }
@@ -102,6 +123,7 @@ async function pMasterSave() {
   } catch(error){document.getElementById("pMasterStatus").textContent=`Could not save vehicle master: ${error.message}`;button.disabled=!pMasterDirty();}
 }
 async function pVerifyLoad() {
+  pVerifyApiChange();
   const status=document.getElementById("pVerifyStatus"); status.textContent="Loading Pallia Vehicle Master...";
   try {
     const data=await api(PALLIA_VEHICLE_MASTER_URL);pMasterVehicles=(data.vehicles||[]).map(pVehicleRecord);
@@ -137,6 +159,7 @@ function pVerifyToggleAll(checked) {
   pVerifyRender();
 }
 async function pVerifyRun() {
+  if ((document.getElementById("pVerifyApi")?.value || "rc-v2") !== "rc-v2") return;
   if(pVerifyBusy||!pVerifySelected.size)return;
   const button=document.getElementById("pVerifyRun"),status=document.getElementById("pVerifyStatus");pVerifyBusy=true;pVerifyRender();
   status.textContent=`Sending ${pVerifySelected.size} Surepass request(s)...`;
