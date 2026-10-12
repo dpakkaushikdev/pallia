@@ -19,6 +19,8 @@ from app.services.auth import (
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+PALLIA_MODULES = {"billing", "tracking", "accounts", "others", "api_dashboard"}
+EEE_MODULES = {"eee_taxi"}
 
 
 @router.get("/needs-setup")
@@ -40,10 +42,20 @@ def register_user(
         # First user is always admin with all permissions
         role = UserRole.ADMIN.value
         permissions = ALL_MODULES[:]
+        business = "both"
     elif current_user is None or current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can register new users.")
+    elif role == UserRole.ADMIN.value:
+        permissions = ALL_MODULES[:]
+        business = "both"
     else:
-        permissions = [m for m in body.permissions if m in ALL_MODULES]
+        business = body.business
+        allowed = PALLIA_MODULES if business == "pallia" else EEE_MODULES if business == "eee_taxi" else set()
+        if not allowed:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose Pallia or EEE-Taxi for a user account.")
+        permissions = [m for m in body.permissions if m in allowed]
+        if not permissions:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one module for this business.")
 
     if role not in {UserRole.ADMIN.value, UserRole.USER.value}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user role.")
@@ -101,8 +113,19 @@ def update_user(
         user.full_name = body.full_name
     if body.is_active is not None:
         user.is_active = body.is_active
-    if body.permissions is not None:
-        user.permissions = [m for m in body.permissions if m in ALL_MODULES]
+    if user.role == UserRole.ADMIN:
+        user.permissions = ALL_MODULES[:]
+    else:
+        business = body.business or user.business
+        allowed = PALLIA_MODULES if business == "pallia" else EEE_MODULES if business == "eee_taxi" else set()
+        if not allowed:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose Pallia or EEE-Taxi for a user account.")
+        if body.permissions is not None:
+            user.permissions = [m for m in body.permissions if m in allowed]
+        elif body.business is not None and body.business != user.business:
+            user.permissions = [m for m in (user.permissions or []) if m in allowed]
+        if not user.permissions:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one module for the chosen business.")
     if body.password:
         user.hashed_password = get_password_hash(body.password)
     user.updated_at = datetime.utcnow()

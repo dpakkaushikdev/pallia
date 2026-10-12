@@ -102,6 +102,10 @@ def require_permission(module: str):
     def _check(current_user: User = Depends(get_current_active_user)) -> User:
         if current_user.role == UserRole.ADMIN:
             return current_user
+        if module == "eee_taxi" and current_user.business != "eee_taxi":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account belongs to Pallia, not EEE-Taxi.")
+        if module in {"billing", "tracking", "accounts", "others"} and current_user.business == "eee_taxi":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account belongs to EEE-Taxi, not Pallia.")
         perms = current_user.permissions or []
         if module not in perms:
             raise HTTPException(
@@ -119,6 +123,8 @@ def require_any_permission(modules: list[str]):
     def _check(current_user: User = Depends(get_current_active_user)) -> User:
         if current_user.role == UserRole.ADMIN:
             return current_user
+        if current_user.business == "eee_taxi":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account belongs to EEE-Taxi, not Pallia.")
         if allowed.intersection(current_user.permissions or []):
             return current_user
         names = " or ".join(f"'{module}'" for module in modules)

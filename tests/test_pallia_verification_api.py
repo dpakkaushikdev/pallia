@@ -120,6 +120,39 @@ def test_surepass_verification_logs_each_vehicle_by_user_and_returns_csv(monkeyp
             db.commit()
 
 
+def test_user_business_scope_filters_permissions_on_create_and_edit():
+    with TestClient(app) as client:
+        with SessionLocal() as db:
+            admin, admin_headers = _user_headers(db)
+            db.commit()
+        created = client.post("/api/auth/register", headers=admin_headers, json={
+            "email": f"scope-test-{uuid.uuid4().hex}@example.com",
+            "password": "Password123",
+            "role": "user",
+            "business": "eee_taxi",
+            "permissions": ["billing", "others", "eee_taxi"],
+        })
+        assert created.status_code == 201, created.text
+        user = created.json()
+        assert user["business"] == "eee_taxi"
+        assert user["permissions"] == ["eee_taxi"]
+
+        rejected = client.patch(f"/api/auth/users/{user['id']}", headers=admin_headers, json={
+            "business": "pallia", "permissions": ["eee_taxi"],
+        })
+        assert rejected.status_code == 400
+        changed = client.patch(f"/api/auth/users/{user['id']}", headers=admin_headers, json={
+            "business": "pallia", "permissions": ["billing", "eee_taxi"],
+        })
+        assert changed.status_code == 200, changed.text
+        assert changed.json()["business"] == "pallia"
+        assert changed.json()["permissions"] == ["billing"]
+        with SessionLocal() as db:
+            db.query(User).filter(User.id == user["id"]).delete()
+            db.query(User).filter(User.id == admin.id).delete()
+            db.commit()
+
+
 def test_pallia_api_rates_require_shared_master_password_and_persist():
     with TestClient(app) as client:
         with SessionLocal() as db:

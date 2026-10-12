@@ -116,6 +116,14 @@ class User(Base):
 
     api_events: Mapped[list["ApiUsageEvent"]] = relationship(back_populates="user")
 
+    @property
+    def business(self) -> str:
+        """Business scope inferred from permissions for backward compatibility."""
+        role = getattr(self.role, "value", self.role)
+        if role == UserRole.ADMIN.value:
+            return "both"
+        return "eee_taxi" if "eee_taxi" in (self.permissions or []) else "pallia"
+
     def __repr__(self) -> str:  # pragma: no cover
         return f"<User {self.email} role={self.role} active={self.is_active}>"
 

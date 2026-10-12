@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -100,6 +100,7 @@ class UserCreateIn(BaseModel):
     role: str = "user"
     full_name: str | None = None
     permissions: list[str] = Field(default_factory=list)
+    business: Literal["pallia", "eee_taxi", "both"] = "pallia"
 
 
 class UserLoginIn(BaseModel):
@@ -112,6 +113,7 @@ class UserUpdateIn(BaseModel):
     is_active: bool | None = None
     permissions: list[str] | None = None
     password: str | None = None
+    business: Literal["pallia", "eee_taxi", "both"] | None = None
 
 
 class UserOut(BaseModel):
@@ -121,6 +123,7 @@ class UserOut(BaseModel):
     email: EmailStr
     full_name: str | None = None
     role: str
+    business: str = "pallia"
     permissions: list[str] = Field(default_factory=list)
     is_active: bool
     last_login: datetime | None = None

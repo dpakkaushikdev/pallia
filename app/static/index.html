@@ -1489,7 +1489,7 @@
         <table class="data-table" id="usersTable">
           <thead>
             <tr>
-              <th>User</th><th>Role</th><th>Permissions</th>
+              <th>User</th><th>Business</th><th>Role</th><th>Permissions</th>
               <th>Status</th><th>Last Login</th><th>Actions</th>
             </tr>
           </thead>
@@ -1551,6 +1551,16 @@
     <p class="modal-sub" id="userModalSub">Create a new user account and assign module access.</p>
     <input type="hidden" id="userModalId" value="" />
 
+    <div style="margin-bottom:14px;">
+      <label class="field">Business</label>
+      <select id="umBusiness" onchange="onUserBusinessChange()">
+        <option value="">Choose business first</option>
+        <option value="pallia">Pallia Trans</option>
+        <option value="eee_taxi">EEE-Taxi</option>
+        <option id="umBusinessBoth" value="both">Both</option>
+      </select>
+    </div>
+
     <div class="grid-2" style="gap:12px;margin-bottom:14px;">
       <div>
         <label class="field">Email</label>
@@ -1568,7 +1578,7 @@
       </div>
       <div>
         <label class="field">Role</label>
-        <select id="umRole">
+        <select id="umRole" onchange="onUserRoleChange()">
           <option value="user">User</option>
           <option value="admin">Admin</option>
         </select>
@@ -1604,6 +1614,9 @@ const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 const today = () => new Date().toISOString().split("T")[0];
 const ALL_MODULES = ["billing", "tracking", "accounts", "others", "api_dashboard", "eee_taxi"];
+const USER_PALLIA_MODULES = ["billing", "tracking", "accounts", "others", "api_dashboard"];
+const EEE_MODULES = ["eee_taxi"];
+const MODULE_LABELS = { billing: "Billing", tracking: "Tracking", accounts: "Accounts", others: "Others", api_dashboard: "API Dashboard", eee_taxi: "EEE-Taxi" };
 
 async function loadAuthImage(imgEl, url) {
   try {
@@ -1792,7 +1805,7 @@ function showApp() {
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
 const _ico = (d) => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
-const PALLIA_MODULES = ["billing", "tracking", "accounts", "others"];
+const PALLIA_MODULES = ["billing", "tracking", "accounts", "others", "api_dashboard"];
 const TAB_DEFS = [
   { id: "billing",       label: "Billing",       module: "billing",    icon: _ico('<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/>') },
   { id: "pallia-verification", label: "Verification API", module: "others", icon: _ico('<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="m8 11 2 2 4-4"/>') },
@@ -2105,6 +2118,7 @@ async function refreshUsers() {
           <div style="font-weight:600;">${u.full_name || u.email.split("@")[0]}</div>
           <div class="meta">${u.email}</div>
         </td>
+        <td>${u.business === "both" ? "Both" : u.business === "eee_taxi" ? "EEE-Taxi" : "Pallia Trans"}</td>
         <td><span class="badge ${u.role}">${u.role}</span></td>
         <td><div class="user-perms">${perms}</div></td>
         <td><span class="badge ${u.is_active ? 'active' : 'inactive'}">${u.is_active ? 'Active' : 'Inactive'}</span></td>
@@ -2117,17 +2131,36 @@ async function refreshUsers() {
           </div>
         </td>
       </tr>`;
-    }).join("") || `<tr><td colspan="6" class="placeholder">No users found.</td></tr>`;
+    }).join("") || `<tr><td colspan="7" class="placeholder">No users found.</td></tr>`;
   } catch(e) { console.error("users", e); }
 }
 
-function buildPermGrid(containerId, selected) {
+function buildPermGrid(containerId, selected, business, disabled = false) {
   const container = $("#" + containerId);
-  container.innerHTML = ALL_MODULES.map(m => `
+  if (!business) {
+    container.innerHTML = `<div class="meta" style="grid-column:1/-1;padding:8px 0;">Choose a business to see its available permissions.</div>`;
+    return;
+  }
+  const modules = business === "eee_taxi" ? EEE_MODULES : business === "pallia" ? USER_PALLIA_MODULES : ALL_MODULES;
+  container.innerHTML = modules.map(m => `
     <label class="perm-check">
-      <input type="checkbox" name="perm_${m}" value="${m}" ${selected.includes(m) ? "checked" : ""} />
-      <span>${m.replace(/_/g, " ")}</span>
+      <input type="checkbox" name="perm_${m}" value="${m}" ${selected.includes(m) ? "checked" : ""} ${disabled ? "disabled" : ""} />
+      <span>${MODULE_LABELS[m] || m}</span>
     </label>`).join("");
+}
+
+function onUserBusinessChange() {
+  const selected = getSelectedPerms("umPermGrid");
+  buildPermGrid("umPermGrid", selected, $("#umBusiness").value, $("#umRole").value === "admin");
+}
+
+function onUserRoleChange() {
+  const admin = $("#umRole").value === "admin";
+  $("#umBusinessBoth").hidden = !admin;
+  if (admin) $("#umBusiness").value = "both";
+  else if ($("#umBusiness").value === "both") $("#umBusiness").value = "";
+  $("#umBusiness").disabled = admin;
+  buildPermGrid("umPermGrid", admin ? ALL_MODULES : getSelectedPerms("umPermGrid"), $("#umBusiness").value, admin);
 }
 
 function getSelectedPerms(containerId) {
@@ -2143,7 +2176,8 @@ function openCreateUserModal() {
   $("#umPassword").value = "";
   $("#umPwdHint").style.display = "none";
   $("#umRole").value = "user";
-  buildPermGrid("umPermGrid", []);
+  $("#umBusiness").value = ""; $("#umBusiness").disabled = false; $("#umBusinessBoth").hidden = true;
+  buildPermGrid("umPermGrid", [], "");
   $("#userModalError").textContent = "";
   $("#userModal").classList.remove("hidden");
 }
@@ -2157,7 +2191,11 @@ function openEditUserModal(u) {
   $("#umPassword").value = "";
   $("#umPwdHint").style.display = "";
   $("#umRole").value = u.role;
-  buildPermGrid("umPermGrid", u.permissions || []);
+  const business = u.role === "admin" ? "both" : (u.business || ((u.permissions || []).includes("eee_taxi") ? "eee_taxi" : "pallia"));
+  $("#umBusiness").value = business;
+  $("#umBusiness").disabled = u.role === "admin";
+  $("#umBusinessBoth").hidden = u.role !== "admin";
+  buildPermGrid("umPermGrid", u.permissions || [], business, u.role === "admin");
   $("#userModalError").textContent = "";
   $("#userModal").classList.remove("hidden");
 }
@@ -2171,17 +2209,20 @@ async function saveUserModal() {
   const fullName = $("#umFullName").value.trim();
   const password = $("#umPassword").value;
   const role = $("#umRole").value;
+  const business = role === "admin" ? "both" : $("#umBusiness").value;
   const permissions = getSelectedPerms("umPermGrid");
   $("#userModalError").textContent = "";
+  if (!business) { $("#userModalError").textContent = "Choose Pallia Trans or EEE-Taxi first."; return; }
+  if (role !== "admin" && !permissions.length) { $("#userModalError").textContent = "Select at least one permission for this business."; return; }
   try {
     if (isEdit) {
-      const body = { full_name: fullName || null, permissions };
+      const body = { full_name: fullName || null, permissions, business };
       if (password) body.password = password;
       await api(`/api/auth/users/${id}`, { method: "PATCH", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
     } else {
       if (!email) { $("#userModalError").textContent = "Email is required."; return; }
       if (!password) { $("#userModalError").textContent = "Password is required."; return; }
-      await api("/api/auth/register", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ email, full_name: fullName || null, password, role, permissions }) });
+      await api("/api/auth/register", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ email, full_name: fullName || null, password, role, permissions, business }) });
     }
     closeUserModal();
     refreshUsers();
