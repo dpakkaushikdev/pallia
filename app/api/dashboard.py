@@ -183,14 +183,14 @@ def external_api_summary(
 
     day_rows = db.execute(
         select(
-            func.strftime("%Y-%m-%d", ExternalApiEvent.created_at).label("day"),
+            func.date(ExternalApiEvent.created_at).label("day"),
             func.count().label("cnt"),
         )
         .where(ExternalApiEvent.created_at >= from_dt)
         .where(ExternalApiEvent.created_at <= to_dt)
         .group_by("day").order_by("day")
     ).all()
-    day_map = {r.day: r.cnt for r in day_rows}
+    day_map = {str(r.day): r.cnt for r in day_rows}
     by_day = [ExternalApiDayStatOut(date=str(d), count=day_map.get(str(d), 0)) for d in all_days]
 
     # 20 most recent calls

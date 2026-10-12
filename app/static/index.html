@@ -2121,7 +2121,14 @@ async function refreshApiDashboard() {
       <td>${user.total_calls}</td><td style="color:var(--ok)">${user.successful}</td>
       <td style="color:${user.failed ? 'var(--err)' : 'var(--muted)'}">${user.failed}</td>
     </tr>`).join("") || `<tr><td colspan="4" class="placeholder">No Surepass calls recorded in this date range.</td></tr>`;
-  } catch(e) { console.error("api dashboard", e); }
+  } catch(e) {
+    console.error("api dashboard", e);
+    const message = "Could not load API usage. Check the selected date range and try again.";
+    $("#apiStatGrid").innerHTML = `<div class="card meta" role="alert">${message}</div>`;
+    $("#apiByApiTable tbody").innerHTML = `<tr><td colspan="6" class="placeholder">${message}</td></tr>`;
+    $("#apiRecentTable tbody").innerHTML = `<tr><td colspan="6" class="placeholder">${message}</td></tr>`;
+    $("#apiUserCallsTable tbody").innerHTML = `<tr><td colspan="4" class="placeholder">${message}</td></tr>`;
+  }
 }
 
 // ── User Management ──────────────────────────────────────────────────────────

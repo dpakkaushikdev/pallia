@@ -113,6 +113,8 @@ def test_surepass_verification_logs_each_vehicle_by_user_and_returns_csv(monkeyp
         user_summary = next(row for row in dashboard.json()["by_user"] if row["email"] == user.email)
         assert user_summary["total_calls"] == 2
         assert user_summary["successful"] == 2
+        assert sum(day["count"] for day in dashboard.json()["by_day"]) == 2
+        assert any(row["model"] == "rc-v2" and row["total_calls"] == 2 for row in dashboard.json()["by_api"])
         with SessionLocal() as db:
             db.query(ExternalApiEvent).filter(ExternalApiEvent.api_name == "surepass").delete()
             db.query(PalliaVehicleMaster).delete()
@@ -260,6 +262,16 @@ def test_surepass_bank_verification_derives_ifsc_details_and_keeps_csv_rows(monk
             db.query(ExternalApiEvent).filter(ExternalApiEvent.api_name == "surepass").delete()
             db.query(User).filter(User.id == user.id).delete()
             db.commit()
+
+
+def test_external_api_dashboard_daily_date_expression_compiles_for_postgres():
+    from sqlalchemy import func, select
+    from sqlalchemy.dialects import postgresql
+
+    statement = select(func.date(ExternalApiEvent.created_at).label("day"))
+    compiled = str(statement.compile(dialect=postgresql.dialect())).lower()
+    assert "date(" in compiled
+    assert "strftime" not in compiled
 
 
 def test_user_business_scope_filters_permissions_on_create_and_edit():
