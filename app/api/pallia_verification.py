@@ -72,7 +72,7 @@ class VehicleMasterIn(BaseModel):
 
 
 class VerifyVehiclesIn(BaseModel):
-    vehicles: list[str] = Field(min_length=1, max_length=3)
+    vehicles: list[str] = Field(min_length=1, max_length=3000)
 
     @field_validator("vehicles")
     @classmethod
@@ -216,29 +216,48 @@ async def verify_vehicles(body: VerifyVehiclesIn, user: User = Depends(verificat
                 response = await client.post(SUREPASS_RC_URL,
                                              json={"id_number": vehicle, "enrich": False})
             row["http_status"] = response.status_code
-            event["success"] = response.is_success
-            if not response.is_success:
-                event["error_message"] = f"HTTP {response.status_code}"
             try:
                 payload = response.json()
             except ValueError:
-                payload = {"response_text": response.text[:4000]}
+                row["response_text"] = response.text[:4000]
+                row["error"] = "Surepass returned a response that was not valid JSON."
+                payload = None
             if isinstance(payload, dict):
-                event["success"] = response.is_success and payload.get("success") is not False
-                if response.is_success and payload.get("success") is False:
-                    event["error_message"] = str(payload.get("message") or "Surepass lookup returned an unsuccessful result")[:500]
-                row["success"] = payload.get("success", "")
-                row["message"] = payload.get("message", "")
                 row.update(_flatten(payload))
-            else:
+                row["message"] = str(payload.get("message") or "")
+                if not response.is_success:
+                    row["error"] = f"Surepass returned HTTP {response.status_code}."
+                elif payload.get("success") is False:
+                    row["error"] = row["message"] or "Surepass reported that this verification failed."
+            elif payload is not None:
                 row["response"] = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+                if not response.is_success:
+                    row["error"] = f"Surepass returned HTTP {response.status_code}."
+            elif not response.is_success:
+                row["error"] = f"Surepass returned HTTP {response.status_code}."
+            elif not row["error"]:
+                row["error"] = "Surepass returned an empty JSON response."
+            if not response.is_success and not row["message"]:
+                row["message"] = f"HTTP {response.status_code} response from Surepass."
+            succeeded = response.is_success and payload is not None and not (
+                isinstance(payload, dict) and payload.get("success") is False
+            ) and not row["error"]
+            row["success"] = "true" if succeeded else "false"
+            event["success"] = succeeded
+            if not succeeded:
+                event["error_message"] = (row["error"] or row["message"] or "Surepass verification failed.")[:500]
         except httpx.TimeoutException:
             row["error"] = "Surepass request timed out."
             event["error_message"] = row["error"]
         except httpx.RequestError:
             row["error"] = "Could not connect to Surepass."
             event["error_message"] = row["error"]
+        except Exception as exc:
+            row["error"] = f"Unexpected verification error ({type(exc).__name__})."
+            event["error_message"] = row["error"]
         finally:
+            if not row["success"]:
+                row["success"] = "false"
             event["duration_ms"] = int((time.monotonic() - started) * 1000)
             row["_api_event"] = event
         return row
@@ -248,7 +267,12 @@ async def verify_vehicles(body: VerifyVehiclesIn, user: User = Depends(verificat
 
     for row in rows:
         db.add(ExternalApiEvent(**row.pop("_api_event")))
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        for row in rows:
+            row["audit_log_error"] = "Verification completed, but API usage logging failed."
 
     columns = ["vehicle_number", "http_status", "success", "message", "error"]
     columns.extend(sorted({key for row in rows for key in row} - set(columns)))

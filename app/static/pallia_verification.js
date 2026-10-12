@@ -210,7 +210,7 @@ async function pVerifyLoad() {
     const data=await api(PALLIA_VEHICLE_MASTER_URL);pMasterVehicles=(data.vehicles||[]).map(pVehicleRecord);
     pMasterSavedVehicles=structuredClone(pMasterVehicles);pMasterSurepassConfigured=!!data.surepass_configured;
     pVerifySelected=new Set([...pVerifySelected].filter(no=>pMasterVehicles.some(v=>v.registration_no===no)));
-    status.textContent=pMasterSurepassConfigured?`${pMasterVehicles.length} Pallia vehicles available. Each lookup may be charged; select up to 3 per run.`:"Surepass token is not configured on the server. Add AUTH_TOKEN_SUREPASS to the server environment.";
+    status.textContent=pMasterSurepassConfigured?`${pMasterVehicles.length} Pallia vehicles available. Each vehicle lookup may incur a charge.`:"Surepass token is not configured on the server. Add AUTH_TOKEN_SUREPASS to the server environment.";
     pVerifyRender();
   } catch(error){status.textContent=`Could not load Pallia Vehicle Master: ${error.message}`;}
 }
@@ -223,19 +223,18 @@ function pVerifyRender() {
   const visible=pMasterVehicles.filter(item=>!pVerifySelected.has(item.registration_no)&&`${item.registration_no} ${item.make} ${item.model}`.toUpperCase().includes(query));
   root.innerHTML=visible.map(item=>`<label style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-bottom:1px solid var(--border);cursor:pointer;"><input type="checkbox" data-p-vehicle="${pEscape(item.registration_no)}" onchange="pVerifySelect(this)"><span><strong>${pEscape(item.registration_no)}</strong><span class="meta" style="display:block">${pEscape([item.make,item.model].filter(Boolean).join(" · "))}</span></span></label>`).join("")||'<div class="meta" style="padding:12px;">No available vehicles found.</div>';
   const count=document.getElementById("pVerifySelected");if(count)count.textContent=`${pVerifySelected.size} selected`;
-  const run=document.getElementById("pVerifyRun");if(run)run.disabled=pVerifyBusy||pVerifySelected.size===0||pVerifySelected.size>3||!pMasterSurepassConfigured;
+  const run=document.getElementById("pVerifyRun");if(run)run.disabled=pVerifyBusy||pVerifySelected.size===0||!pMasterSurepassConfigured;
   const all=document.getElementById("pVerifyAll");if(all){all.checked=false;all.indeterminate=false;all.disabled=visible.length===0;}
 }
 function pVerifySelect(input) {
   const vehicle=input.dataset.pVehicle;
-  if(input.checked&&pVerifySelected.size>=3){document.getElementById("pVerifyStatus").textContent="Each lookup may be charged. Select no more than 3 vehicles per run.";}
-  else if(input.checked)pVerifySelected.add(vehicle);
+  if(input.checked)pVerifySelected.add(vehicle);
   pVerifyRender();
 }
 function pVerifyRemove(vehicle){pVerifySelected.delete(vehicle);pVerifyRender();}
 function pVerifyToggleAll(checked) {
   const query=(document.getElementById("pVerifySearch").value||"").trim().toUpperCase();
-  if(checked){for(const item of pMasterVehicles){if(pVerifySelected.size>=3)break;if(!pVerifySelected.has(item.registration_no)&&`${item.registration_no} ${item.make} ${item.model}`.toUpperCase().includes(query))pVerifySelected.add(item.registration_no);}}
+  if(checked){for(const item of pMasterVehicles){if(!pVerifySelected.has(item.registration_no)&&`${item.registration_no} ${item.make} ${item.model}`.toUpperCase().includes(query))pVerifySelected.add(item.registration_no);}}
   else pVerifySelected.clear();
   pVerifyRender();
 }
@@ -251,7 +250,7 @@ async function pVerifyRun() {
     const blob=await response.blob(),disposition=response.headers.get("Content-Disposition")||"",match=disposition.match(/filename="?([^";]+)"?/i),link=document.createElement("a");
     link.href=URL.createObjectURL(blob);link.download=match?match[1]:"pallia_vehicle_verification.csv";document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(link.href),10000);
     document.getElementById("pVerifyResult").textContent=`CSV downloaded for ${pVerifySelected.size} vehicle(s).`;
-    status.textContent="Surepass verification finished. Review the downloaded CSV for each response.";
+    status.textContent="Verification finished. The CSV includes one row per selected vehicle; check its success and error columns.";
   } catch(error){document.getElementById("pVerifyResult").textContent=error.message;status.textContent=error.message;}
   finally{pVerifyBusy=false;pVerifyRender();}
 }

@@ -120,6 +120,82 @@ def test_surepass_verification_logs_each_vehicle_by_user_and_returns_csv(monkeyp
             db.commit()
 
 
+def test_surepass_batch_keeps_successes_and_failure_rows_in_csv(monkeypatch):
+    import csv
+    import io
+    import app.api.pallia_verification as verification
+
+    class FakeResponse:
+        status_code = 200
+        is_success = True
+        text = ""
+
+        def __init__(self, payload, status=200):
+            self.payload = payload
+            self.status_code = status
+            self.is_success = 200 <= status < 300
+
+        def json(self):
+            return self.payload
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def post(self, url, json):
+            if json["id_number"] == "NL01AA1004":
+                return FakeResponse({"success": False, "message": "RC service unavailable"}, status=503)
+            if json["id_number"] == "NL01AA1005":
+                raise RuntimeError("simulated per-vehicle failure")
+            if json["id_number"] == "NL01AA1006":
+                return FakeResponse({"success": False, "message": "Registration not found"})
+            return FakeResponse({"success": True, "data": {"registration_number": json["id_number"]}})
+
+    monkeypatch.setattr(verification.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(settings, "auth_token_surepass", "test-token")
+    vehicles = [f"NL01AA100{number}" for number in range(1, 5)]
+    extra_vehicles = ["NL01AA1005", "NL01AA1006"]
+    with TestClient(app) as client:
+        with SessionLocal() as db:
+            db.query(ExternalApiEvent).filter(ExternalApiEvent.api_name == "surepass").delete()
+            db.query(PalliaVehicleMaster).delete()
+            user, headers = _user_headers(db, role=UserRole.USER, permissions=["others"])
+            db.add(PalliaVehicleMaster(id=1, vehicles=vehicles + extra_vehicles))
+            db.commit()
+        response = client.post("/api/pallia/vehicle-verification", headers=headers, json={"vehicles": vehicles})
+        assert response.status_code == 200, response.text
+        rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
+        assert len(rows) == 4
+        assert {row["vehicle_number"] for row in rows} == set(vehicles)
+        assert sum(row["success"] == "true" for row in rows) == 3
+        failed = next(row for row in rows if row["vehicle_number"] == "NL01AA1004")
+        assert failed["success"] == "false"
+        assert "HTTP 503" in failed["error"]
+        exception_rows = client.post("/api/pallia/vehicle-verification", headers=headers,
+                                     json={"vehicles": extra_vehicles})
+        assert exception_rows.status_code == 200
+        exception_csv = list(csv.DictReader(io.StringIO(exception_rows.content.decode("utf-8-sig"))))
+        assert len(exception_csv) == 2
+        runtime_failure = next(row for row in exception_csv if row["vehicle_number"] == "NL01AA1005")
+        api_failed = next(row for row in exception_csv if row["vehicle_number"] == "NL01AA1006")
+        assert "RuntimeError" in runtime_failure["error"]
+        assert api_failed["success"] == "false" and "Registration not found" in api_failed["error"]
+        with SessionLocal() as db:
+            events = db.query(ExternalApiEvent).filter(ExternalApiEvent.user_id == user.id).all()
+            assert len(events) == 6
+            assert sum(event.success for event in events) == 3
+            db.query(ExternalApiEvent).filter(ExternalApiEvent.api_name == "surepass").delete()
+            db.query(PalliaVehicleMaster).delete()
+            db.query(User).filter(User.id == user.id).delete()
+            db.commit()
+
+
 def test_user_business_scope_filters_permissions_on_create_and_edit():
     with TestClient(app) as client:
         with SessionLocal() as db:
