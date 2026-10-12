@@ -924,23 +924,10 @@
 
     <div class="tab-pane" id="pane-pallia-verification">
       <div class="page-hd"><div><h1>Pallia — Vehicle Verification</h1><div class="meta">Verify up to 3 selected Pallia fleet registrations with Surepass and download the full response as CSV.</div></div></div>
-      <div class="grid-2" style="gap:16px;margin-bottom:16px;">
-        <div class="card" style="padding:20px;">
-          <div class="card-title">Surepass wallet balance</div>
-          <div style="font-size:30px;font-weight:700;margin:10px 0;">&#8377;56,237.03</div>
-          <div class="meta">Manual balance snapshot; it is not synced with Surepass.</div>
-        </div>
-        <div class="card" style="padding:20px;">
-          <div class="card-title">API rate per hit</div>
-          <table class="data-table"><thead><tr><th>API</th><th>Rate per hit</th></tr></thead><tbody>
-            <tr><td>RC Verification</td><td>&#8377;4</td></tr>
-            <tr><td>Aadhaar PAN Link</td><td class="meta">Not set</td></tr>
-            <tr><td>Bank Verification</td><td class="meta">Not set</td></tr>
-            <tr><td>Company Details</td><td class="meta">Not set</td></tr>
-            <tr><td>Corporate CIN</td><td class="meta">Not set</td></tr>
-            <tr><td>Corporate GSTIN</td><td class="meta">Not set</td></tr>
-          </tbody></table>
-        </div>
+      <div class="card" style="padding:20px;margin-bottom:16px;">
+        <div class="card-title">Surepass wallet balance</div>
+        <div style="font-size:30px;font-weight:700;margin:10px 0;">&#8377;56,237.03</div>
+        <div class="meta">Manual balance snapshot; it is not synced with Surepass.</div>
       </div>
       <div class="card" style="margin-bottom:16px;">
         <label class="field" for="pVerifyApi" style="max-width:420px;">Verification API
@@ -979,6 +966,18 @@
         <div id="pMasterStatus" class="meta" role="status" style="margin:8px 0 12px;">Loading Pallia Vehicle Master...</div>
         <div style="overflow:auto;max-height:560px;"><table class="data-table"><thead><tr><th>Exc</th><th>Registration No</th><th>Registration date</th><th>Make</th><th>Model</th><th>Action</th></tr></thead><tbody id="pMasterVehicles"></tbody></table></div>
         <div style="margin-top:16px;display:flex;gap:8px;align-items:center;"><button class="btn" id="pMasterSave" onclick="pMasterSave()" disabled>Save Pallia Vehicle Master</button><button class="btn secondary" onclick="pMasterLoad()">Discard changes</button></div>
+      </div>
+      <div class="card" style="padding:20px;margin-top:16px;">
+        <div class="card-title">API rates per hit</div>
+        <p class="meta">Rate changes are protected by the shared Masters edit password. The password is checked again when rates are saved.</p>
+        <table class="data-table"><thead><tr><th>API</th><th>Rate per hit (&#8377;)</th></tr></thead><tbody id="pMasterApiRates"></tbody></table>
+        <div id="pMasterRatesStatus" class="meta" role="status" style="margin:10px 0;"></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input type="password" id="pMasterRatesPassword" maxlength="128" placeholder="Masters edit password" autocomplete="current-password" aria-label="Masters edit password">
+          <button class="btn secondary" id="pMasterRatesUnlockBtn" onclick="pMasterRatesUnlock()">Unlock rates</button>
+          <button class="btn" id="pMasterRatesSaveBtn" onclick="pMasterRatesSave()" hidden>Save rates</button>
+          <button class="btn secondary" id="pMasterRatesCancelBtn" onclick="pMasterRatesCancel()" hidden>Cancel</button>
+        </div>
       </div>
     </div>
 
@@ -1597,7 +1596,7 @@
   </div>
 </div>
 <script src="/static/eee_documents.js"></script>
-<script src="/static/pallia_verification.js?v=20261012-2"></script>
+<script src="/static/pallia_verification.js?v=20261012-3"></script>
 
 <script>
 // ── Helpers ──────────────────────────────────────────────────────────────────

@@ -410,6 +410,9 @@ class PalliaVehicleMaster(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     vehicles: Mapped[list] = mapped_column(JSON, default=list)
+    api_rates: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    api_rates_updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    api_rates_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

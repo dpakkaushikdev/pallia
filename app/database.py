@@ -103,6 +103,16 @@ def _migrate_existing_db() -> None:
                 conn.execute(text("ALTER TABLE external_api_events ADD COLUMN user_id VARCHAR(32) REFERENCES users(id) ON DELETE SET NULL"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_external_api_events_user_id ON external_api_events (user_id)"))
             conn.commit()
+        if "pallia_vehicle_master" in inspector.get_table_names():
+            existing = {c["name"] for c in inspector.get_columns("pallia_vehicle_master")}
+            if "api_rates" not in existing:
+                conn.execute(text("ALTER TABLE pallia_vehicle_master ADD COLUMN api_rates JSON"))
+            if "api_rates_updated_by" not in existing:
+                conn.execute(text("ALTER TABLE pallia_vehicle_master ADD COLUMN api_rates_updated_by VARCHAR(255)"))
+            if "api_rates_updated_at" not in existing:
+                datetime_type = DateTime().compile(dialect=engine.dialect)
+                conn.execute(text(f"ALTER TABLE pallia_vehicle_master ADD COLUMN api_rates_updated_at {datetime_type}"))
+            conn.commit()
         if "eee_taxi_rate_card" in inspector.get_table_names():
             existing = {c["name"] for c in inspector.get_columns("eee_taxi_rate_card")}
             if "edit_password_hash" not in existing:

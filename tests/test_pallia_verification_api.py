@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from app.config import settings
 from app.database import SessionLocal
 from app.main import app
-from app.models import ExternalApiEvent, PalliaVehicleMaster, User, UserRole
+from app.models import EeeTaxiRateCard, ExternalApiEvent, PalliaVehicleMaster, User, UserRole
 from app.services.auth import create_access_token, get_password_hash
 
 
@@ -90,3 +90,56 @@ def test_surepass_verification_logs_each_vehicle_by_user_and_returns_csv(monkeyp
             db.query(PalliaVehicleMaster).delete()
             db.query(User).filter(User.id == user.id).delete()
             db.commit()
+
+
+def test_pallia_api_rates_require_shared_master_password_and_persist():
+    with TestClient(app) as client:
+        with SessionLocal() as db:
+            original_master = db.get(PalliaVehicleMaster, 1)
+            original_rates = dict(original_master.api_rates) if original_master and original_master.api_rates else None
+            original_rates_updated_by = original_master.api_rates_updated_by if original_master else None
+            original_rates_updated_at = original_master.api_rates_updated_at if original_master else None
+            original_master_present = original_master is not None
+            original_edit_row = db.get(EeeTaxiRateCard, 1)
+            original_edit_row_present = original_edit_row is not None
+            original_password_hash = original_edit_row.edit_password_hash if original_edit_row else None
+            if original_edit_row is None:
+                original_edit_row = EeeTaxiRateCard(id=1, rates={}, edit_password_hash=None)
+                db.add(original_edit_row)
+            original_edit_row.edit_password_hash = get_password_hash("MasterEdit123")
+            user, headers = _user_headers(db)
+            db.commit()
+
+        try:
+            initial = client.get("/api/pallia/api-rates", headers=headers)
+            assert initial.status_code == 200
+            assert initial.json()["rates"]["rc_verification"] == 4
+            assert initial.json()["rates"]["aadhaar_pan_link"] is None
+            assert client.post("/api/pallia/api-rates/unlock", headers=headers, json={"password": "wrong"}).status_code == 403
+            assert client.post("/api/pallia/api-rates/unlock", headers=headers, json={"password": "MasterEdit123"}).status_code == 200
+            values = {"rc_verification": 4.5, "aadhaar_pan_link": None, "bank_verification": 12,
+                      "company_details": None, "corporate_cin": 8, "corporate_gstin": 6}
+            assert client.put("/api/pallia/api-rates", headers=headers,
+                              json={"edit_password": "wrong", "rates": values}).status_code == 403
+            saved = client.put("/api/pallia/api-rates", headers=headers,
+                               json={"edit_password": "MasterEdit123", "rates": values})
+            assert saved.status_code == 200, saved.text
+            assert saved.json()["rates"] == values
+            assert client.get("/api/pallia/api-rates", headers=headers).json()["rates"] == values
+        finally:
+            with SessionLocal() as db:
+                row = db.get(PalliaVehicleMaster, 1)
+                if original_master_present:
+                    row.api_rates = original_rates
+                    row.api_rates_updated_by = original_rates_updated_by
+                    row.api_rates_updated_at = original_rates_updated_at
+                elif row is not None:
+                    db.delete(row)
+                rate_card = db.get(EeeTaxiRateCard, 1)
+                if rate_card:
+                    if not original_edit_row_present:
+                        db.delete(rate_card)
+                    else:
+                        rate_card.edit_password_hash = original_password_hash
+                db.query(User).filter(User.id == user.id).delete()
+                db.commit()

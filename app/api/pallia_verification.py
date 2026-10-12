@@ -19,11 +19,21 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.models import ExternalApiEvent, PalliaVehicleMaster, User
+from app.api.eee_taxi_rates import check_edit_password
 from app.services.auth import require_permission
+from app.services.eee_taxi_rates import get_edit_password_hash
 
 router = APIRouter(prefix="/api/pallia", tags=["pallia-verification"])
 pallia_user = require_permission("billing")
 SUREPASS_RC_URL = "https://kyc-api.surepass.app/api/v1/rc/rc-v2"
+PALLIA_API_RATE_DEFAULTS = {
+    "rc_verification": 4.0,
+    "aadhaar_pan_link": None,
+    "bank_verification": None,
+    "company_details": None,
+    "corporate_cin": None,
+    "corporate_gstin": None,
+}
 
 
 def normalize_vehicle(value: str) -> str:
@@ -77,6 +87,24 @@ class VerifyVehiclesIn(BaseModel):
         return cleaned
 
 
+class PalliaApiRatesIn(BaseModel):
+    rc_verification: float | None = Field(default=4, ge=0)
+    aadhaar_pan_link: float | None = Field(default=None, ge=0)
+    bank_verification: float | None = Field(default=None, ge=0)
+    company_details: float | None = Field(default=None, ge=0)
+    corporate_cin: float | None = Field(default=None, ge=0)
+    corporate_gstin: float | None = Field(default=None, ge=0)
+
+
+class PalliaApiRatesUpdateIn(BaseModel):
+    edit_password: str = Field(min_length=1, max_length=128)
+    rates: PalliaApiRatesIn
+
+
+class PalliaRatesUnlockIn(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
+
+
 def _master(db: Session):
     stored = db.get(PalliaVehicleMaster, 1)
     vehicles = stored.vehicles if stored else []
@@ -112,6 +140,42 @@ def save_vehicle_master(body: VehicleMasterIn, user: User = Depends(pallia_user)
     stored.updated_at = datetime.utcnow()
     db.commit()
     return read_vehicle_master(user, db)
+
+
+def _api_rates_response(db: Session) -> dict:
+    stored = db.get(PalliaVehicleMaster, 1)
+    rates = {**PALLIA_API_RATE_DEFAULTS, **(stored.api_rates or {})} if stored else dict(PALLIA_API_RATE_DEFAULTS)
+    return {
+        "rates": rates,
+        "updated_by": stored.api_rates_updated_by if stored else None,
+        "updated_at": stored.api_rates_updated_at.isoformat() + "Z" if stored and stored.api_rates_updated_at else None,
+        "has_edit_password": bool(get_edit_password_hash(db)),
+    }
+
+
+@router.get("/api-rates")
+def read_pallia_api_rates(_: User = Depends(pallia_user), db: Session = Depends(get_db)):
+    return _api_rates_response(db)
+
+
+@router.post("/api-rates/unlock")
+def unlock_pallia_api_rates(body: PalliaRatesUnlockIn, user: User = Depends(pallia_user), db: Session = Depends(get_db)):
+    check_edit_password(db, body.password, user)
+    return {"ok": True}
+
+
+@router.put("/api-rates")
+def save_pallia_api_rates(body: PalliaApiRatesUpdateIn, user: User = Depends(pallia_user), db: Session = Depends(get_db)):
+    check_edit_password(db, body.edit_password, user)
+    stored = db.get(PalliaVehicleMaster, 1)
+    if stored is None:
+        stored = PalliaVehicleMaster(id=1, vehicles=[])
+        db.add(stored)
+    stored.api_rates = body.rates.model_dump()
+    stored.api_rates_updated_by = user.email
+    stored.api_rates_updated_at = datetime.utcnow()
+    db.commit()
+    return _api_rates_response(db)
 
 
 def _flatten(value, prefix=""):

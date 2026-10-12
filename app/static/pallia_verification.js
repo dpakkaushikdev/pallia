@@ -5,6 +5,14 @@ let pMasterSavedVehicles = [];
 let pMasterSurepassConfigured = false;
 let pVerifySelected = new Set();
 let pVerifyBusy = false;
+const PALLIA_API_RATE_ROWS = [
+  ["rc_verification", "RC Verification"], ["aadhaar_pan_link", "Aadhaar PAN Link"],
+  ["bank_verification", "Bank Verification"], ["company_details", "Company Details"],
+  ["corporate_cin", "Corporate CIN"], ["corporate_gstin", "Corporate GSTIN"]
+];
+let pMasterApiRates = {};
+let pMasterRatesEditing = false;
+let pMasterRatesHasPassword = false;
 const PALLIA_API_DESCRIPTIONS = {
   "rc-v2": "Checks a vehicle registration and returns the details available from the RC Verification API. Each lookup may incur a Surepass charge.",
   "aadhaar-pan-link": "Checks whether an Aadhaar number is linked with a PAN. Its input form and verification flow will be added later.",
@@ -39,6 +47,9 @@ function pVehicleRecord(item) {
 function pEscape(value) { return String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[ch])); }
 function pMasterDirty() { return JSON.stringify(pMasterVehicles) !== JSON.stringify(pMasterSavedVehicles); }
 async function pMasterLoad() {
+  pMasterRatesEditing = false;
+  const passwordInput = document.getElementById("pMasterRatesPassword");
+  if (passwordInput) passwordInput.value = "";
   const status = document.getElementById("pMasterStatus"); status.textContent = "Loading Pallia Vehicle Master...";
   try {
     const data = await api(PALLIA_VEHICLE_MASTER_URL);
@@ -47,7 +58,69 @@ async function pMasterLoad() {
     pMasterSurepassConfigured = !!data.surepass_configured;
     status.textContent = `${pMasterVehicles.length} vehicles.${data.updated_by ? ` Last saved by ${data.updated_by}.` : ""}`;
     pMasterRender(); pVerifyRender();
+    await pMasterRatesLoad();
   } catch (error) { status.textContent = `Could not load Pallia Vehicle Master: ${error.message}`; }
+}
+async function pMasterRatesLoad() {
+  const status = document.getElementById("pMasterRatesStatus");
+  try {
+    const data = await api("/api/pallia/api-rates");
+    pMasterApiRates = data.rates || {};
+    pMasterRatesHasPassword = !!data.has_edit_password;
+    status.textContent = data.updated_by ? `Last updated by ${data.updated_by}${data.updated_at ? ` on ${new Date(data.updated_at).toLocaleString()}` : ""}.` : "Rates have not been edited yet; the current RC rate is ₹4 per hit.";
+    if (!pMasterRatesHasPassword) status.textContent += " Set the shared Masters edit password first (EEE-Taxi > Masters).";
+    pMasterRatesRender();
+  } catch (error) { status.textContent = `Could not load API rates: ${error.message}`; }
+}
+function pMasterRatesRender() {
+  const root = document.getElementById("pMasterApiRates");
+  if (!root) return;
+  root.innerHTML = PALLIA_API_RATE_ROWS.map(([key, label]) => {
+    const value = pMasterApiRates[key];
+    return `<tr><td>${label}</td><td><input type="number" min="0" step="0.01" data-p-api-rate="${key}" value="${value == null ? "" : pEscape(value)}" placeholder="Not set" ${pMasterRatesEditing ? "" : "disabled"} style="max-width:180px;"></td></tr>`;
+  }).join("");
+  const unlock = document.getElementById("pMasterRatesUnlockBtn");
+  const save = document.getElementById("pMasterRatesSaveBtn");
+  const cancel = document.getElementById("pMasterRatesCancelBtn");
+  const password = document.getElementById("pMasterRatesPassword");
+  if (unlock) unlock.hidden = pMasterRatesEditing;
+  if (save) save.hidden = !pMasterRatesEditing;
+  if (cancel) cancel.hidden = !pMasterRatesEditing;
+  if (password) password.disabled = pMasterRatesEditing;
+}
+async function pMasterRatesUnlock() {
+  const password = document.getElementById("pMasterRatesPassword").value;
+  const status = document.getElementById("pMasterRatesStatus");
+  if (!password) { status.textContent = "Enter the shared Masters edit password to unlock rates."; return; }
+  try {
+    await api("/api/pallia/api-rates/unlock", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({password})});
+    pMasterRatesEditing = true;
+    status.textContent = "Rates unlocked. The password will be checked again when you save.";
+    pMasterRatesRender();
+  } catch (error) { status.textContent = `Could not unlock API rates: ${error.message}`; }
+}
+function pMasterRatesCancel() {
+  pMasterRatesEditing = false;
+  document.getElementById("pMasterRatesPassword").value = "";
+  pMasterRatesLoad();
+}
+async function pMasterRatesSave() {
+  const password = document.getElementById("pMasterRatesPassword").value;
+  const status = document.getElementById("pMasterRatesStatus");
+  const rates = {};
+  for (const input of document.querySelectorAll("[data-p-api-rate]")) {
+    const raw = input.value.trim();
+    if (raw && (!Number.isFinite(Number(raw)) || Number(raw) < 0)) { status.textContent = "Rates must be non-negative numbers or left blank."; return; }
+    rates[input.dataset.pApiRate] = raw ? Number(raw) : null;
+  }
+  try {
+    const data = await api("/api/pallia/api-rates", {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify({edit_password:password, rates})});
+    pMasterApiRates = data.rates || rates;
+    pMasterRatesEditing = false;
+    document.getElementById("pMasterRatesPassword").value = "";
+    status.textContent = `API rates saved${data.updated_by ? ` by ${data.updated_by}` : ""}.`;
+    pMasterRatesRender();
+  } catch (error) { status.textContent = `Could not save API rates: ${error.message}`; }
 }
 function pMasterRender() {
   const root = document.getElementById("pMasterVehicles");
