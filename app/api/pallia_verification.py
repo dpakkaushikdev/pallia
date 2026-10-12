@@ -24,7 +24,7 @@ from app.services.auth import require_permission
 from app.services.eee_taxi_rates import get_edit_password_hash
 
 router = APIRouter(prefix="/api/pallia", tags=["pallia-verification"])
-pallia_user = require_permission("billing")
+pallia_user = require_permission("others")
 SUREPASS_RC_URL = "https://kyc-api.surepass.app/api/v1/rc/rc-v2"
 PALLIA_API_RATE_DEFAULTS = {
     "rc_verification": 4.0,
