@@ -110,3 +110,21 @@ def require_permission(module: str):
             )
         return current_user
     return _check
+
+
+def require_any_permission(modules: list[str]):
+    """Allow admins or users who belong to at least one listed business module."""
+    allowed = set(modules)
+
+    def _check(current_user: User = Depends(get_current_active_user)) -> User:
+        if current_user.role == UserRole.ADMIN:
+            return current_user
+        if allowed.intersection(current_user.permissions or []):
+            return current_user
+        names = " or ".join(f"'{module}'" for module in modules)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"You do not have access to {names}.",
+        )
+
+    return _check

@@ -20,11 +20,12 @@ from app.config import settings
 from app.database import get_db
 from app.models import ExternalApiEvent, PalliaVehicleMaster, User
 from app.api.eee_taxi_rates import check_edit_password
-from app.services.auth import require_permission
+from app.services.auth import require_any_permission, require_permission
 from app.services.eee_taxi_rates import get_edit_password_hash
 
 router = APIRouter(prefix="/api/pallia", tags=["pallia-verification"])
-pallia_user = require_permission("others")
+pallia_user = require_any_permission(["billing", "tracking", "accounts", "others"])
+verification_user = require_permission("others")
 SUREPASS_RC_URL = "https://kyc-api.surepass.app/api/v1/rc/rc-v2"
 PALLIA_API_RATE_DEFAULTS = {
     "rc_verification": 4.0,
@@ -42,6 +43,7 @@ def normalize_vehicle(value: str) -> str:
 
 class VehicleMasterIn(BaseModel):
     vehicles: list[Any] = Field(max_length=3000)
+    edit_password: str = Field(default="", max_length=128)
 
     @field_validator("vehicles")
     @classmethod
@@ -131,6 +133,7 @@ def read_vehicle_master(_: User = Depends(pallia_user), db: Session = Depends(ge
 
 @router.put("/vehicle-master")
 def save_vehicle_master(body: VehicleMasterIn, user: User = Depends(pallia_user), db: Session = Depends(get_db)):
+    check_edit_password(db, body.edit_password, user)
     stored = db.get(PalliaVehicleMaster, 1)
     if stored is None:
         stored = PalliaVehicleMaster(id=1)
@@ -192,7 +195,7 @@ def _flatten(value, prefix=""):
 
 
 @router.post("/vehicle-verification")
-async def verify_vehicles(body: VerifyVehiclesIn, user: User = Depends(pallia_user), db: Session = Depends(get_db)):
+async def verify_vehicles(body: VerifyVehiclesIn, user: User = Depends(verification_user), db: Session = Depends(get_db)):
     if not settings.auth_token_surepass.strip():
         raise HTTPException(503, "Surepass is not configured. Set AUTH_TOKEN_SUREPASS in the server environment.")
     allowed = {v["registration_no"] for v in _master(db)}

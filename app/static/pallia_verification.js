@@ -48,6 +48,8 @@ function pEscape(value) { return String(value ?? "").replace(/[&<>"']/g, ch => (
 function pMasterDirty() { return JSON.stringify(pMasterVehicles) !== JSON.stringify(pMasterSavedVehicles); }
 async function pMasterLoad() {
   pMasterRatesEditing = false;
+  const vehiclePassword = document.getElementById("pMasterVehiclePassword");
+  if (vehiclePassword) vehiclePassword.value = "";
   const passwordInput = document.getElementById("pMasterRatesPassword");
   if (passwordInput) passwordInput.value = "";
   const status = document.getElementById("pMasterStatus"); status.textContent = "Loading Pallia Vehicle Master...";
@@ -187,13 +189,19 @@ async function pMasterImportCsv(input) {
   finally{input.value="";}
 }
 async function pMasterSave() {
-  const button=document.getElementById("pMasterSave"); button.disabled=true;
+  const button=document.getElementById("pMasterSave");
+  const passwordInput=document.getElementById("pMasterVehiclePassword");
+  const editPassword=passwordInput?.value||"";
+  const status=document.getElementById("pMasterStatus");
+  if(!editPassword.trim()){status.textContent="Enter the Masters edit password to save vehicle changes.";passwordInput?.focus();return;}
+  button.disabled=true;
   try {
-    const data=await api(PALLIA_VEHICLE_MASTER_URL,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({vehicles:pMasterVehicles})});
+    const data=await api(PALLIA_VEHICLE_MASTER_URL,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({vehicles:pMasterVehicles,edit_password:editPassword})});
     pMasterVehicles=(data.vehicles||[]).map(pVehicleRecord);pMasterSavedVehicles=structuredClone(pMasterVehicles);
-    document.getElementById("pMasterStatus").textContent=`Saved ${pMasterVehicles.length} vehicles to the shared Pallia master.`;
+    status.textContent=`Saved ${pMasterVehicles.length} vehicles to the shared Pallia master.`;
     pMasterRender();pVerifyRender();
-  } catch(error){document.getElementById("pMasterStatus").textContent=`Could not save vehicle master: ${error.message}`;button.disabled=!pMasterDirty();}
+  } catch(error){status.textContent=`Could not save vehicle master: ${error.message}`;button.disabled=!pMasterDirty();}
+  finally{if(passwordInput)passwordInput.value="";}
 }
 async function pVerifyLoad() {
   pVerifyApiChange();

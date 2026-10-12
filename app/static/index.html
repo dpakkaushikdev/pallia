@@ -965,7 +965,7 @@
         </div>
         <div id="pMasterStatus" class="meta" role="status" style="margin:8px 0 12px;">Loading Pallia Vehicle Master...</div>
         <div style="overflow:auto;max-height:560px;"><table class="data-table"><thead><tr><th>Exc</th><th>Registration No</th><th>Registration date</th><th>Make</th><th>Model</th><th>Action</th></tr></thead><tbody id="pMasterVehicles"></tbody></table></div>
-        <div style="margin-top:16px;display:flex;gap:8px;align-items:center;"><button class="btn" id="pMasterSave" onclick="pMasterSave()" disabled>Save Pallia Vehicle Master</button><button class="btn secondary" onclick="pMasterLoad()">Discard changes</button></div>
+        <div style="margin-top:16px;display:flex;gap:8px;align-items:end;flex-wrap:wrap;"><label class="field">Masters edit password<input type="password" id="pMasterVehiclePassword" maxlength="128" placeholder="Required to save changes" autocomplete="current-password"></label><button class="btn" id="pMasterSave" onclick="pMasterSave()" disabled>Save Pallia Vehicle Master</button><button class="btn secondary" onclick="pMasterLoad()">Discard changes</button></div>
       </div>
       <div class="card" style="padding:20px;margin-top:16px;">
         <div class="card-title">API rates per hit</div>
@@ -1792,10 +1792,11 @@ function showApp() {
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
 const _ico = (d) => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const PALLIA_MODULES = ["billing", "tracking", "accounts", "others"];
 const TAB_DEFS = [
   { id: "billing",       label: "Billing",       module: "billing",    icon: _ico('<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/>') },
   { id: "pallia-verification", label: "Verification API", module: "others", icon: _ico('<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="m8 11 2 2 4-4"/>') },
-  { id: "pallia-master", label: "Pallia Master", module: "billing", icon: _ico('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/>') },
+  { id: "pallia-master", label: "Pallia Master", module: "__pallia_master__", icon: _ico('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/>') },
   { id: "tracking",      label: "Tracking",      module: "tracking",   icon: _ico('<rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>') },
   { id: "accounts",      label: "Accounts",      module: "accounts",   icon: _ico('<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>') },
   { id: "others",        label: "Others",        module: "others",     icon: _ico('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>') },
@@ -1809,8 +1810,15 @@ function canAccess(tab) {
   if (!currentUser) return false;
   if (isAdmin()) return true;
   if (tab.module === "__admin__") return false;
+  if (tab.module === "__pallia_master__") return isPalliaUser();
   if (tab.module === null) return true;   // dashboard visible to all
   return (currentUser.permissions || []).includes(tab.module);
+}
+
+function isPalliaUser() {
+  if (!currentUser) return false;
+  if (isAdmin()) return true;
+  return PALLIA_MODULES.some(module => (currentUser.permissions || []).includes(module));
 }
 
 function canAccessEee() {
@@ -1857,7 +1865,7 @@ function buildSidebar() {
   // Others collapsible group
   const verificationTab = TAB_DEFS.find(tab => tab.id === "pallia-verification");
   const othersTab = TAB_DEFS.find(tab => tab.id === "others");
-  if (canAccess(verificationTab) || canAccess(othersTab)) {
+  if (canAccess(othersTab)) {
     const othersParent = document.createElement("button");
     othersParent.className = "sb-group-parent";
     othersParent.id = "othersGroupParent";
