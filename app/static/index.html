@@ -1843,6 +1843,8 @@ function buildSidebar() {
   }
 
   TAB_DEFS.forEach(tab => {
+    // Verification API lives under the expandable Others group below.
+    if (tab.id === "pallia-verification" || tab.id === "others") return;
     if (!canAccess(tab)) return;
     const btn = document.createElement("button");
     btn.className = "sb-item";
@@ -1851,6 +1853,35 @@ function buildSidebar() {
     btn.addEventListener("click", () => switchTab(tab.id));
     nav.appendChild(btn);
   });
+
+  // Others collapsible group
+  const verificationTab = TAB_DEFS.find(tab => tab.id === "pallia-verification");
+  const othersTab = TAB_DEFS.find(tab => tab.id === "others");
+  if (canAccess(verificationTab) || canAccess(othersTab)) {
+    const othersParent = document.createElement("button");
+    othersParent.className = "sb-group-parent";
+    othersParent.id = "othersGroupParent";
+    othersParent.innerHTML = `<span class="sb-icon">${othersTab.icon}</span>Others<span class="sb-group-arrow">â–¶</span>`;
+    nav.appendChild(othersParent);
+
+    const othersSubNav = document.createElement("div");
+    othersSubNav.className = "sb-sub-nav";
+    othersSubNav.id = "othersSubNav";
+    if (canAccess(verificationTab)) {
+      const verificationItem = document.createElement("button");
+      verificationItem.className = "sb-sub-item";
+      verificationItem.dataset.tab = verificationTab.id;
+      verificationItem.innerHTML = `<span class="sb-icon">${verificationTab.icon}</span>${verificationTab.label}`;
+      verificationItem.addEventListener("click", () => switchTab(verificationTab.id));
+      othersSubNav.appendChild(verificationItem);
+    }
+    nav.appendChild(othersSubNav);
+
+    othersParent.addEventListener("click", () => {
+      const open = othersParent.classList.toggle("open");
+      othersSubNav.classList.toggle("open", open);
+    });
+  }
 
   // EEE-Taxi collapsible group
   if (!canAccessEee()) return;
@@ -1920,6 +1951,16 @@ function switchTab(tabId) {
   if (tabId.startsWith("eee-")) {
     const parent = $("#eeeGroupParent");
     const subNav = $("#eeeSubNav");
+    if (parent && !parent.classList.contains("open")) {
+      parent.classList.add("open");
+      subNav && subNav.classList.add("open");
+    }
+  }
+
+  // Auto-expand Others when one of its sub-tabs is active.
+  if (tabId === "pallia-verification") {
+    const parent = $("#othersGroupParent");
+    const subNav = $("#othersSubNav");
     if (parent && !parent.classList.contains("open")) {
       parent.classList.add("open");
       subNav && subNav.classList.add("open");
