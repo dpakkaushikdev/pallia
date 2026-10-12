@@ -943,6 +943,27 @@
         <p id="pVerifyApiDescription" class="meta" style="margin:8px 0 0;">Checks a vehicle registration and returns the details available from the RC Verification API. Each lookup may incur a Surepass charge.</p>
       </div>
       <div id="pVerifyComingSoon" class="card" hidden role="status">This API is listed for selection, but its input form and integration are not available yet.</div>
+      <div id="pVerifyBankPanel" hidden>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-title">Bank account verification</div>
+          <p class="meta">Enter one account or upload a CSV for multiple checks. Each valid row makes a separate Surepass request and may incur a charge. IFSC details are requested automatically when IFSC is provided.</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:14px;">
+            <label class="field">ID Number<input type="text" id="pBankIdNumber" maxlength="128" placeholder="Bank account number" autocomplete="off"></label>
+            <label class="field">IFSC (optional)<input type="text" id="pBankIfsc" maxlength="32" placeholder="e.g. BARB0DAMOHA" autocomplete="off"></label>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:12px;"><button class="btn" id="pBankManualSubmit" onclick="pBankVerifyManual()">Verify account</button></div>
+        </div>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-title">Verify accounts from CSV</div>
+          <p class="meta">CSV must contain an <strong>ID Number</strong> column. An <strong>IFSC</strong> column is optional; blank IFSC values send <code>ifsc_details=false</code>.</p>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;">
+            <input type="file" id="pBankCsvFile" accept=".csv,text/csv" aria-label="Choose bank verification CSV">
+            <button class="btn" id="pBankCsvSubmit" onclick="pBankVerifyCsv()">Verify CSV</button>
+          </div>
+          <div id="pBankCsvStatus" class="meta" role="status" style="margin-top:10px;"></div>
+        </div>
+        <div class="card"><div class="card-title">Bank verification results</div><div id="pBankResult" class="meta" role="status">No bank verification has been run in this session.</div><pre id="pBankCsvPreview" hidden style="max-height:360px;overflow:auto;white-space:pre-wrap;margin-top:12px;"></pre></div>
+      </div>
       <div class="card" id="pVerifyRcPanel">
         <div class="sec-hd"><div><div class="card-title">Select vehicles to verify</div><div id="pVerifyStatus" class="meta" role="status">Loading Pallia Vehicle Master...</div></div><button class="btn" id="pVerifyRun" onclick="pVerifyRun()" disabled>Verify selected</button></div>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:12px 0;">
@@ -952,7 +973,7 @@
         <div class="card" style="padding:12px;margin-bottom:12px;"><div class="card-title">Selected vehicles</div><div id="pVerifySelectedList" class="vehicle-tag-list" style="margin-top:8px;"><span class="meta">No vehicles selected.</span></div></div>
         <div id="pVerifyVehicles" class="card" style="padding:8px;max-height:420px;overflow:auto;"></div>
       </div>
-      <div class="card" id="pVerifyRcResults"><div class="card-title">Verification results</div><p class="meta">Each vehicle lookup may incur a Surepass charge. Each run is limited to 3 vehicles. The downloaded CSV contains the Surepass response fields for each vehicle, including any lookup error.</p><div id="pVerifyResult" class="meta" role="status">No verification has been run in this session.</div></div>
+      <div class="card" id="pVerifyRcResults"><div class="card-title">Verification results</div><p class="meta">Each vehicle lookup may incur a Surepass charge. The downloaded CSV contains one row per selected vehicle and includes any lookup error.</p><div id="pVerifyResult" class="meta" role="status">No verification has been run in this session.</div></div>
     </div>
 
     <div class="tab-pane" id="pane-pallia-master">
@@ -1606,7 +1627,7 @@
   </div>
 </div>
 <script src="/static/eee_documents.js"></script>
-<script src="/static/pallia_verification.js?v=20261012-4"></script>
+<script src="/static/pallia_verification.js?v=20261012-5"></script>
 
 <script>
 // ── Helpers ──────────────────────────────────────────────────────────────────

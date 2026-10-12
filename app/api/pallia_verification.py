@@ -27,6 +27,7 @@ router = APIRouter(prefix="/api/pallia", tags=["pallia-verification"])
 pallia_user = require_any_permission(["billing", "tracking", "accounts", "others"])
 verification_user = require_permission("others")
 SUREPASS_RC_URL = "https://kyc-api.surepass.app/api/v1/rc/rc-v2"
+SUREPASS_BANK_URL = "https://kyc-api.surepass.app/api/v1/bank-verification"
 PALLIA_API_RATE_DEFAULTS = {
     "rc_verification": 4.0,
     "aadhaar_pan_link": None,
@@ -87,6 +88,25 @@ class VerifyVehiclesIn(BaseModel):
                 seen.add(vehicle)
                 cleaned.append(vehicle)
         return cleaned
+
+
+class BankAccountIn(BaseModel):
+    id_number: str = Field(default="", max_length=128)
+    ifsc: str = Field(default="", max_length=32)
+
+    @field_validator("id_number", "ifsc")
+    @classmethod
+    def trim_values(cls, value):
+        return value.strip()
+
+    @field_validator("ifsc")
+    @classmethod
+    def normalize_ifsc(cls, value):
+        return value.upper()
+
+
+class VerifyBankAccountsIn(BaseModel):
+    accounts: list[BankAccountIn] = Field(min_length=1, max_length=3000)
 
 
 class PalliaApiRatesIn(BaseModel):
@@ -284,3 +304,103 @@ async def verify_vehicles(body: VerifyVehiclesIn, user: User = Depends(verificat
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return Response(content=content.encode("utf-8"), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="pallia_vehicle_verification_{stamp}.csv"'})
+
+
+@router.post("/bank-verification")
+async def verify_bank_accounts(body: VerifyBankAccountsIn, user: User = Depends(verification_user), db: Session = Depends(get_db)):
+    if not settings.auth_token_surepass.strip():
+        raise HTTPException(503, "Surepass is not configured. Set AUTH_TOKEN_SUREPASS in the server environment.")
+
+    headers = {"Authorization": f"Bearer {settings.auth_token_surepass.strip()}"}
+    semaphore = asyncio.Semaphore(8)
+
+    async def verify_one(client, account: BankAccountIn):
+        id_number = account.id_number.strip()
+        ifsc = account.ifsc.strip().upper()
+        include_ifsc_details = bool(ifsc)
+        row = {"id_number": id_number, "ifsc": ifsc, "ifsc_details": str(include_ifsc_details).lower(),
+               "http_status": "", "success": "false", "message": "", "error": ""}
+        if not id_number:
+            row["error"] = "ID Number is required; no Surepass request was made."
+            return row
+
+        started = time.monotonic()
+        event = {"api_name": "surepass", "model": "bank-verification", "success": False,
+                 "error_message": None, "duration_ms": None, "user_id": user.id}
+        try:
+            async with semaphore:
+                response = await client.post(
+                    SUREPASS_BANK_URL,
+                    json={"id_number": id_number, "ifsc": ifsc, "ifsc_details": include_ifsc_details},
+                )
+            row["http_status"] = response.status_code
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+                row["response_text"] = response.text[:4000]
+                row["error"] = "Surepass returned a response that was not valid JSON."
+
+            if isinstance(payload, dict):
+                row.update(_flatten(payload))
+                row["message"] = str(payload.get("message") or "")
+                if not response.is_success:
+                    row["error"] = f"Surepass returned HTTP {response.status_code}."
+                elif payload.get("success") is False:
+                    row["error"] = row["message"] or "Surepass reported that this bank verification failed."
+            elif payload is not None:
+                row["response"] = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+                if not response.is_success:
+                    row["error"] = f"Surepass returned HTTP {response.status_code}."
+            elif not response.is_success:
+                row["error"] = f"Surepass returned HTTP {response.status_code}."
+            elif not row["error"]:
+                row["error"] = "Surepass returned an empty JSON response."
+
+            if not response.is_success and not row["message"]:
+                row["message"] = f"HTTP {response.status_code} response from Surepass."
+            succeeded = response.is_success and payload is not None and not (
+                isinstance(payload, dict) and payload.get("success") is False
+            ) and not row["error"]
+            row["success"] = "true" if succeeded else "false"
+            event["success"] = succeeded
+            if not succeeded:
+                event["error_message"] = (row["error"] or row["message"] or "Surepass bank verification failed.")[:500]
+        except httpx.TimeoutException:
+            row["error"] = "Surepass request timed out."
+            event["error_message"] = row["error"]
+        except httpx.RequestError:
+            row["error"] = "Could not connect to Surepass."
+            event["error_message"] = row["error"]
+        except Exception as exc:
+            row["error"] = f"Unexpected verification error ({type(exc).__name__})."
+            event["error_message"] = row["error"]
+        finally:
+            event["duration_ms"] = int((time.monotonic() - started) * 1000)
+            row["_api_event"] = event
+        return row
+
+    async with httpx.AsyncClient(headers=headers, timeout=45.0) as client:
+        rows = await asyncio.gather(*(verify_one(client, account) for account in body.accounts))
+
+    for row in rows:
+        event = row.pop("_api_event", None)
+        if event:
+            db.add(ExternalApiEvent(**event))
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        for row in rows:
+            row["audit_log_error"] = "Verification completed, but API usage logging failed."
+
+    columns = ["id_number", "ifsc", "ifsc_details", "http_status", "success", "message", "error"]
+    columns.extend(sorted({key for row in rows for key in row} - set(columns)))
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    content = "\ufeff" + output.getvalue()
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return Response(content=content.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="pallia_bank_verification_{stamp}.csv"'})

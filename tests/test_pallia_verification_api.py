@@ -196,6 +196,72 @@ def test_surepass_batch_keeps_successes_and_failure_rows_in_csv(monkeypatch):
             db.commit()
 
 
+def test_surepass_bank_verification_derives_ifsc_details_and_keeps_csv_rows(monkeypatch):
+    import csv
+    import io
+    import app.api.pallia_verification as verification
+
+    class FakeResponse:
+        def __init__(self, payload, status=200):
+            self.payload = payload
+            self.status_code = status
+            self.is_success = 200 <= status < 300
+            self.text = ""
+
+        def json(self):
+            return self.payload
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def post(self, url, json):
+            assert url.endswith("/api/v1/bank-verification")
+            assert json["ifsc_details"] is bool(json["ifsc"])
+            if json["id_number"] == "BAD-ACCOUNT":
+                return FakeResponse({"success": False, "message": "Account not found"}, status=422)
+            return FakeResponse({"data": {"account_exists": True, "full_name": "A YADAV",
+                                           "ifsc_details": {"bank": "C Bank"}},
+                                 "success": True, "message": None})
+
+    monkeypatch.setattr(verification.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(settings, "auth_token_surepass", "test-token")
+    accounts = [
+        {"id_number": "219101000000000", "ifsc": "barb0damoha"},
+        {"id_number": "000123456789", "ifsc": ""},
+        {"id_number": "BAD-ACCOUNT", "ifsc": "CNRB0000000"},
+        {"id_number": "", "ifsc": ""},
+    ]
+    with TestClient(app) as client:
+        with SessionLocal() as db:
+            db.query(ExternalApiEvent).filter(ExternalApiEvent.api_name == "surepass").delete()
+            user, headers = _user_headers(db, role=UserRole.USER, permissions=["others"])
+            db.commit()
+        response = client.post("/api/pallia/bank-verification", headers=headers, json={"accounts": accounts})
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"].startswith("text/csv")
+        rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
+        assert len(rows) == 4
+        assert rows[0]["ifsc"] == "BARB0DAMOHA" and rows[0]["ifsc_details"] == "true"
+        assert rows[0]["data.account_exists"] == "True" and rows[0]["data.full_name"] == "A YADAV"
+        assert rows[1]["ifsc_details"] == "false" and rows[1]["success"] == "true"
+        assert rows[2]["success"] == "false" and "HTTP 422" in rows[2]["error"]
+        assert rows[3]["success"] == "false" and "ID Number is required" in rows[3]["error"]
+        with SessionLocal() as db:
+            events = db.query(ExternalApiEvent).filter(ExternalApiEvent.user_id == user.id).all()
+            assert len(events) == 3
+            assert all(event.model == "bank-verification" for event in events)
+            db.query(ExternalApiEvent).filter(ExternalApiEvent.api_name == "surepass").delete()
+            db.query(User).filter(User.id == user.id).delete()
+            db.commit()
+
+
 def test_user_business_scope_filters_permissions_on_create_and_edit():
     with TestClient(app) as client:
         with SessionLocal() as db:

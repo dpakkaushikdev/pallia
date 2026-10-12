@@ -1,10 +1,12 @@
 const PALLIA_VEHICLE_MASTER_URL = "/api/pallia/vehicle-master";
 const PALLIA_VERIFY_URL = "/api/pallia/vehicle-verification";
+const PALLIA_BANK_VERIFY_URL = "/api/pallia/bank-verification";
 let pMasterVehicles = [];
 let pMasterSavedVehicles = [];
 let pMasterSurepassConfigured = false;
 let pVerifySelected = new Set();
 let pVerifyBusy = false;
+let pBankBusy = false;
 const PALLIA_API_RATE_ROWS = [
   ["rc_verification", "RC Verification"], ["aadhaar_pan_link", "Aadhaar PAN Link"],
   ["bank_verification", "Bank Verification"], ["company_details", "Company Details"],
@@ -16,7 +18,7 @@ let pMasterRatesHasPassword = false;
 const PALLIA_API_DESCRIPTIONS = {
   "rc-v2": "Checks a vehicle registration and returns the details available from the RC Verification API. Each lookup may incur a Surepass charge.",
   "aadhaar-pan-link": "Checks whether an Aadhaar number is linked with a PAN. Its input form and verification flow will be added later.",
-  "bank-verification": "Checks bank account information through a verification service. Its required inputs and response flow will be added later.",
+  "bank-verification": "Checks whether a bank account exists and returns the account name and bank details. IFSC branch details are included automatically when an IFSC is supplied.",
   "company-details": "Looks up available profile information for a company. The required lookup input and response flow will be added later.",
   "corporate-cin": "Looks up corporate registration information using a Corporate Identification Number (CIN). Its input form will be added later.",
   "corporate-gstin": "Looks up company GST registration information using a corporate GSTIN. Its input form will be added later."
@@ -25,14 +27,21 @@ const PALLIA_API_DESCRIPTIONS = {
 function pVerifyApiChange() {
   const api = document.getElementById("pVerifyApi")?.value || "rc-v2";
   const isRc = api === "rc-v2";
+  const isBank = api === "bank-verification";
   const description = document.getElementById("pVerifyApiDescription");
   const rcPanel = document.getElementById("pVerifyRcPanel");
   const rcResults = document.getElementById("pVerifyRcResults");
   const comingSoon = document.getElementById("pVerifyComingSoon");
+  const bankPanel = document.getElementById("pVerifyBankPanel");
   if (description) description.textContent = PALLIA_API_DESCRIPTIONS[api] || "Description not available.";
   if (rcPanel) rcPanel.hidden = !isRc;
   if (rcResults) rcResults.hidden = !isRc;
-  if (comingSoon) comingSoon.hidden = isRc;
+  if (bankPanel) bankPanel.hidden = !isBank;
+  if (comingSoon) comingSoon.hidden = isRc || isBank;
+  const bankSubmit = document.getElementById("pBankManualSubmit");
+  const bankCsvSubmit = document.getElementById("pBankCsvSubmit");
+  if (bankSubmit) bankSubmit.disabled = pBankBusy || !pMasterSurepassConfigured;
+  if (bankCsvSubmit) bankCsvSubmit.disabled = pBankBusy || !pMasterSurepassConfigured;
 }
 
 function pNormalizeVehicle(value) { return String(value || "").replace(/[\s-]+/g, "").toUpperCase(); }
@@ -253,4 +262,68 @@ async function pVerifyRun() {
     status.textContent="Verification finished. The CSV includes one row per selected vehicle; check its success and error columns.";
   } catch(error){document.getElementById("pVerifyResult").textContent=error.message;status.textContent=error.message;}
   finally{pVerifyBusy=false;pVerifyRender();}
+}
+
+function pBankCsvRows(text) {
+  const rows=[]; let row=[], cell="", quoted=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(quoted&&ch==='"'&&text[i+1]==='"'){cell+='"';i++;}
+    else if(ch==='"')quoted=!quoted;
+    else if(ch===","&&!quoted){row.push(cell);cell="";}
+    else if((ch==="\n"||ch==="\r")&&!quoted){if(ch==="\r"&&text[i+1]==="\n")i++;row.push(cell);if(row.some(v=>v.trim()))rows.push(row);row=[];cell="";}
+    else cell+=ch;
+  }
+  row.push(cell);if(row.some(v=>v.trim()))rows.push(row);
+  if(!rows.length)throw new Error("The CSV file is empty.");
+  const headers=rows.shift().map(h=>h.trim().replace(/^\uFEFF/,"").toLowerCase().replace(/[^a-z]/g,""));
+  const idIndex=headers.findIndex(h=>["idnumber","accountnumber","accountno","bankaccountnumber"].includes(h));
+  const ifscIndex=headers.indexOf("ifsc");
+  if(idIndex<0)throw new Error("CSV must include an ID Number column.");
+  const accounts=rows.map(values=>({id_number:String(values[idIndex]||"").trim(),ifsc:ifscIndex<0?"":String(values[ifscIndex]||"").trim()}));
+  if(!accounts.length)throw new Error("No account rows were found in the CSV.");
+  return accounts;
+}
+
+async function pBankSubmit(accounts) {
+  if(pBankBusy) return;
+  if(!pMasterSurepassConfigured)throw new Error("Surepass is not configured on the server.");
+  pBankBusy=true;
+  const status=document.getElementById("pBankCsvStatus");
+  const result=document.getElementById("pBankResult");
+  const preview=document.getElementById("pBankCsvPreview");
+  pVerifyApiChange();
+  status.textContent=`Sending ${accounts.length} bank verification request(s). Each valid account lookup may incur a charge...`;
+  result.textContent="Verification is running...";
+  preview.hidden=true;
+  try{
+    const response=await fetch(PALLIA_BANK_VERIFY_URL,{method:"POST",headers:{"Content-Type":"application/json",...(authToken?{Authorization:`Bearer ${authToken}`}:{})},body:JSON.stringify({accounts})});
+    if(response.status===401){logout();throw new Error("Session expired. Please sign in again.");}
+    if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.detail||`Bank verification failed (${response.status}).`);}
+    const blob=await response.blob(),text=await blob.text(),disposition=response.headers.get("Content-Disposition")||"",match=disposition.match(/filename="?([^";]+)"?/i),link=document.createElement("a");
+    link.href=URL.createObjectURL(blob);link.download=match?match[1]:"pallia_bank_verification.csv";document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(link.href),10000);
+    preview.textContent=text.length>12000?`${text.slice(0,12000)}\n… Preview shortened; the downloaded CSV contains all rows.`:text;
+    preview.hidden=false;
+    result.textContent=`CSV downloaded with ${accounts.length} row(s). Review the success and error columns for per-account results.`;
+    status.textContent="Bank verification finished. IFSC details were requested only for rows with an IFSC value.";
+  }catch(error){result.textContent=error.message;status.textContent=error.message;throw error;}
+  finally{pBankBusy=false;pVerifyApiChange();}
+}
+
+async function pBankVerifyManual(){
+  const idNumber=document.getElementById("pBankIdNumber").value.trim();
+  const ifsc=document.getElementById("pBankIfsc").value.trim();
+  const status=document.getElementById("pBankCsvStatus");
+  if(!idNumber){status.textContent="Enter an ID Number.";document.getElementById("pBankIdNumber").focus();return;}
+  try{await pBankSubmit([{id_number:idNumber,ifsc}]);}
+  catch(error){/* The shared result area already shows the request error. */}
+}
+
+async function pBankVerifyCsv(){
+  const file=document.getElementById("pBankCsvFile").files?.[0];
+  const status=document.getElementById("pBankCsvStatus");
+  if(!file){status.textContent="Choose a CSV file first.";return;}
+  try{await pBankSubmit(pBankCsvRows(await file.text()));}
+  catch(error){status.textContent=error.message;}
+  finally{document.getElementById("pBankCsvFile").value="";}
 }
