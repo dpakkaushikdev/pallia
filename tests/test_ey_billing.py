@@ -312,6 +312,29 @@ def test_client_masters_include_workbook_ey_registrations_and_save_separately(ey
     assert len(ey_client.get(pwc_url).json()["rows"]) == len(CLIENT_MASTER)
 
 
+def test_pwc_entity_workbook_import_replaces_only_pwc_master(ey_client):
+    from io import BytesIO
+    from openpyxl import Workbook
+
+    with SessionLocal() as db:
+        set_edit_password_hash(db, get_password_hash("masters123"))
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Row Labels"])
+    sheet.append(["06AABCP9181H1Z8"])
+    sheet.append(["Building No. 8, 8th Floor, Tower-B, Gurugram, Haryana, 122002"])
+    sheet.append(["PRICEWATERHOUSECOOPERS PRIVATE LIMITED"])
+    stream = BytesIO()
+    workbook.save(stream)
+    url = "/api/eee-taxi/clients/import?client_profile=pwc&edit_password=masters123"
+    response = ey_client.post(url, files={"file": ("PWC-ENTITY+GST.xlsx", stream.getvalue(),
+                                                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert response.status_code == 200, response.text
+    assert [row["gstin"] for row in response.json()["rows"]] == ["06AABCP9181H1Z8"]
+    assert response.json()["rows"][0]["address"].startswith("Building No.")
+    assert len(ey_client.get("/api/eee-taxi/clients?client_profile=ey").json()["rows"]) == 84
+
+
 def test_admin_can_reset_forgotten_masters_edit_password(ey_client):
     with SessionLocal() as db:
         set_edit_password_hash(db, get_password_hash("old-edit-password"))

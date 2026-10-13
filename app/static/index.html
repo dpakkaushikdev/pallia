@@ -1413,6 +1413,8 @@
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn sm" id="cmEdit" onclick="cmStartEdit()">Edit client entities</button>
+            <input type="file" id="cmWorkbook" accept=".xlsx,.xlsm" class="hidden" onchange="cmImportWorkbook()">
+            <button class="btn secondary sm hidden" id="cmImportBtn" onclick="$('#cmWorkbook').click()">Replace PWC master from workbook</button>
             <button class="btn ghost sm hidden" id="cmAdd" onclick="cmAddRow()">+ Add entity</button>
             <button class="btn secondary sm hidden" id="cmCancel" onclick="cmCancelEdit()">Cancel</button>
             <button class="btn sm hidden" id="cmSave" onclick="cmReview()">Review &amp; save</button>
@@ -1421,10 +1423,18 @@
         <div class="meta" style="margin:0 0 12px;">Invoice entity name, GSTIN and address must match the selected company registration. State is read from the first two GSTIN digits. Changes apply to new batches; existing batches keep their saved buyer details.</div>
         <div id="cmMsg" class="hidden" style="margin-bottom:16px;"></div>
         <div class="card">
-          <table class="data-table" id="cmTable">
-            <thead><tr><th style="width:230px;">GSTIN</th><th style="width:320px;">Entity name</th><th>Invoice address</th><th style="width:150px;">State from GSTIN</th><th style="width:56px;"></th></tr></thead>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;align-items:end;">
+            <label class="field" style="margin:0;min-width:240px;">Entity name<input id="cmFilterName" type="search" placeholder="Filter entity name" oninput="cmRender()"></label>
+            <label class="field" style="margin:0;min-width:200px;">GST state<select id="cmFilterState" onchange="cmRender()"><option value="">All states</option></select></label>
+            <span id="cmFilterCount" class="meta"></span>
+          </div>
+          <div style="overflow:auto;">
+          <table class="data-table" id="cmTable" style="width:100%;table-layout:fixed;min-width:1050px;">
+            <colgroup><col style="width:190px"><col style="width:280px"><col><col style="width:165px"><col style="width:56px"></colgroup>
+            <thead><tr><th>GSTIN</th><th>Entity name</th><th>Invoice address</th><th>State from GSTIN</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
+          </div>
           <div id="cmEmpty" class="placeholder hidden">No client entities are saved for this profile.</div>
         </div>
       </section>
@@ -5188,7 +5198,7 @@ function cmRow(r = {}) {
   return `<tr>
     <td><input data-cm="gstin" maxlength="15" value="${rcEsc(gstin)}" aria-label="GSTIN" oninput="cmUpdateState(this)"></td>
     <td><input data-cm="entity_name" maxlength="255" value="${rcEsc(r.entity_name || "")}" aria-label="Entity name"></td>
-    <td><input data-cm="address" maxlength="600" value="${rcEsc(r.address || "")}" aria-label="Invoice address"></td>
+    <td><textarea data-cm="address" maxlength="600" rows="3" aria-label="Invoice address" style="width:100%;min-height:76px;box-sizing:border-box;white-space:pre-wrap;overflow-wrap:anywhere;resize:vertical;">${rcEsc(r.address || "")}</textarea></td>
     <td class="meta" data-cm-state>${rcEsc(state)}</td>
     <td><button class="btn danger xs cm-edit-only" title="Remove entity" onclick="this.closest('tr').remove();cmApplyMode()">×</button></td>
   </tr>`;
@@ -5199,9 +5209,21 @@ function cmUpdateState(input) {
   input.closest("tr").querySelector("[data-cm-state]").textContent = CM_STATES[gstin.slice(0, 2)] || (gstin.length >= 2 ? "Unknown state code" : "");
 }
 function cmFill(rows) {
+  _cm.saved = rows;
+  cmRender();
+  cmApplyMode();
+}
+function cmRender() {
+  const name = (_cm.editing ? "" : $("#cmFilterName").value).trim().toLocaleLowerCase();
+  const state = _cm.editing ? "" : $("#cmFilterState").value;
+  const rows = _cm.saved.filter(r => {
+    const gstinState = CM_STATES[(r.gstin || "").slice(0, 2)] || "Unknown state code";
+    return (!name || (r.entity_name || "").toLocaleLowerCase().includes(name)) && (!state || gstinState === state);
+  });
   $("#cmTable tbody").innerHTML = rows.map(cmRow).join("");
   $("#cmEmpty").classList.toggle("hidden", rows.length > 0);
   $("#cmTable").classList.toggle("hidden", rows.length === 0);
+  $("#cmFilterCount").textContent = `${rows.length} of ${_cm.saved.length} entities`;
   cmApplyMode();
 }
 function cmApplyMode() {
@@ -5212,7 +5234,10 @@ function cmApplyMode() {
   $("#cmAdd").classList.toggle("hidden", !editing);
   $("#cmCancel").classList.toggle("hidden", !editing);
   $("#cmSave").classList.toggle("hidden", !editing);
-  $$("#cmTable input").forEach(input => { input.disabled = !editing; });
+  $("#cmImportBtn").classList.toggle("hidden", !editing || cmProfile() !== "pwc");
+  $("#cmFilterName").disabled = editing;
+  $("#cmFilterState").disabled = editing;
+  $$("#cmTable input, #cmTable textarea").forEach(input => { input.disabled = !editing; });
   $$("#cmTable .cm-edit-only").forEach(button => button.classList.toggle("hidden", !editing));
 }
 function cmMetaText(data) {
@@ -5222,6 +5247,9 @@ function cmMetaText(data) {
 }
 async function cmLoad() {
   _cm = { saved: [], editing: false, password: null };
+  if ($("#cmFilterState").options.length === 1) {
+    for (const name of [...new Set(Object.values(CM_STATES))].sort()) $("#cmFilterState").add(new Option(name, name));
+  }
   $("#cmMsg").className = "hidden";
   try {
     const data = await api(`/api/eee-taxi/clients?client_profile=${encodeURIComponent(cmProfile())}`);
@@ -5236,7 +5264,7 @@ async function cmLoad() {
 }
 function cmStartEdit() {
   cmShowMsg("");
-  mstUnlock(password => { _cm.password = password; _cm.editing = true; cmApplyMode(); });
+  mstUnlock(password => { $("#cmFilterName").value = ""; $("#cmFilterState").value = ""; _cm.password = password; _cm.editing = true; cmRender(); });
 }
 function cmCancelEdit() {
   _cm.editing = false;
@@ -5248,6 +5276,21 @@ function cmAddRow() {
   $("#cmTable tbody").insertAdjacentHTML("afterbegin", cmRow());
   cmApplyMode();
   $("#cmTable tbody tr:first-child [data-cm=gstin]").focus();
+}
+async function cmImportWorkbook() {
+  const input = $("#cmWorkbook"), file = input.files?.[0];
+  if (!file) return;
+  try {
+    if (cmProfile() !== "pwc" || !_cm.editing || !_cm.password) throw new Error("Unlock PWC master editing before importing.");
+    if (!confirm(`Replace all ${_cm.saved.length} PWC registrations with the data in “${file.name}”? EY data will not change.`)) return;
+    const form = new FormData(); form.append("file", file);
+    const data = await api(`/api/eee-taxi/clients/import?client_profile=pwc&edit_password=${encodeURIComponent(_cm.password)}`, {method:"POST", body:form});
+    _cm.saved = data.rows; _cm.editing = false; _cm.password = null;
+    $("#cmFilterName").value = ""; $("#cmFilterState").value = "";
+    cmRender(); $("#cmMeta").textContent = cmMetaText(data);
+    cmShowMsg(`Replaced the PWC entity master with ${data.rows.length} registrations from the workbook.`, true);
+  } catch (error) { cmShowMsg("Workbook import failed: " + error.message); }
+  finally { input.value = ""; }
 }
 function cmCollect() {
   const rows = [], seen = new Set();
