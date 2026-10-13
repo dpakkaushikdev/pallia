@@ -257,7 +257,7 @@ def generate_eee_taxi_invoice_pdf(
     if ctx.is_rental:
         ekc = "0" if ctx.extra_km_charge_val == 0 else f"{ctx.extra_km_charge_val:.2f}"
         night_line = (
-            f"<br/>Night Charge ({ctx.night_window_label}= {ctx.night_charge_val:.2f})"
+            f"<br/>Night Charges = {_rate(ctx.night_charge_val)}"
             if ctx.night_charge_val > 0 else ""
         )
         breakdown = (

@@ -75,7 +75,7 @@ def _description(row: EeeTaxiRow, rates: RateCard) -> tuple[str, ...]:
             f"Extra Kms ({fr.extra_km}*{_n(rates.extra_km_rate)}=  {_n(fr.extra_km_charge)})",
         ]
         if fr.night_charge:
-            lines.append(f"Night Charges ({rates.night_label}=  {_n(fr.night_charge)})")
+            lines.append(f"Night Charges = {_n(fr.night_charge)}")
         lines.append(_PWC_RENTAL_INCLUDED_LINE)
     return tuple(lines)
 
