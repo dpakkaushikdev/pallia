@@ -113,8 +113,11 @@ def test_surepass_verification_logs_each_vehicle_by_user_and_returns_csv(monkeyp
         user_summary = next(row for row in dashboard.json()["by_user"] if row["email"] == user.email)
         assert user_summary["total_calls"] == 2
         assert user_summary["successful"] == 2
+        assert user_summary["estimated_charged"] == 8.0
         assert sum(day["count"] for day in dashboard.json()["by_day"]) == 2
-        assert any(row["model"] == "rc-v2" and row["total_calls"] == 2 for row in dashboard.json()["by_api"])
+        assert any(row["model"] == "rc-v2" and row["total_calls"] == 2 and row["estimated_charged"] == 8.0 for row in dashboard.json()["by_api"])
+        wallet = client.get("/api/pallia/wallet", headers=headers)
+        assert wallet.status_code == 200 and wallet.json()["balance"] == 56212.51
         with SessionLocal() as db:
             db.query(ExternalApiEvent).filter(ExternalApiEvent.api_name == "surepass").delete()
             db.query(PalliaVehicleMaster).delete()
@@ -188,10 +191,12 @@ def test_surepass_batch_keeps_successes_and_failure_rows_in_csv(monkeypatch):
         api_failed = next(row for row in exception_csv if row["vehicle_number"] == "NL01AA1006")
         assert "RuntimeError" in runtime_failure["error"]
         assert api_failed["success"] == "false" and "Registration not found" in api_failed["error"]
+        assert client.get("/api/pallia/wallet", headers=headers).json()["balance"] == 56196.51
         with SessionLocal() as db:
             events = db.query(ExternalApiEvent).filter(ExternalApiEvent.user_id == user.id).all()
             assert len(events) == 6
             assert sum(event.success for event in events) == 3
+            assert all(float(event.charge_amount) == 4.0 for event in events)
             db.query(ExternalApiEvent).filter(ExternalApiEvent.api_name == "surepass").delete()
             db.query(PalliaVehicleMaster).delete()
             db.query(User).filter(User.id == user.id).delete()
@@ -326,6 +331,7 @@ def test_surepass_company_and_gstin_endpoints_return_per_input_csv_and_log_calls
         assert len(gstin_rows) == 1 and gstin_rows[0]["success"] == "true"
         assert gstin_rows[0]["data.business_name"] == "MINDA"
         assert gstin_rows[0]["filing_status"] == "true" and gstin_rows[0]["hsn_info"] == "false"
+        assert client.get("/api/pallia/wallet", headers=headers).json()["balance"] == 56220.51
         with SessionLocal() as db:
             events = db.query(ExternalApiEvent).filter(ExternalApiEvent.user_id == user.id).all()
             assert len(events) == 3  # blank identifier is retained in CSV without a paid API call

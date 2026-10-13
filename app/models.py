@@ -16,9 +16,10 @@ from __future__ import annotations
 
 import enum
 import uuid
+from decimal import Decimal
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -154,6 +155,7 @@ class ExternalApiEvent(Base):
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    charge_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     lr_id: Mapped[str | None] = mapped_column(ForeignKey("lrs.id", ondelete="SET NULL"), nullable=True, index=True)
     invoice_id: Mapped[str | None] = mapped_column(ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
@@ -421,6 +423,7 @@ class PalliaVehicleMaster(Base):
     api_rates: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     api_rates_updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     api_rates_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    wallet_balance: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("56220.51"))
     updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

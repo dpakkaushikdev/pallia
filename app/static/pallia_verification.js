@@ -40,7 +40,12 @@ function pVerifyApiChange() {
   const bankPanel = document.getElementById("pVerifyBankPanel");
   const companyPanel = document.getElementById("pVerifyCompanyPanel");
   const gstinPanel = document.getElementById("pVerifyGstinPanel");
-  if (description) description.textContent = PALLIA_API_DESCRIPTIONS[api] || "Description not available.";
+  if (description) {
+    const rateKey = ({"rc-v2":"rc_verification", "bank-verification":"bank_verification", "company-details":"company_details", "corporate-gstin":"corporate_gstin"})[api];
+    const rate = rateKey ? pMasterApiRates[rateKey] : null;
+    const billing = rateKey ? (rate == null ? "Per-hit rate is not set in Pallia Master, so this API will not reduce the app wallet." : `App wallet deduction: ₹${Number(rate).toFixed(2)} per hit.`) : "";
+    description.textContent = [PALLIA_API_DESCRIPTIONS[api] || "Description not available.", billing].filter(Boolean).join(" ");
+  }
   if (rcPanel) rcPanel.hidden = !isRc;
   if (rcResults) rcResults.hidden = !isRc;
   if (bankPanel) bankPanel.hidden = !isBank;
@@ -234,7 +239,18 @@ async function pVerifyLoad() {
     pVerifySelected=new Set([...pVerifySelected].filter(no=>pMasterVehicles.some(v=>v.registration_no===no)));
     status.textContent=pMasterSurepassConfigured?`${pMasterVehicles.length} Pallia vehicles available. Each vehicle lookup may incur a charge.`:"Surepass token is not configured on the server. Add AUTH_TOKEN_SUREPASS to the server environment.";
     pVerifyRender();
+    await pWalletLoad();
   } catch(error){status.textContent=`Could not load Pallia Vehicle Master: ${error.message}`;}
+}
+async function pWalletLoad() {
+  const balance=document.getElementById("pWalletBalance"),status=document.getElementById("pWalletStatus");
+  try {
+    const data=await api("/api/pallia/wallet");
+    pMasterApiRates=data.rates||{};
+    if(balance)balance.textContent=new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",minimumFractionDigits:2,maximumFractionDigits:2}).format(data.balance);
+    if(status)status.textContent=`App estimate based on the ₹56,220.51 starting balance and recorded hits. Estimated deductions to date: ₹${Number(data.estimated_charged_total||0).toFixed(2)}. This balance does not sync with Surepass.`;
+    pVerifyApiChange();
+  } catch(error) {if(status)status.textContent=`Could not load app wallet balance: ${error.message}`;}
 }
 function pVerifyRender() {
   const root=document.getElementById("pVerifyVehicles");if(!root)return;
@@ -273,6 +289,7 @@ async function pVerifyRun() {
     link.href=URL.createObjectURL(blob);link.download=match?match[1]:"pallia_vehicle_verification.csv";document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(link.href),10000);
     document.getElementById("pVerifyResult").textContent=`CSV downloaded for ${pVerifySelected.size} vehicle(s).`;
     status.textContent="Verification finished. The CSV includes one row per selected vehicle; check its success and error columns.";
+    await pWalletLoad();
   } catch(error){document.getElementById("pVerifyResult").textContent=error.message;status.textContent=error.message;}
   finally{pVerifyBusy=false;pVerifyRender();}
 }
@@ -319,6 +336,7 @@ async function pBankSubmit(accounts) {
     preview.hidden=false;
     result.textContent=`CSV downloaded with ${accounts.length} row(s). Review the success and error columns for per-account results.`;
     status.textContent="Bank verification finished. IFSC details were requested only for rows with an IFSC value.";
+    await pWalletLoad();
   }catch(error){result.textContent=error.message;status.textContent=error.message;throw error;}
   finally{pBankBusy=false;pVerifyApiChange();}
 }
@@ -390,6 +408,7 @@ async function pStructuredSubmit(apiName, requests) {
     preview.textContent=text.length>16000?`${text.slice(0,16000)}\n… Preview shortened; the downloaded CSV contains all rows.`:text;preview.hidden=false;
     result.textContent=`CSV downloaded with ${requests.length} row(s). Review the success and error columns for per-request results.`;
     status.textContent=`${isGstin?"Corporate GSTIN":"Company Details"} verification finished. Each input has a CSV row, including any lookup failure.`;
+    await pWalletLoad();
   }catch(error){result.textContent=error.message;status.textContent=error.message;throw error;}
   finally{pStructuredBusy=false;pVerifyApiChange();}
 }

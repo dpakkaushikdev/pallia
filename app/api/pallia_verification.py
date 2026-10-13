@@ -8,12 +8,14 @@ import json
 import re
 import time
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -30,6 +32,7 @@ SUREPASS_RC_URL = "https://kyc-api.surepass.app/api/v1/rc/rc-v2"
 SUREPASS_BANK_URL = "https://kyc-api.surepass.app/api/v1/bank-verification"
 SUREPASS_COMPANY_URL = "https://kyc-api.surepass.app/api/v1/corporate/company-details"
 SUREPASS_GSTIN_URL = "https://kyc-api.surepass.app/api/v1/corporate/gstin"
+PALLIA_WALLET_STARTING_BALANCE = Decimal("56220.51")
 PALLIA_API_RATE_DEFAULTS = {
     "rc_verification": 4.0,
     "aadhaar_pan_link": None,
@@ -209,6 +212,69 @@ def _api_rates_response(db: Session) -> dict:
     }
 
 
+@router.get("/wallet")
+def read_pallia_wallet(_: User = Depends(pallia_user), db: Session = Depends(get_db)):
+    stored = db.get(PalliaVehicleMaster, 1)
+    if stored is None:
+        stored = PalliaVehicleMaster(id=1, vehicles=[], wallet_balance=PALLIA_WALLET_STARTING_BALANCE)
+        db.add(stored)
+        db.commit()
+        db.refresh(stored)
+    rates = {**PALLIA_API_RATE_DEFAULTS, **(stored.api_rates or {})}
+    charged = db.scalar(select(func.sum(ExternalApiEvent.charge_amount)).where(ExternalApiEvent.api_name == "surepass")) or 0
+    return {"balance": float(stored.wallet_balance), "rates": rates,
+            "updated_at": stored.updated_at.isoformat() + "Z" if stored.updated_at else None,
+            "estimated_charged_total": float(charged)}
+
+
+SUREPASS_RATE_KEYS = {
+    "rc-v2": "rc_verification", "bank-verification": "bank_verification",
+    "company-details": "company_details", "corporate-gstin": "corporate_gstin",
+}
+
+
+def _record_surepass_events(db: Session, rows: list[dict], model: str) -> None:
+    """Persist call events and atomically subtract configured per-hit rates."""
+    events = [row.pop("_api_event", None) for row in rows]
+    events = [event for event in events if event]
+    if not events:
+        return
+    rate_key = SUREPASS_RATE_KEYS.get(model)
+    stored = db.get(PalliaVehicleMaster, 1)
+    configured = {**PALLIA_API_RATE_DEFAULTS, **(stored.api_rates or {})} if stored else dict(PALLIA_API_RATE_DEFAULTS)
+    raw_rate = configured.get(rate_key) if rate_key else None
+    rate = Decimal(str(raw_rate)).quantize(Decimal("0.01")) if raw_rate is not None else None
+    total_charge = Decimal("0.00")
+    # Each event corresponds to a request that was actually sent; missing/blank
+    # identifiers never create events and therefore never reduce the estimate.
+    charged_rows = [row for row in rows if row.get("id_number") or row.get("vehicle_number")]
+    if rate is not None:
+        for row in charged_rows:
+            row["charge_amount"] = f"{rate:.2f}"
+            total_charge += rate
+    else:
+        for row in charged_rows:
+            row["charge_amount"] = "rate not set"
+    for event in events:
+        event["charge_amount"] = rate
+        db.add(ExternalApiEvent(**event))
+    try:
+        if total_charge:
+            if stored is None:
+                stored = PalliaVehicleMaster(id=1, vehicles=[], wallet_balance=PALLIA_WALLET_STARTING_BALANCE)
+                db.add(stored)
+                db.flush()
+            db.execute(update(PalliaVehicleMaster).where(PalliaVehicleMaster.id == 1).values(
+                wallet_balance=func.coalesce(PalliaVehicleMaster.wallet_balance, PALLIA_WALLET_STARTING_BALANCE) - total_charge
+            ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        for row in rows:
+            if row.get("_api_event") or row.get("charge_amount"):
+                row["audit_log_error"] = "Verification completed, but wallet usage could not be saved."
+
+
 @router.get("/api-rates")
 def read_pallia_api_rates(_: User = Depends(pallia_user), db: Session = Depends(get_db)):
     return _api_rates_response(db)
@@ -318,14 +384,7 @@ async def verify_vehicles(body: VerifyVehiclesIn, user: User = Depends(verificat
     async with httpx.AsyncClient(headers=headers, timeout=45.0) as client:
         rows = await asyncio.gather(*(verify_one(client, vehicle) for vehicle in body.vehicles))
 
-    for row in rows:
-        db.add(ExternalApiEvent(**row.pop("_api_event")))
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        for row in rows:
-            row["audit_log_error"] = "Verification completed, but API usage logging failed."
+    _record_surepass_events(db, rows, "rc-v2")
 
     columns = ["vehicle_number", "http_status", "success", "message", "error"]
     columns.extend(sorted({key for row in rows for key in row} - set(columns)))
@@ -416,16 +475,7 @@ async def verify_bank_accounts(body: VerifyBankAccountsIn, user: User = Depends(
     async with httpx.AsyncClient(headers=headers, timeout=45.0) as client:
         rows = await asyncio.gather(*(verify_one(client, account) for account in body.accounts))
 
-    for row in rows:
-        event = row.pop("_api_event", None)
-        if event:
-            db.add(ExternalApiEvent(**event))
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        for row in rows:
-            row["audit_log_error"] = "Verification completed, but API usage logging failed."
+    _record_surepass_events(db, rows, "bank-verification")
 
     columns = ["id_number", "ifsc", "ifsc_details", "http_status", "success", "message", "error"]
     columns.extend(sorted({key for row in rows for key in row} - set(columns)))
@@ -525,17 +575,7 @@ async def _surepass_structured_csv(items, *, endpoint: str, model: str, filename
 
     async with httpx.AsyncClient(headers=headers, timeout=45.0) as client:
         rows = await asyncio.gather(*(verify_one(client, item) for item in items))
-    for row in rows:
-        event = row.pop("_api_event", None)
-        if event:
-            db.add(ExternalApiEvent(**event))
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        for row in rows:
-            if row["id_number"]:
-                row["audit_log_error"] = "Verification completed, but API usage logging failed."
+    _record_surepass_events(db, rows, model)
 
     columns = ["id_number"]
     if include_gstin_options:

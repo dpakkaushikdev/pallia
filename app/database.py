@@ -86,7 +86,7 @@ def _widen_varchar_columns(conn, inspector) -> None:
 
 def _migrate_existing_db() -> None:
     """Add columns introduced after initial deploy without dropping existing data."""
-    from sqlalchemy import JSON, Date, DateTime, LargeBinary, inspect, text
+    from sqlalchemy import JSON, Date, DateTime, LargeBinary, Numeric, inspect, text
 
     with engine.connect() as conn:
         inspector = inspect(conn)
@@ -101,6 +101,8 @@ def _migrate_existing_db() -> None:
             existing = {c["name"] for c in inspector.get_columns("external_api_events")}
             if "user_id" not in existing:
                 conn.execute(text("ALTER TABLE external_api_events ADD COLUMN user_id VARCHAR(32) REFERENCES users(id) ON DELETE SET NULL"))
+            if "charge_amount" not in existing:
+                conn.execute(text("ALTER TABLE external_api_events ADD COLUMN charge_amount NUMERIC(12, 2)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_external_api_events_user_id ON external_api_events (user_id)"))
             conn.commit()
         if "pallia_vehicle_master" in inspector.get_table_names():
@@ -112,6 +114,8 @@ def _migrate_existing_db() -> None:
             if "api_rates_updated_at" not in existing:
                 datetime_type = DateTime().compile(dialect=engine.dialect)
                 conn.execute(text(f"ALTER TABLE pallia_vehicle_master ADD COLUMN api_rates_updated_at {datetime_type}"))
+            if "wallet_balance" not in existing:
+                conn.execute(text("ALTER TABLE pallia_vehicle_master ADD COLUMN wallet_balance NUMERIC(12, 2) NOT NULL DEFAULT 56220.51"))
             conn.commit()
         if "eee_taxi_rate_card" in inspector.get_table_names():
             existing = {c["name"] for c in inspector.get_columns("eee_taxi_rate_card")}

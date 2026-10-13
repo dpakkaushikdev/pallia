@@ -155,6 +155,7 @@ def external_api_summary(
             func.count().label("total"),
             func.sum(func.cast(ExternalApiEvent.success, Integer)).label("ok"),
             func.avg(ExternalApiEvent.duration_ms).label("avg_ms"),
+            func.sum(ExternalApiEvent.charge_amount).label("charged"),
         )
         .where(ExternalApiEvent.created_at >= from_dt)
         .where(ExternalApiEvent.created_at <= to_dt)
@@ -170,6 +171,7 @@ def external_api_summary(
             successful=int(r.ok or 0),
             failed=r.total - int(r.ok or 0),
             avg_duration_ms=int(r.avg_ms) if r.avg_ms else None,
+            estimated_charged=float(r.charged or 0),
         )
         for r in api_rows
     ]
@@ -209,6 +211,7 @@ def external_api_summary(
             "success": r.success,
             "duration_ms": r.duration_ms,
             "error_message": r.error_message,
+            "charge_amount": float(r.charge_amount) if r.charge_amount is not None else None,
             "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S"),
         }
         for r in recent_rows
@@ -220,6 +223,7 @@ def external_api_summary(
             User.full_name,
             func.count(ExternalApiEvent.id).label("total"),
             func.sum(func.cast(ExternalApiEvent.success, Integer)).label("ok"),
+            func.sum(ExternalApiEvent.charge_amount).label("charged"),
         )
         .join(User, User.id == ExternalApiEvent.user_id)
         .where(ExternalApiEvent.api_name == "surepass")
@@ -230,7 +234,8 @@ def external_api_summary(
     ).all()
     by_user = [
         {"email": r.email, "full_name": r.full_name, "total_calls": r.total,
-         "successful": int(r.ok or 0), "failed": r.total - int(r.ok or 0)}
+         "successful": int(r.ok or 0), "failed": r.total - int(r.ok or 0),
+         "estimated_charged": float(r.charged or 0)}
         for r in user_rows
     ]
 

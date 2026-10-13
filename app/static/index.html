@@ -926,8 +926,8 @@
       <div class="page-hd"><div><h1>Pallia — Vehicle Verification</h1><div class="meta">Verify selected Pallia fleet registrations with Surepass and download one CSV row per vehicle, including any lookup failures.</div></div></div>
       <div class="card" style="padding:20px;margin-bottom:16px;">
         <div class="card-title">Surepass wallet balance</div>
-        <div style="font-size:30px;font-weight:700;margin:10px 0;">&#8377;56,237.03</div>
-        <div class="meta">Manual balance snapshot; it is not synced with Surepass.</div>
+        <div id="pWalletBalance" style="font-size:30px;font-weight:700;margin:10px 0;">Loading balance...</div>
+        <div id="pWalletStatus" class="meta">Starting from the latest balance you provided; future checks are deducted using configured per-hit rates. This app does not sync with Surepass.</div>
       </div>
       <div class="card" style="margin-bottom:16px;">
         <label class="field" for="pVerifyApi" style="max-width:420px;">Verification API
@@ -1510,7 +1510,7 @@
         <div class="card" style="padding:18px 20px;">
           <div class="card-title">By API / Model</div>
           <table class="data-table" id="apiByApiTable">
-            <thead><tr><th>API</th><th>Model</th><th>Total</th><th>OK</th><th>Failed</th><th>Avg ms</th></tr></thead>
+          <thead><tr><th>API</th><th>Model</th><th>Total</th><th>OK</th><th>Failed</th><th>Avg ms</th><th>Estimated charged (&#8377;)</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -1519,15 +1519,15 @@
       <div class="card" style="padding:18px 20px;">
         <div class="card-title">Recent API Calls</div>
         <table class="data-table" id="apiRecentTable">
-          <thead><tr><th>Time</th><th>API</th><th>Model</th><th>Result</th><th>Duration</th><th>Error</th></tr></thead>
+          <thead><tr><th>Time</th><th>API</th><th>Model</th><th>Result</th><th>Duration</th><th>Estimated charge (&#8377;)</th><th>Error</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
 
       <div class="card" style="padding:18px 20px;margin-top:16px;">
         <div class="card-title">Surepass calls by user</div>
-        <p class="meta">One call is counted for each vehicle submitted to verification, including failed lookups.</p>
-        <table class="data-table" id="apiUserCallsTable"><thead><tr><th>User</th><th>Total calls</th><th>Successful</th><th>Failed</th></tr></thead><tbody></tbody></table>
+        <p class="meta">A call is counted for each submitted request, including failed lookups. Estimated spend uses the configured rate at the time of each hit.</p>
+        <table class="data-table" id="apiUserCallsTable"><thead><tr><th>User</th><th>Total calls</th><th>Successful</th><th>Failed</th><th>Estimated charged (&#8377;)</th></tr></thead><tbody></tbody></table>
       </div>
     </div>
 
@@ -1659,7 +1659,7 @@
   </div>
 </div>
 <script src="/static/eee_documents.js"></script>
-<script src="/static/pallia_verification.js?v=20261013-1"></script>
+<script src="/static/pallia_verification.js?v=20261013-2"></script>
 
 <script>
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -2136,7 +2136,8 @@ async function refreshApiDashboard() {
       <td style="color:var(--ok)">${a.successful}</td>
       <td style="color:${a.failed > 0 ? 'var(--err)' : 'var(--muted)'}">${a.failed}</td>
       <td class="meta">${a.avg_duration_ms != null ? a.avg_duration_ms + " ms" : "–"}</td>
-    </tr>`).join("") || `<tr><td colspan="6" class="meta" style="padding:12px;">No AI API calls recorded yet. They appear here after you upload and process an LR image.</td></tr>`;
+      <td>₹${Number(a.estimated_charged || 0).toFixed(2)}</td>
+    </tr>`).join("") || `<tr><td colspan="7" class="meta" style="padding:12px;">No API calls recorded in this date range.</td></tr>`;
 
     // Recent calls
     $("#apiRecentTable tbody").innerHTML = data.recent.map(r => `<tr>
@@ -2145,21 +2146,23 @@ async function refreshApiDashboard() {
       <td class="meta">${r.model || "–"}</td>
       <td><span class="badge ${r.success ? 'confirmed' : 'failed'}">${r.success ? "OK" : "FAIL"}</span></td>
       <td class="meta">${r.duration_ms != null ? r.duration_ms + " ms" : "–"}</td>
+      <td>${r.charge_amount != null ? `₹${Number(r.charge_amount).toFixed(2)}` : "Rate not set"}</td>
       <td class="meta" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.error_message || ''}">${r.error_message || "–"}</td>
-    </tr>`).join("") || `<tr><td colspan="6" class="placeholder">No recent calls.</td></tr>`;
+    </tr>`).join("") || `<tr><td colspan="7" class="placeholder">No recent calls.</td></tr>`;
 
     $("#apiUserCallsTable tbody").innerHTML = (data.by_user || []).map(user => `<tr>
       <td><strong>${user.full_name || user.email}</strong><div class="meta">${user.email}</div></td>
       <td>${user.total_calls}</td><td style="color:var(--ok)">${user.successful}</td>
       <td style="color:${user.failed ? 'var(--err)' : 'var(--muted)'}">${user.failed}</td>
-    </tr>`).join("") || `<tr><td colspan="4" class="placeholder">No Surepass calls recorded in this date range.</td></tr>`;
+      <td>₹${Number(user.estimated_charged || 0).toFixed(2)}</td>
+    </tr>`).join("") || `<tr><td colspan="5" class="placeholder">No Surepass calls recorded in this date range.</td></tr>`;
   } catch(e) {
     console.error("api dashboard", e);
     const message = "Could not load API usage. Check the selected date range and try again.";
     $("#apiStatGrid").innerHTML = `<div class="card meta" role="alert">${message}</div>`;
-    $("#apiByApiTable tbody").innerHTML = `<tr><td colspan="6" class="placeholder">${message}</td></tr>`;
-    $("#apiRecentTable tbody").innerHTML = `<tr><td colspan="6" class="placeholder">${message}</td></tr>`;
-    $("#apiUserCallsTable tbody").innerHTML = `<tr><td colspan="4" class="placeholder">${message}</td></tr>`;
+    $("#apiByApiTable tbody").innerHTML = `<tr><td colspan="7" class="placeholder">${message}</td></tr>`;
+    $("#apiRecentTable tbody").innerHTML = `<tr><td colspan="7" class="placeholder">${message}</td></tr>`;
+    $("#apiUserCallsTable tbody").innerHTML = `<tr><td colspan="5" class="placeholder">${message}</td></tr>`;
   }
 }
 

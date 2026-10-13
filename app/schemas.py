@@ -164,6 +164,7 @@ class ExternalApiStatOut(BaseModel):
     successful: int
     failed: int
     avg_duration_ms: int | None
+    estimated_charged: float = 0
 
 
 class ExternalApiDayStatOut(BaseModel):
