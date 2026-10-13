@@ -1,12 +1,15 @@
 const PALLIA_VEHICLE_MASTER_URL = "/api/pallia/vehicle-master";
 const PALLIA_VERIFY_URL = "/api/pallia/vehicle-verification";
 const PALLIA_BANK_VERIFY_URL = "/api/pallia/bank-verification";
+const PALLIA_COMPANY_VERIFY_URL = "/api/pallia/company-details";
+const PALLIA_GSTIN_VERIFY_URL = "/api/pallia/corporate-gstin";
 let pMasterVehicles = [];
 let pMasterSavedVehicles = [];
 let pMasterSurepassConfigured = false;
 let pVerifySelected = new Set();
 let pVerifyBusy = false;
 let pBankBusy = false;
+let pStructuredBusy = false;
 const PALLIA_API_RATE_ROWS = [
   ["rc_verification", "RC Verification"], ["aadhaar_pan_link", "Aadhaar PAN Link"],
   ["bank_verification", "Bank Verification"], ["company_details", "Company Details"],
@@ -19,29 +22,39 @@ const PALLIA_API_DESCRIPTIONS = {
   "rc-v2": "Checks a vehicle registration and returns the details available from the RC Verification API. Each lookup may incur a Surepass charge.",
   "aadhaar-pan-link": "Checks whether an Aadhaar number is linked with a PAN. Its input form and verification flow will be added later.",
   "bank-verification": "Checks whether a bank account exists and returns the account name and bank details. IFSC branch details are included automatically when an IFSC is supplied.",
-  "company-details": "Looks up available profile information for a company. The required lookup input and response flow will be added later.",
+  "company-details": "Looks up a company by CIN and returns available registration, financial, management, legal-status, director, and registered-charge details. Each lookup may incur a Surepass charge.",
   "corporate-cin": "Looks up corporate registration information using a Corporate Identification Number (CIN). Its input form will be added later.",
-  "corporate-gstin": "Looks up company GST registration information using a corporate GSTIN. Its input form will be added later."
+  "corporate-gstin": "Verifies a GSTIN and returns registration information, with optional filing status, HSN, filing frequency, and split address details. Each lookup may incur a Surepass charge."
 };
 
 function pVerifyApiChange() {
   const api = document.getElementById("pVerifyApi")?.value || "rc-v2";
   const isRc = api === "rc-v2";
   const isBank = api === "bank-verification";
+  const isCompany = api === "company-details";
+  const isGstin = api === "corporate-gstin";
   const description = document.getElementById("pVerifyApiDescription");
   const rcPanel = document.getElementById("pVerifyRcPanel");
   const rcResults = document.getElementById("pVerifyRcResults");
   const comingSoon = document.getElementById("pVerifyComingSoon");
   const bankPanel = document.getElementById("pVerifyBankPanel");
+  const companyPanel = document.getElementById("pVerifyCompanyPanel");
+  const gstinPanel = document.getElementById("pVerifyGstinPanel");
   if (description) description.textContent = PALLIA_API_DESCRIPTIONS[api] || "Description not available.";
   if (rcPanel) rcPanel.hidden = !isRc;
   if (rcResults) rcResults.hidden = !isRc;
   if (bankPanel) bankPanel.hidden = !isBank;
-  if (comingSoon) comingSoon.hidden = isRc || isBank;
+  if (companyPanel) companyPanel.hidden = !isCompany;
+  if (gstinPanel) gstinPanel.hidden = !isGstin;
+  if (comingSoon) comingSoon.hidden = isRc || isBank || isCompany || isGstin;
   const bankSubmit = document.getElementById("pBankManualSubmit");
   const bankCsvSubmit = document.getElementById("pBankCsvSubmit");
   if (bankSubmit) bankSubmit.disabled = pBankBusy || !pMasterSurepassConfigured;
   if (bankCsvSubmit) bankCsvSubmit.disabled = pBankBusy || !pMasterSurepassConfigured;
+  for (const id of ["pCompanyManualSubmit", "pCompanyCsvSubmit", "pGstinManualSubmit", "pGstinCsvSubmit"]) {
+    const button = document.getElementById(id);
+    if (button) button.disabled = pStructuredBusy || !pMasterSurepassConfigured;
+  }
 }
 
 function pNormalizeVehicle(value) { return String(value || "").replace(/[\s-]+/g, "").toUpperCase(); }
@@ -327,3 +340,78 @@ async function pBankVerifyCsv(){
   catch(error){status.textContent=error.message;}
   finally{document.getElementById("pBankCsvFile").value="";}
 }
+
+function pStructuredCsvIds(text, label) {
+  const rows=[];let row=[],cell="",quoted=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(quoted&&ch==='"'&&text[i+1]==='"'){cell+='"';i++;}
+    else if(ch==='"')quoted=!quoted;
+    else if(ch===","&&!quoted){row.push(cell);cell="";}
+    else if((ch==="\n"||ch==="\r")&&!quoted){if(ch==="\r"&&text[i+1]==="\n")i++;row.push(cell);if(row.some(v=>v.trim()))rows.push(row);row=[];cell="";}
+    else cell+=ch;
+  }
+  row.push(cell);if(row.some(v=>v.trim()))rows.push(row);
+  if(!rows.length)throw new Error("The CSV file is empty.");
+  const headers=rows.shift().map(h=>h.trim().replace(/^\uFEFF/,"").toLowerCase().replace(/[^a-z]/g,""));
+  const idIndex=headers.findIndex(h=>["idnumber","cin","gstin","corporateidentificationnumber"].includes(h));
+  if(idIndex<0)throw new Error(`CSV must include an ID Number or ${label} column.`);
+  const ids=rows.map(values=>String(values[idIndex]||"").trim().toUpperCase());
+  if(!ids.length)throw new Error("No data rows were found in the CSV.");
+  return ids.map(id_number=>({id_number}));
+}
+
+function pGstinOptions() {
+  return {
+    financial_year: document.getElementById("pGstinFinancialYear")?.value || "2024",
+    filing_status: !!document.getElementById("pGstinFilingStatus")?.checked,
+    hsn_info: !!document.getElementById("pGstinHsnInfo")?.checked,
+    filing_frequency: !!document.getElementById("pGstinFilingFrequency")?.checked,
+    split_address: !!document.getElementById("pGstinSplitAddress")?.checked
+  };
+}
+
+async function pStructuredSubmit(apiName, requests) {
+  if(pStructuredBusy)return;
+  if(!pMasterSurepassConfigured)throw new Error("Surepass is not configured on the server.");
+  const isGstin=apiName==="corporate-gstin",prefix=isGstin?"pGstin":"pCompany";
+  const url=isGstin?PALLIA_GSTIN_VERIFY_URL:PALLIA_COMPANY_VERIFY_URL;
+  const status=document.getElementById(`${prefix}CsvStatus`),result=document.getElementById(`${prefix}Result`),preview=document.getElementById(`${prefix}CsvPreview`);
+  pStructuredBusy=true;pVerifyApiChange();
+  status.textContent=`Sending ${requests.length} ${isGstin?"GSTIN":"company"} verification request(s). Each non-empty lookup may incur a charge...`;
+  result.textContent="Verification is running...";preview.hidden=true;
+  const options=isGstin?pGstinOptions():{};
+  try{
+    const response=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json",...(authToken?{Authorization:`Bearer ${authToken}`}:{})},body:JSON.stringify({requests:requests.map(item=>({...item,...options}))})});
+    if(response.status===401){logout();throw new Error("Session expired. Please sign in again.");}
+    if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.detail||`Verification failed (${response.status}).`);}
+    const blob=await response.blob(),text=await blob.text(),disposition=response.headers.get("Content-Disposition")||"",match=disposition.match(/filename="?([^";]+)"?/i),link=document.createElement("a");
+    link.href=URL.createObjectURL(blob);link.download=match?match[1]:`${isGstin?"pallia_corporate_gstin":"pallia_company_details"}.csv`;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(link.href),10000);
+    preview.textContent=text.length>16000?`${text.slice(0,16000)}\n… Preview shortened; the downloaded CSV contains all rows.`:text;preview.hidden=false;
+    result.textContent=`CSV downloaded with ${requests.length} row(s). Review the success and error columns for per-request results.`;
+    status.textContent=`${isGstin?"Corporate GSTIN":"Company Details"} verification finished. Each input has a CSV row, including any lookup failure.`;
+  }catch(error){result.textContent=error.message;status.textContent=error.message;throw error;}
+  finally{pStructuredBusy=false;pVerifyApiChange();}
+}
+
+async function pStructuredVerifyManual(apiName) {
+  const isGstin=apiName==="corporate-gstin",prefix=isGstin?"pGstin":"pCompany";
+  const status=document.getElementById(`${prefix}CsvStatus`);
+  const idNumber=document.getElementById(`${prefix}IdNumber`).value.trim();
+  if(!idNumber){status.textContent=`Enter an ${isGstin?"ID Number (GSTIN)":"ID Number (CIN)"}.`;document.getElementById(`${prefix}IdNumber`).focus();return;}
+  try{await pStructuredSubmit(apiName,[{id_number:idNumber}]);}catch(error){status.textContent=error.message;}
+}
+
+async function pStructuredVerifyCsv(apiName) {
+  const isGstin=apiName==="corporate-gstin",prefix=isGstin?"pGstin":"pCompany",label=isGstin?"GSTIN":"CIN";
+  const fileInput=document.getElementById(`${prefix}CsvFile`),status=document.getElementById(`${prefix}CsvStatus`),file=fileInput.files?.[0];
+  if(!file){status.textContent="Choose a CSV file first.";return;}
+  try{await pStructuredSubmit(apiName,pStructuredCsvIds(await file.text(),label));}
+  catch(error){status.textContent=error.message;}
+  finally{fileInput.value="";}
+}
+
+(()=>{
+  const select=document.getElementById("pGstinFinancialYear");
+  if(select&&!select.options.length){for(let year=2026;year>=2017;year--){const option=document.createElement("option");option.value=String(year);option.textContent=String(year);if(year===2024)option.selected=true;select.appendChild(option);}}
+})();

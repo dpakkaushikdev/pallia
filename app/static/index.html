@@ -964,6 +964,38 @@
         </div>
         <div class="card"><div class="card-title">Bank verification results</div><div id="pBankResult" class="meta" role="status">No bank verification has been run in this session.</div><pre id="pBankCsvPreview" hidden style="max-height:360px;overflow:auto;white-space:pre-wrap;margin-top:12px;"></pre></div>
       </div>
+      <div id="pVerifyCompanyPanel" hidden>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-title">Company Details</div>
+          <p class="meta">Look up company profile, registration, financial, management, legal-status, director, and registered-charge information using its CIN.</p>
+          <label class="field" style="max-width:520px;margin-top:14px;">ID Number (CIN)<input type="text" id="pCompanyIdNumber" maxlength="128" placeholder="e.g. U65999MH1995PLC123456" autocomplete="off"></label>
+          <div style="display:flex;justify-content:flex-end;margin-top:12px;"><button class="btn" id="pCompanyManualSubmit" onclick="pStructuredVerifyManual('company-details')">Verify company</button></div>
+        </div>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-title">Verify companies from CSV</div><p class="meta">CSV must contain an <strong>ID Number</strong> or <strong>CIN</strong> column. Each non-empty row makes a separate Surepass request.</p>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;"><input type="file" id="pCompanyCsvFile" accept=".csv,text/csv" aria-label="Choose company details CSV"><button class="btn" id="pCompanyCsvSubmit" onclick="pStructuredVerifyCsv('company-details')">Verify CSV</button></div>
+          <div id="pCompanyCsvStatus" class="meta" role="status" style="margin-top:10px;"></div>
+        </div>
+        <div class="card"><div class="card-title">Company Details results</div><div id="pCompanyResult" class="meta" role="status">No company lookup has been run in this session.</div><pre id="pCompanyCsvPreview" hidden style="max-height:360px;overflow:auto;white-space:pre-wrap;margin-top:12px;"></pre></div>
+      </div>
+      <div id="pVerifyGstinPanel" hidden>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-title">Corporate GSTIN</div><p class="meta">Verify a GST registration. Select which additional filing and address information to request.</p>
+          <label class="field" style="max-width:520px;margin-top:14px;">ID Number (GSTIN)<input type="text" id="pGstinIdNumber" maxlength="32" placeholder="e.g. 08AKWPJ1234H1ZN" autocomplete="off"></label>
+          <label class="field" style="max-width:520px;margin-top:12px;">Financial year<select id="pGstinFinancialYear"></select></label>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:12px;">
+            <label><input type="checkbox" id="pGstinFilingStatus"> Filing Status</label><label><input type="checkbox" id="pGstinHsnInfo"> HSN Info</label>
+            <label><input type="checkbox" id="pGstinFilingFrequency"> Filing Frequency</label><label><input type="checkbox" id="pGstinSplitAddress"> Split Address</label>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:12px;"><button class="btn" id="pGstinManualSubmit" onclick="pStructuredVerifyManual('corporate-gstin')">Verify GSTIN</button></div>
+        </div>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-title">Verify GSTINs from CSV</div><p class="meta">CSV must contain an <strong>ID Number</strong> or <strong>GSTIN</strong> column. The financial year and selected options above apply to every row.</p>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;"><input type="file" id="pGstinCsvFile" accept=".csv,text/csv" aria-label="Choose corporate GSTIN CSV"><button class="btn" id="pGstinCsvSubmit" onclick="pStructuredVerifyCsv('corporate-gstin')">Verify CSV</button></div>
+          <div id="pGstinCsvStatus" class="meta" role="status" style="margin-top:10px;"></div>
+        </div>
+        <div class="card"><div class="card-title">Corporate GSTIN results</div><div id="pGstinResult" class="meta" role="status">No GSTIN lookup has been run in this session.</div><pre id="pGstinCsvPreview" hidden style="max-height:360px;overflow:auto;white-space:pre-wrap;margin-top:12px;"></pre></div>
+      </div>
       <div class="card" id="pVerifyRcPanel">
         <div class="sec-hd"><div><div class="card-title">Select vehicles to verify</div><div id="pVerifyStatus" class="meta" role="status">Loading Pallia Vehicle Master...</div></div><button class="btn" id="pVerifyRun" onclick="pVerifyRun()" disabled>Verify selected</button></div>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:12px 0;">
@@ -1627,7 +1659,7 @@
   </div>
 </div>
 <script src="/static/eee_documents.js"></script>
-<script src="/static/pallia_verification.js?v=20261012-5"></script>
+<script src="/static/pallia_verification.js?v=20261013-1"></script>
 
 <script>
 // ── Helpers ──────────────────────────────────────────────────────────────────

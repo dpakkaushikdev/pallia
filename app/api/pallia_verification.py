@@ -28,6 +28,8 @@ pallia_user = require_any_permission(["billing", "tracking", "accounts", "others
 verification_user = require_permission("others")
 SUREPASS_RC_URL = "https://kyc-api.surepass.app/api/v1/rc/rc-v2"
 SUREPASS_BANK_URL = "https://kyc-api.surepass.app/api/v1/bank-verification"
+SUREPASS_COMPANY_URL = "https://kyc-api.surepass.app/api/v1/corporate/company-details"
+SUREPASS_GSTIN_URL = "https://kyc-api.surepass.app/api/v1/corporate/gstin"
 PALLIA_API_RATE_DEFAULTS = {
     "rc_verification": 4.0,
     "aadhaar_pan_link": None,
@@ -107,6 +109,37 @@ class BankAccountIn(BaseModel):
 
 class VerifyBankAccountsIn(BaseModel):
     accounts: list[BankAccountIn] = Field(min_length=1, max_length=3000)
+
+
+class CompanyDetailsItem(BaseModel):
+    id_number: str = Field(default="", max_length=128)
+
+    @field_validator("id_number")
+    @classmethod
+    def trim_id(cls, value):
+        return value.strip().upper()
+
+
+class VerifyCompanyDetailsIn(BaseModel):
+    requests: list[CompanyDetailsItem] = Field(min_length=1, max_length=3000)
+
+
+class CorporateGstinItem(BaseModel):
+    id_number: str = Field(default="", max_length=32)
+    financial_year: str = Field(default="2024", pattern=r"^\d{4}$")
+    filing_status: bool = False
+    hsn_info: bool = False
+    filing_frequency: bool = False
+    split_address: bool = False
+
+    @field_validator("id_number")
+    @classmethod
+    def trim_gstin(cls, value):
+        return value.strip().upper()
+
+
+class VerifyCorporateGstinIn(BaseModel):
+    requests: list[CorporateGstinItem] = Field(min_length=1, max_length=3000)
 
 
 class PalliaApiRatesIn(BaseModel):
@@ -404,3 +437,130 @@ async def verify_bank_accounts(body: VerifyBankAccountsIn, user: User = Depends(
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return Response(content=content.encode("utf-8"), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="pallia_bank_verification_{stamp}.csv"'})
+
+
+async def _surepass_structured_csv(items, *, endpoint: str, model: str, filename: str,
+                                   user: User, db: Session, include_gstin_options: bool = False):
+    """Run one Surepass request per input while retaining a CSV row for every input."""
+    if not settings.auth_token_surepass.strip():
+        raise HTTPException(503, "Surepass is not configured. Set AUTH_TOKEN_SUREPASS in the server environment.")
+
+    headers = {"Authorization": f"Bearer {settings.auth_token_surepass.strip()}"}
+    semaphore = asyncio.Semaphore(8)
+    option_names = ("financial_year", "filing_status", "hsn_info", "filing_frequency", "split_address")
+
+    async def verify_one(client, item):
+        values = item.model_dump()
+        id_number = values["id_number"].strip().upper()
+        row = {key: values[key] for key in option_names if include_gstin_options}
+        row.update({"id_number": id_number, "http_status": "", "success": "false", "message": "", "error": ""})
+        if include_gstin_options:
+            for key in option_names[1:]:
+                row[key] = str(bool(values[key])).lower()
+        if not id_number:
+            row["error"] = "ID Number is required; no Surepass request was made."
+            return row
+
+        request_payload = {"id_number": id_number}
+        if include_gstin_options:
+            request_payload.update({key: values[key] for key in option_names})
+        started = time.monotonic()
+        event = {"api_name": "surepass", "model": model, "success": False,
+                 "error_message": None, "duration_ms": None, "user_id": user.id}
+        try:
+            async with semaphore:
+                response = await client.post(endpoint, json=request_payload)
+            row["http_status"] = response.status_code
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+                row["response_text"] = response.text[:4000]
+                row["error"] = "Surepass returned a response that was not valid JSON."
+
+            if isinstance(payload, dict):
+                flattened = _flatten(payload)
+                row.update(flattened)
+                row["id_number"] = id_number
+                if include_gstin_options:
+                    row["financial_year"] = values["financial_year"]
+                    for key in option_names[1:]:
+                        row[key] = str(bool(values[key])).lower()
+                row["message"] = str(payload.get("message") or "")
+                if not response.is_success:
+                    row["error"] = f"Surepass returned HTTP {response.status_code}."
+                elif payload.get("success") is False:
+                    row["error"] = row["message"] or "Surepass reported that this verification failed."
+            elif payload is not None:
+                row["response"] = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+                if not response.is_success:
+                    row["error"] = f"Surepass returned HTTP {response.status_code}."
+            elif not response.is_success:
+                row["error"] = f"Surepass returned HTTP {response.status_code}."
+            elif not row["error"]:
+                row["error"] = "Surepass returned an empty JSON response."
+
+            if not response.is_success and not row["message"]:
+                row["message"] = f"HTTP {response.status_code} response from Surepass."
+            succeeded = response.is_success and payload is not None and not (
+                isinstance(payload, dict) and payload.get("success") is False
+            ) and not row["error"]
+            row["success"] = "true" if succeeded else "false"
+            event["success"] = succeeded
+            if not succeeded:
+                event["error_message"] = (row["error"] or row["message"] or "Surepass verification failed.")[:500]
+        except httpx.TimeoutException:
+            row["error"] = "Surepass request timed out."
+            event["error_message"] = row["error"]
+        except httpx.RequestError:
+            row["error"] = "Could not connect to Surepass."
+            event["error_message"] = row["error"]
+        except Exception as exc:
+            row["error"] = f"Unexpected verification error ({type(exc).__name__})."
+            event["error_message"] = row["error"]
+        finally:
+            event["duration_ms"] = int((time.monotonic() - started) * 1000)
+            row["_api_event"] = event
+        return row
+
+    async with httpx.AsyncClient(headers=headers, timeout=45.0) as client:
+        rows = await asyncio.gather(*(verify_one(client, item) for item in items))
+    for row in rows:
+        event = row.pop("_api_event", None)
+        if event:
+            db.add(ExternalApiEvent(**event))
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        for row in rows:
+            if row["id_number"]:
+                row["audit_log_error"] = "Verification completed, but API usage logging failed."
+
+    columns = ["id_number"]
+    if include_gstin_options:
+        columns.extend(option_names)
+    columns.extend(["http_status", "success", "message", "error"])
+    columns.extend(sorted({key for row in rows for key in row} - set(columns)))
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return Response(content=("\ufeff" + output.getvalue()).encode("utf-8"),
+                    media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}_{stamp}.csv"'})
+
+
+@router.post("/company-details")
+async def verify_company_details(body: VerifyCompanyDetailsIn, user: User = Depends(verification_user), db: Session = Depends(get_db)):
+    return await _surepass_structured_csv(body.requests, endpoint=SUREPASS_COMPANY_URL,
+                                          model="company-details", filename="pallia_company_details",
+                                          user=user, db=db)
+
+
+@router.post("/corporate-gstin")
+async def verify_corporate_gstin(body: VerifyCorporateGstinIn, user: User = Depends(verification_user), db: Session = Depends(get_db)):
+    return await _surepass_structured_csv(body.requests, endpoint=SUREPASS_GSTIN_URL,
+                                          model="corporate-gstin", filename="pallia_corporate_gstin",
+                                          user=user, db=db, include_gstin_options=True)

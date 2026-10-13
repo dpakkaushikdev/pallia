@@ -264,6 +264,76 @@ def test_surepass_bank_verification_derives_ifsc_details_and_keeps_csv_rows(monk
             db.commit()
 
 
+def test_surepass_company_and_gstin_endpoints_return_per_input_csv_and_log_calls(monkeypatch):
+    import csv
+    import io
+    import app.api.pallia_verification as verification
+
+    class FakeResponse:
+        def __init__(self, payload, status=200):
+            self.payload = payload
+            self.status_code = status
+            self.is_success = 200 <= status < 300
+            self.text = ""
+
+        def json(self):
+            return self.payload
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def post(self, url, json):
+            if url.endswith("/corporate/company-details"):
+                assert set(json) == {"id_number"}
+                if json["id_number"] == "BAD-CIN":
+                    return FakeResponse({"success": False, "message": "Company not found"}, status=422)
+                return FakeResponse({"success": True, "data": {"company": {"status": "Active"}}})
+            assert url.endswith("/corporate/gstin")
+            assert json == {"id_number": "08AKWPJ1234H1ZN", "financial_year": "2024",
+                            "filing_status": True, "hsn_info": False,
+                            "filing_frequency": True, "split_address": False}
+            return FakeResponse({"success": True, "data": {"gstin": json["id_number"], "business_name": "MINDA"}})
+
+    monkeypatch.setattr(verification.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(settings, "auth_token_surepass", "test-token")
+    with TestClient(app) as client:
+        with SessionLocal() as db:
+            user, headers = _user_headers(db, role=UserRole.USER, permissions=["others"])
+            db.commit()
+        company = client.post("/api/pallia/company-details", headers=headers, json={
+            "requests": [{"id_number": "U65999MH1995PLC123456"}, {"id_number": "BAD-CIN"}, {"id_number": ""}]
+        })
+        assert company.status_code == 200, company.text
+        company_rows = list(csv.DictReader(io.StringIO(company.content.decode("utf-8-sig"))))
+        assert len(company_rows) == 3
+        assert company_rows[0]["data.company.status"] == "Active" and company_rows[0]["success"] == "true"
+        assert company_rows[1]["success"] == "false" and "HTTP 422" in company_rows[1]["error"]
+        assert "ID Number is required" in company_rows[2]["error"]
+
+        gstin = client.post("/api/pallia/corporate-gstin", headers=headers, json={
+            "requests": [{"id_number": "08AKWPJ1234H1ZN", "financial_year": "2024",
+                          "filing_status": True, "filing_frequency": True}]
+        })
+        assert gstin.status_code == 200, gstin.text
+        gstin_rows = list(csv.DictReader(io.StringIO(gstin.content.decode("utf-8-sig"))))
+        assert len(gstin_rows) == 1 and gstin_rows[0]["success"] == "true"
+        assert gstin_rows[0]["data.business_name"] == "MINDA"
+        assert gstin_rows[0]["filing_status"] == "true" and gstin_rows[0]["hsn_info"] == "false"
+        with SessionLocal() as db:
+            events = db.query(ExternalApiEvent).filter(ExternalApiEvent.user_id == user.id).all()
+            assert len(events) == 3  # blank identifier is retained in CSV without a paid API call
+            assert {event.model for event in events} == {"company-details", "corporate-gstin"}
+            assert sum(event.success for event in events) == 2
+            db.query(ExternalApiEvent).filter(ExternalApiEvent.user_id == user.id).delete(synchronize_session=False)
+            db.query(User).filter(User.id == user.id).delete()
+            db.commit()
 def test_external_api_dashboard_daily_date_expression_compiles_for_postgres():
     from sqlalchemy import func, select
     from sqlalchemy.dialects import postgresql
