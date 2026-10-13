@@ -5283,8 +5283,8 @@ async function cmImportWorkbook() {
   try {
     if (cmProfile() !== "pwc" || !_cm.editing || !_cm.password) throw new Error("Unlock PWC master editing before importing.");
     if (!confirm(`Replace all ${_cm.saved.length} PWC registrations with the data in “${file.name}”? EY data will not change.`)) return;
-    const form = new FormData(); form.append("file", file);
-    const data = await api(`/api/eee-taxi/clients/import?client_profile=pwc&edit_password=${encodeURIComponent(_cm.password)}`, {method:"POST", body:form});
+    const form = new FormData(); form.append("file", file); form.append("edit_password", _cm.password);
+    const data = await api("/api/eee-taxi/clients/import?client_profile=pwc", {method:"POST", body:form});
     _cm.saved = data.rows; _cm.editing = false; _cm.password = null;
     $("#cmFilterName").value = ""; $("#cmFilterState").value = "";
     cmRender(); $("#cmMeta").textContent = cmMetaText(data);

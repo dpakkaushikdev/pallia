@@ -4,7 +4,7 @@ from __future__ import annotations
 from io import BytesIO
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from loguru import logger
 from pydantic import Field
 from sqlalchemy.orm import Session
@@ -62,7 +62,7 @@ def update_clients(
 @router.post("/import")
 async def import_pwc_clients(
     file: UploadFile = File(...),
-    edit_password: str = Query(..., min_length=1, max_length=128),
+    edit_password: str = Form(..., min_length=1, max_length=128),
     client_profile: Literal["pwc"] = Query(...),
     user: User = Depends(_eee_user),
     db: Session = Depends(get_db),

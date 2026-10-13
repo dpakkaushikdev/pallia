@@ -326,9 +326,9 @@ def test_pwc_entity_workbook_import_replaces_only_pwc_master(ey_client):
     sheet.append(["PRICEWATERHOUSECOOPERS PRIVATE LIMITED"])
     stream = BytesIO()
     workbook.save(stream)
-    url = "/api/eee-taxi/clients/import?client_profile=pwc&edit_password=masters123"
-    response = ey_client.post(url, files={"file": ("PWC-ENTITY+GST.xlsx", stream.getvalue(),
-                                                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    url = "/api/eee-taxi/clients/import?client_profile=pwc"
+    response = ey_client.post(url, data={"edit_password": "masters123"}, files={"file": ("PWC-ENTITY+GST.xlsx", stream.getvalue(),
+                                                                                          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     assert response.status_code == 200, response.text
     assert [row["gstin"] for row in response.json()["rows"]] == ["06AABCP9181H1Z8"]
     assert response.json()["rows"][0]["address"].startswith("Building No.")
