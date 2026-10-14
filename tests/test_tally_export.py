@@ -238,7 +238,7 @@ def test_ey_address_selection_is_specific_to_buyer_registration():
     settings = ey_tally_ledgers(EyRateCard())
     for gstin, address in [("06AACCP8967E1Z5", None),
                            ("06AAEFE1763C1ZW", "HARYANA"),
-                           ("06ACHFS9180N1ZD", "HARYANA")]:
+                           ("06ACHFS9180N1ZD", None)]:
         [v] = _parse(render_tally_xml([_voucher(party=lookup_ey_client(gstin))], settings)).iter("VOUCHER")
         assert v.findtext("PARTYADDRESSTYPE") == address
         assert v.findtext("PARTYGSTIN") == gstin

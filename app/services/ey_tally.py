@@ -32,6 +32,7 @@ def ey_tally_ledgers(rates):
         party_address_names=(("Haryana", "HARYANA"), ("Maharashtra", "MAHARASHTRA"),
                              ("Uttar Pradesh", "Uttar Pradesh")),
         include_buyer_address_type=False,
-        # This ledger uses its Primary address, unlike Ernst & Young LLP.
-        party_address_by_gstin=(("06AACCP8967E1Z5", ""),),
+        # These ledgers use their Primary address, unlike Ernst & Young LLP.
+        # Batliboi's manually exported invoice 1119 omits PARTYADDRESSTYPE.
+        party_address_by_gstin=(("06AACCP8967E1Z5", ""), ("06ACHFS9180N1ZD", "")),
     )
