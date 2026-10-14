@@ -149,12 +149,34 @@ def test_state_specific_party_address_and_nil_cess_details_are_exported():
     raw = render_tally_xml([maharashtra]).decode("utf-16")
     assert '<GSTRATEVALUATIONTYPE>&#4; Not Applicable</GSTRATEVALUATIONTYPE>' in raw
     assert len(sales_line.findall("GSTOVERRIDDEN")) == 1
+    assert sales_line.findtext("GSTRATEINFERAPPLICABILITY") == "As per Masters/Company"
+    assert sales_line.findtext("GSTHSNINFERAPPLICABILITY") == "As per Masters/Company"
 
 
 def test_haryana_address_type_tracks_buyer_gstin_state():
     haryana = _voucher(party=lookup_client("06AAEFP1428R1ZW"))
     [v] = _parse(render_tally_xml([haryana])).iter("VOUCHER")
-    assert v.findtext("PARTYADDRESSTYPE") == "Haryana"
-    assert v.findtext("BUYERADDRESSTYPE") == "Haryana"
+    assert v.find("PARTYADDRESSTYPE") is None
+    assert v.find("BUYERADDRESSTYPE") is None
     assert v.findtext("BILLTOPLACE") == "HARYANA"
     assert v.findtext("SHIPTOPLACE") == "HARYANA"
+
+
+def test_dispatch_fields_match_working_v3_import_for_every_voucher():
+    parties = ["06AARFG0505D1ZT", "27AARFG0505D1ZP", "09AARFG0505D1ZN"]
+    vouchers = [_voucher(party=lookup_client(gstin)) for gstin in parties]
+    for v in _parse(render_tally_xml(vouchers)).iter("VOUCHER"):
+        assert v.findtext("DISPATCHFROMNAME") == "EEE-TAXI MOBILITY SOLUTIONS PRIVATE LIMITED"
+        assert v.findtext("DISPATCHFROMSTATENAME") == "Delhi"
+        assert v.findtext("DISPATCHFROMPINCODE") == "110042"
+        assert v.findtext("DISPATCHFROMPLACE") == "Delhi"
+        assert v.findtext("ISDISPATCHSAMEASCONSIGNOR") == "No"
+        assert [e.text for e in v.findall("DISPATCHFROMADDRESS.LIST/DISPATCHFROMADDRESS")] == list(DEFAULT_LEDGERS.dispatch_address)
+
+
+def test_other_company_settings_do_not_inherit_delhi_dispatch():
+    from app.services.ey_rates import EyRateCard
+    from app.services.ey_tally import ey_tally_ledgers
+    [v] = _parse(render_tally_xml([_voucher()], ey_tally_ledgers(EyRateCard()))).iter("VOUCHER")
+    assert v.find("DISPATCHFROMNAME") is None
+    assert v.find("DISPATCHFROMADDRESS.LIST") is None

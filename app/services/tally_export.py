@@ -48,9 +48,26 @@ class TallyLedgers:
     cost_category: str = "Primary Cost Category"
     payment_terms: str = "30 Days"
     gst_rate: Decimal = Decimal("18")
+    dispatch_name: str = ""
+    dispatch_address: tuple[str, ...] = ()
+    dispatch_state: str = ""
+    dispatch_pincode: str = ""
+    dispatch_place: str = ""
 
 
-DEFAULT_LEDGERS = TallyLedgers()
+# Dispatch values match the user-verified v3 import and manual Delhi exports.
+DEFAULT_LEDGERS = TallyLedgers(
+    dispatch_name="EEE-TAXI MOBILITY SOLUTIONS PRIVATE LIMITED",
+    dispatch_address=(
+        "Flat No 2486, Sector D, Pocket 2,Church Mall Road",
+        "Sheetla Balloon Decoration Shop",
+        "Vasant Kunj, South Delhi - 110070",
+        "UDYAM REGISTRATION NUMBER :- UDYAM-HR-05-0019335",
+    ),
+    dispatch_state="Delhi",
+    dispatch_pincode="110042",
+    dispatch_place="Delhi",
+)
 
 
 @dataclass(frozen=True)
@@ -209,7 +226,9 @@ def _income_entry(v: TallyVoucher, ledger: str, hsn: str, amount: Decimal,
         + _tag("HSNSOURCETYPE", "Ledger")
         + _tag("HSNLEDGERSOURCE", ledger)
         + _tag("GSTOVRDNTYPEOFSUPPLY", "Services")
+        + _tag("GSTRATEINFERAPPLICABILITY", "As per Masters/Company")
         + _tag("GSTHSNNAME", hsn)
+        + _tag("GSTHSNINFERAPPLICABILITY", "As per Masters/Company")
         + _tag("ISDEEMEDPOSITIVE", "No")
         + _tag("ISPARTYLEDGER", "No")
         + _tag("GSTOVERRIDDEN", "No")
@@ -245,6 +264,18 @@ def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
     buyer_address = "".join(_tag("BASICBUYERADDRESS", line) for line in _address_lines(p.address))
     sales_ledger = ledgers.sales_local if v.is_local else ledgers.sales_interstate
     sales_hsn = ledgers.hsn_local if v.is_local else ledgers.hsn_interstate
+    dispatch = ""
+    if ledgers.dispatch_name:
+        dispatch = (
+            '<DISPATCHFROMADDRESS.LIST TYPE="String">'
+            + "".join(_tag("DISPATCHFROMADDRESS", line) for line in ledgers.dispatch_address)
+            + "</DISPATCHFROMADDRESS.LIST>"
+            + _tag("DISPATCHFROMNAME", ledgers.dispatch_name)
+            + _tag("DISPATCHFROMSTATENAME", ledgers.dispatch_state)
+            + _tag("DISPATCHFROMPINCODE", ledgers.dispatch_pincode)
+            + _tag("DISPATCHFROMPLACE", ledgers.dispatch_place)
+            + _tag("ISDISPATCHSAMEASCONSIGNOR", "No")
+        )
 
     entries = [_party_entry(v), _income_entry(v, sales_ledger, sales_hsn, v.fare, ledgers, v.description)]
     if v.toll:
@@ -265,10 +296,13 @@ def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
         + _tag("REFERENCEDATE", _d(v.invoice_date))
         + _tag("EFFECTIVEDATE", _d(v.invoice_date))
         + _tag("BILLOFLADINGDATE", _d(v.trip_date))
+        + dispatch
         + _tag("GSTREGISTRATIONTYPE", "Regular")
         + _tag("VATDEALERTYPE", "Regular")
-        + _tag("BUYERADDRESSTYPE", state)
-        + _tag("PARTYADDRESSTYPE", state)
+        # Haryana is the primary address in the supplied Tally samples;
+        # named address selectors are used only for the other registrations.
+        + (_tag("BUYERADDRESSTYPE", state) if state != "Haryana" else "")
+        + (_tag("PARTYADDRESSTYPE", state) if state != "Haryana" else "")
         + _tag("BILLTOPLACE", state.upper())
         + _tag("SHIPTOPLACE", state.upper())
         + _tag("STATENAME", state)
