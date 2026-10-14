@@ -6,6 +6,8 @@ each invoice so the next export skips it by default; re-exporting is allowed
 Tally, and Tally's "Prevent duplicates" stops a second copy of a number.
 """
 from __future__ import annotations
+import io
+import zipfile
 
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional, Literal
@@ -21,7 +23,7 @@ from app.database import get_db
 from app.models import EeeTaxiBatch, EeeTaxiInvoice, User
 from app.services.auth import require_admin, require_permission
 from app.services.eee_taxi_tally import ExportItem, delete_invoice, find_export_items, mark_exported, row_total
-from app.services.eee_taxi_pipeline import batch_rates, batch_rows
+from app.services.eee_taxi_pipeline import batch_rates, batch_rows, signed_pdf_bytes, archive_pdf_filename
 from app.services.tally_export import render_tally_xml
 from app.services.ey_rates import get_ey_rates
 from app.services.ey_tally import ey_tally_ledgers
@@ -97,7 +99,7 @@ def invoice_history(
         query = query.filter(EeeTaxiBatch.created_at < _local_day_utc(created_to + timedelta(days=1)))
     count = query.count()
     records = (query.order_by(EeeTaxiBatch.created_at.desc(), EeeTaxiInvoice.invoice_no.desc())
-               .offset((page - 1) * 50).limit(50).all())
+               .offset((page - 1) * 40).limit(40).all())
 
     rows_by_batch: dict[str, dict] = {}
     failed_batches: set[str] = set()
@@ -135,8 +137,30 @@ def invoice_history(
             "error_message": invoice.error_message or "",
             "exported_at": invoice.tally_exported_at.isoformat() if invoice.tally_exported_at else None,
         })
-    return {"invoices": items, "count": count, "page": page, "page_size": 50,
-            "pages": (count + 49) // 50}
+    return {"invoices": items, "count": count, "page": page, "page_size": 40,
+            "pages": max(1, (count + 39) // 40)}
+
+
+@router.post("/history/download")
+def download_history(body: ExportIn, _: User = Depends(_eee_user), db: Session = Depends(get_db)):
+    ids = list(dict.fromkeys(body.invoice_ids))
+    invoices = db.query(EeeTaxiInvoice).filter(EeeTaxiInvoice.id.in_(ids)).all()
+    if len(invoices) != len(ids):
+        raise HTTPException(404, "Some selected invoices no longer exist. Refresh the page.")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as archive:
+        names = set()
+        for inv in invoices:
+            data = signed_pdf_bytes(inv) if str(getattr(inv.status, "value", inv.status)) == "done" else None
+            if not data:
+                raise HTTPException(409, "Select only completed invoices with saved signed PDFs.")
+            name = archive_pdf_filename(inv, "Invoice")
+            if name in names:
+                name = f"{name[:-4]}_{inv.id}.pdf"
+            names.add(name)
+            archive.writestr(name, data)
+    return Response(buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": 'attachment; filename="selected_invoices.zip"'})
 
 
 @router.post("/export")

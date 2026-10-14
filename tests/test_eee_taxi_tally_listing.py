@@ -76,3 +76,38 @@ def test_batch_without_csv_explains_why(db):
     old = {i.invoice_id: i for i in find_export_items(db)}["old"]
     assert "did not keep the uploaded CSV" in old.problem
     assert old.total is None and old.car_no == ""
+
+
+def test_history_pages_hold_forty_records_without_overlap(db):
+    from app.api.eee_taxi_tally import invoice_history
+    batch = db.get(EeeTaxiInvoice, "new-a").batch_id
+    for n in range(41):
+        db.add(EeeTaxiInvoice(id=f"page-{n}", batch_id=batch, row_index=100+n,
+                             invoice_no=f"DL/HO/26-27/{100+n}"))
+    db.commit()
+    def page(number):
+        return invoice_history(client_profile=None, created_from=None, created_to=None,
+                               page=number, _=None, db=db)
+    first, second = page(1), page(2)
+    assert first["page_size"] == 40 and first["count"] == 44 and first["pages"] == 2
+    assert len(first["invoices"]) == 40 and len(second["invoices"]) == 4
+    assert not {i["id"] for i in first["invoices"]} & {i["id"] for i in second["invoices"]}
+
+
+def test_selected_history_download_contains_only_selected_signed_pdfs(db):
+    import io
+    import zipfile
+    from fastapi import HTTPException
+    from app.api.eee_taxi_tally import download_history, ExportIn
+    for inv_id in ["new-a", "new-b"]:
+        inv = db.get(EeeTaxiInvoice, inv_id)
+        inv.signed_pdf_data = b"signed-" + inv_id.encode()
+        inv.route_no = "DS-" + inv_id
+    db.commit()
+    response = download_history(ExportIn(invoice_ids=["new-a", "new-a"]), _=None, db=db)
+    with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
+        assert archive.namelist() == ["DS-new-a_Invoice.pdf"]
+        assert archive.read(archive.namelist()[0]) == b"signed-new-a"
+    with pytest.raises(HTTPException) as error:
+        download_history(ExportIn(invoice_ids=["old"]), _=None, db=db)
+    assert error.value.status_code == 409
