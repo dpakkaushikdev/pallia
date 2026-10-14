@@ -35,8 +35,8 @@ def generate_ey_pdf(row, invoice_no, invoice_date, description, output_path: Pat
         return Paragraph(escape(str(value)).replace("\n", "<br/>"), styles[style])
     def d(value):
         return value.strftime("%d-%b-%y")
-    def table(rows, widths, grid=True):
-        result = Table(rows, colWidths=widths)
+    def table(rows, widths, grid=True, row_heights=None):
+        result = Table(rows, colWidths=widths, rowHeights=row_heights)
         commands = [("VALIGN", (0, 0), (-1, -1), "TOP"),
                     ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
                     ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]
@@ -63,7 +63,16 @@ def generate_ey_pdf(row, invoice_no, invoice_date, description, output_path: Pat
         [p(f"Bill of Lading/LR-RR No.\ndt. {d(row.trip_date)}"),
          p(f"Motor Vehicle No.\n{row.car_no}{f'({vehicle_model})' if vehicle_model else ''}")],
     ]
-    header = table([[table([[company], [buyer_text]], [left-8]), table(metadata, [(right-8)/2]*2)]], [left, right])
+    metadata_table = table(metadata, [(right-8)/2]*2)
+    _, metadata_height = metadata_table.wrap(right-8, A4[1])
+    seller_table = table([[company]], [left-8])
+    _, seller_height = seller_table.wrap(left-8, A4[1])
+    buyer_table = table([[buyer_text]], [left-8])
+    _, buyer_height = buyer_table.wrap(left-8, A4[1])
+    # Extend Bill to down to the metadata's bottom edge: only two left boxes.
+    party_table = table([[company], [buyer_text]], [left-8],
+                        row_heights=[seller_height, max(buyer_height, metadata_height-seller_height)])
+    header = table([[party_table, metadata_table]], [left, right])
     label = "CAR RENTAL - LOCAL (5%)" if local else "CAR RENTAL - INTERSTATE (5%)"
     detail = "\n".join([label, f"Guest Name :- {row.guest_name}", f"From - {row.pickup_location}",
                          f"To - {row.drop_location}", *description])
