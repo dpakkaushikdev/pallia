@@ -174,9 +174,18 @@ def test_dispatch_fields_match_working_v3_import_for_every_voucher():
         assert [e.text for e in v.findall("DISPATCHFROMADDRESS.LIST/DISPATCHFROMADDRESS")] == list(DEFAULT_LEDGERS.dispatch_address)
 
 
-def test_other_company_settings_do_not_inherit_delhi_dispatch():
+def test_ey_company_uses_its_own_haryana_dispatch():
     from app.services.ey_rates import EyRateCard
     from app.services.ey_tally import ey_tally_ledgers
     [v] = _parse(render_tally_xml([_voucher()], ey_tally_ledgers(EyRateCard()))).iter("VOUCHER")
-    assert v.find("DISPATCHFROMNAME") is None
-    assert v.find("DISPATCHFROMADDRESS.LIST") is None
+    assert v.findtext("DISPATCHFROMSTATENAME") == "Haryana"
+    assert v.findtext("DISPATCHFROMPINCODE") == "122098"
+    assert v.findtext("DISPATCHFROMPLACE") == "Gurugram"
+    assert "Good Earth Business Bay" in v.findtext("DISPATCHFROMADDRESS.LIST/DISPATCHFROMADDRESS")
+
+
+def test_split_kolkata_pincode_is_normalized_in_buyer_and_consignee():
+    from app.services.ey_clients import lookup_ey_client
+    [v] = _parse(render_tally_xml([_voucher(party=lookup_ey_client("19AAEFE1763C1ZP"))])).iter("VOUCHER")
+    assert v.findtext("PARTYPINCODE") == "700016"
+    assert v.findtext("CONSIGNEEPINCODE") == "700016"

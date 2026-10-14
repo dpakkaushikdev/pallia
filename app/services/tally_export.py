@@ -117,8 +117,8 @@ def _tag(name: str, value) -> str:
 
 
 def _pincode(address: str) -> str:
-    found = re.findall(r"\b\d{6}\b", address)
-    return found[-1] if found else ""
+    found = re.findall(r"\b\d{3}[ \t]*\d{3}\b", address)
+    return re.sub(r"\s", "", found[-1]) if found else ""
 
 
 def _address_lines(address: str, width: int = 48) -> list[str]:

@@ -1,7 +1,7 @@
 """Haryana EY accounting settings; never use PWC's Delhi company or 18% ledgers."""
 from decimal import Decimal
 
-from app.services.ey_clients import SELLER_GSTIN
+from app.services.ey_clients import SELLER_ADDRESS, SELLER_GSTIN
 from app.services.tally_export import TallyLedgers
 
 
@@ -24,4 +24,9 @@ def ey_tally_ledgers(rates):
         igst=rates.tally_igst,
         hsn_local="996601",
         gst_rate=Decimal("5"),
+        dispatch_name="EEE-TAXI MOBILITY SOLUTIONS PRIVATE LIMITED",
+        dispatch_address=(SELLER_ADDRESS,),
+        dispatch_state="Haryana",
+        dispatch_pincode="122098",
+        dispatch_place="Gurugram",
     )
