@@ -389,7 +389,7 @@ def test_ey_full_flow_pdf_xml_snapshot_and_separate_listing(ey_client):
     assert tally_preview["batch_id"] == batch_id
     response = client.post("/api/eee-taxi/tally/export", json={"invoice_ids": [invoice_id]})
     assert response.status_code == 200, response.text
-    xml = ET.fromstring(response.content.decode("utf-16"))
+    xml = ET.fromstring(response.content.decode("utf-16").replace("&#4; ", ""))
     assert xml.findtext(".//CMPGSTIN") == "06AANCA3858Q1ZW"
     assert xml.findtext(".//BASICPURCHASEORDERNO") == "E-45303477"
     [voucher] = xml.findall(".//VOUCHER")
@@ -493,7 +493,7 @@ def test_ey_tally_matches_haryana_exports_without_vehicle_cost_centres(gstin, ex
     rates = EyRateCard()
     _, [row] = parse_ey_csv(ey_csv(**{"Entity Gst": gstin}), rates)
     voucher = voucher_for_row(row, "HR/HO/26-27/1164", date(2026, 10, 7), rates, {})
-    xml = ET.fromstring(render_tally_xml([voucher], ey_tally_ledgers(rates)).decode("utf-16"))
+    xml = ET.fromstring(render_tally_xml([voucher], ey_tally_ledgers(rates)).decode("utf-16").replace("&#4; ", ""))
     entries = xml.findall(".//VOUCHER/LEDGERENTRIES.LIST")
     assert [e.findtext("LEDGERNAME") for e in entries] == expected_ledgers
     assert sum(Decimal(e.findtext("AMOUNT")) for e in entries) == 0

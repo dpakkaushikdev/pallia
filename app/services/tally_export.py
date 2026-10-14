@@ -129,6 +129,8 @@ def _party_entry(v: TallyVoucher) -> str:
         + _tag("LEDGERNAME", v.party.entity_name)
         + _tag("ISDEEMEDPOSITIVE", "Yes")
         + _tag("ISPARTYLEDGER", "Yes")
+        + _tag("GSTOVERRIDDEN", "No")
+        + _tag("ISGSTASSESSABLEVALUEOVERRIDDEN", "No")
         + _tag("ISLASTDEEMEDPOSITIVE", "Yes")
         + _tag("AMOUNT", total)
         + "<BILLALLOCATIONS.LIST>"
@@ -143,7 +145,7 @@ def _party_entry(v: TallyVoucher) -> str:
 def _rate_details(gst_rate: Decimal = Decimal("18")) -> str:
     # Tally lists all three heads on every taxable line; place of supply picks the tax.
     rates = (("CGST", str(gst_rate / 2)), ("SGST/UTGST", str(gst_rate / 2)), ("IGST", str(gst_rate)))
-    return "".join(
+    details = "".join(
         "<RATEDETAILS.LIST>"
         + _tag("GSTRATEDUTYHEAD", head)
         + _tag("GSTRATEVALUATIONTYPE", "Based on Value")
@@ -151,6 +153,19 @@ def _rate_details(gst_rate: Decimal = Decimal("18")) -> str:
         + "</RATEDETAILS.LIST>"
         for head, rate in rates
     )
+    # Match Tally's nil-duty heads so imported taxable lines do not prompt
+    # users to choose a Cess valuation type when no Cess is charged.
+    details += (
+        "<RATEDETAILS.LIST>"
+        + _tag("GSTRATEDUTYHEAD", "Cess")
+        + '<GSTRATEVALUATIONTYPE>&#4; Not Applicable</GSTRATEVALUATIONTYPE>'
+        + "</RATEDETAILS.LIST>"
+        + "<RATEDETAILS.LIST>"
+        + _tag("GSTRATEDUTYHEAD", "State Cess")
+        + _tag("GSTRATEVALUATIONTYPE", "Based on Value")
+        + "</RATEDETAILS.LIST>"
+    )
+    return details
 
 
 _INVOICE_TAX_RATE = "<RATEOFINVOICETAX.LIST TYPE=\"Number\"><RATEOFINVOICETAX>18</RATEOFINVOICETAX></RATEOFINVOICETAX.LIST>"
@@ -197,6 +212,8 @@ def _income_entry(v: TallyVoucher, ledger: str, hsn: str, amount: Decimal,
         + _tag("GSTHSNNAME", hsn)
         + _tag("ISDEEMEDPOSITIVE", "No")
         + _tag("ISPARTYLEDGER", "No")
+        + _tag("GSTOVERRIDDEN", "No")
+        + _tag("ISGSTASSESSABLEVALUEOVERRIDDEN", "No")
         + _tag("AMOUNT", amt)
         + _tag("VATEXPAMOUNT", amt)
         + cost_allocation
@@ -250,6 +267,10 @@ def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
         + _tag("BILLOFLADINGDATE", _d(v.trip_date))
         + _tag("GSTREGISTRATIONTYPE", "Regular")
         + _tag("VATDEALERTYPE", "Regular")
+        + _tag("BUYERADDRESSTYPE", state)
+        + _tag("PARTYADDRESSTYPE", state)
+        + _tag("BILLTOPLACE", state.upper())
+        + _tag("SHIPTOPLACE", state.upper())
         + _tag("STATENAME", state)
         + _tag("COUNTRYOFRESIDENCE", "India")
         + _tag("PARTYGSTIN", p.gstin)
@@ -258,6 +279,7 @@ def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
         + f'<GSTREGISTRATION TAXTYPE="GST" TAXREGISTRATION={quoteattr(ledgers.company_gstin)}>'
         + f"{_x(ledgers.gst_registration)}</GSTREGISTRATION>"
         + _tag("CMPGSTIN", ledgers.company_gstin)
+        + _tag("ISGSTOVERRIDDEN", "No")
         + _tag("VOUCHERTYPENAME", ledgers.voucher_type)
         + _tag("PARTYLEDGERNAME", p.entity_name)
         + _tag("VOUCHERNUMBER", v.invoice_no)
@@ -276,6 +298,7 @@ def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
         + _tag("NUMBERINGSTYLE", "Manual")
         + _tag("PERSISTEDVIEW", "Invoice Voucher View")
         + _tag("VCHSTATUSVOUCHERTYPE", ledgers.voucher_type)
+        + _tag("VCHGSTSTATUSISOVERRDN", "No")
         + _tag("VCHSTATUSTAXUNIT", ledgers.gst_registration)
         + _tag("BASICSHIPVESSELNO", v.motor_vehicle_no or v.car_no)
         + (_tag("BASICSHIPDOCUMENTNO", v.dispatch_doc_no) if v.dispatch_doc_no else "")

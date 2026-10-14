@@ -32,7 +32,8 @@ def _parse(data: bytes) -> ET.Element:
     assert data.startswith(codecs.BOM_UTF16_LE)
     text = data[2:].decode("utf-16-le")
     # ElementTree needs the UDF prefix declared at the root, as Tally does per message.
-    return ET.fromstring(text.replace("<ENVELOPE>", '<ENVELOPE xmlns:UDF="TallyUDF">', 1))
+    # Tally's Not Applicable enum uses an XML 1.0 control-character reference.
+    return ET.fromstring(text.replace("&#4; ", "").replace("<ENVELOPE>", '<ENVELOPE xmlns:UDF="TallyUDF">', 1))
 
 
 def _entries(voucher: ET.Element) -> dict[str, Decimal]:
@@ -123,3 +124,37 @@ def test_header_and_tax_rate_tags_match_the_tally_sample():
     # Tally puts the 18% rate on the toll and tax lines, not on the party or rental line.
     assert rates[DEFAULT_LEDGERS.toll] == "18" and rates[DEFAULT_LEDGERS.igst] == "18"
     assert rates[DEFAULT_LEDGERS.sales_interstate] is None
+
+
+def test_state_specific_party_address_and_nil_cess_details_are_exported():
+    maharashtra = _voucher(party=lookup_client("27AARFG0505D1ZP"))
+    [v] = _parse(render_tally_xml([maharashtra])).iter("VOUCHER")
+    assert v.findtext("PARTYADDRESSTYPE") == "Maharashtra"
+    assert v.findtext("BUYERADDRESSTYPE") == "Maharashtra"
+    assert v.findtext("BILLTOPLACE") == "MAHARASHTRA"
+    assert v.findtext("SHIPTOPLACE") == "MAHARASHTRA"
+    assert v.findtext("ISGSTOVERRIDDEN") == "No"
+    assert v.findtext("VCHGSTSTATUSISOVERRDN") == "No"
+
+    sales_line = next(e for e in v.iter("LEDGERENTRIES.LIST")
+                      if e.findtext("LEDGERNAME") == DEFAULT_LEDGERS.sales_interstate)
+    assert sales_line.findtext("GSTOVERRIDDEN") == "No"
+    assert sales_line.findtext("ISGSTASSESSABLEVALUEOVERRIDDEN") == "No"
+    rate_details = {
+        e.findtext("GSTRATEDUTYHEAD"): e.findtext("GSTRATEVALUATIONTYPE")
+        for e in sales_line.findall("RATEDETAILS.LIST")
+    }
+    assert rate_details["Cess"] == "Not Applicable"
+    assert rate_details["State Cess"] == "Based on Value"
+    raw = render_tally_xml([maharashtra]).decode("utf-16")
+    assert '<GSTRATEVALUATIONTYPE>&#4; Not Applicable</GSTRATEVALUATIONTYPE>' in raw
+    assert len(sales_line.findall("GSTOVERRIDDEN")) == 1
+
+
+def test_haryana_address_type_tracks_buyer_gstin_state():
+    haryana = _voucher(party=lookup_client("06AAEFP1428R1ZW"))
+    [v] = _parse(render_tally_xml([haryana])).iter("VOUCHER")
+    assert v.findtext("PARTYADDRESSTYPE") == "Haryana"
+    assert v.findtext("BUYERADDRESSTYPE") == "Haryana"
+    assert v.findtext("BILLTOPLACE") == "HARYANA"
+    assert v.findtext("SHIPTOPLACE") == "HARYANA"
