@@ -427,7 +427,7 @@ def test_invoice_history_includes_pending_invoices_and_filters_by_client_and_cre
     assert start.status_code == 200, start.text
     history = ey_client.get("/api/eee-taxi/tally/history?client_profile=ey").json()
     assert history["count"] == 1
-    assert (history["page"], history["page_size"], history["pages"]) == (1, 50, 1)
+    assert (history["page"], history["page_size"], history["pages"]) == (1, 40, 1)
     item = history["invoices"][0]
     assert item["status"] == "pending"
     assert item["invoice_no"] is None
@@ -443,7 +443,7 @@ def test_invoice_history_includes_pending_invoices_and_filters_by_client_and_cre
     assert ey_client.get("/api/eee-taxi/tally/history?client_profile=ey").json()["count"] == 0
 
 
-def test_invoice_history_fetches_only_50_records_per_page(ey_client):
+def test_invoice_history_fetches_only_40_records_per_page(ey_client):
     started = ey_client.post(
         "/api/eee-taxi/batch", files={"csv_file": ("ey.csv", ey_csv(), "text/csv")},
         data={"invoice_date": "2026-05-08", "start_suffix": 157, "sign_mode": "dummy"},
@@ -460,8 +460,8 @@ def test_invoice_history_fetches_only_50_records_per_page(ey_client):
 
     first = ey_client.get("/api/eee-taxi/tally/history?page=1").json()
     second = ey_client.get("/api/eee-taxi/tally/history?page=2").json()
-    assert first["count"] == 51 and len(first["invoices"]) == 50 and first["pages"] == 2
-    assert second["count"] == 51 and len(second["invoices"]) == 1 and second["page"] == 2
+    assert first["count"] == 51 and len(first["invoices"]) == 40 and first["pages"] == 2
+    assert second["count"] == 51 and len(second["invoices"]) == 11 and second["page"] == 2
 
 
 def test_ey_tally_defaults_upgrade_to_names_from_imported_tally_xml():

@@ -54,6 +54,7 @@ class TallyLedgers:
     dispatch_pincode: str = ""
     dispatch_place: str = ""
     party_address_names: tuple[tuple[str, str], ...] = ()
+    party_address_by_gstin: tuple[tuple[str, str], ...] = ()
     include_buyer_address_type: bool = True
 
 
@@ -262,6 +263,7 @@ def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
     p = v.party
     state = p.state_name
     party_address = dict(ledgers.party_address_names).get(state, state if state != "Haryana" else "")
+    party_address = dict(ledgers.party_address_by_gstin).get(p.gstin, party_address)
     pin = _pincode(p.address)
     address = "".join(_tag("ADDRESS", line) for line in _address_lines(p.address))
     buyer_address = "".join(_tag("BASICBUYERADDRESS", line) for line in _address_lines(p.address))

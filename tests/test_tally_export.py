@@ -229,3 +229,16 @@ def test_pwc_v3_and_ey_corrected_formats_stay_separate():
         assert pwc.findtext("BUYERADDRESSTYPE") == address
         assert pwc.findtext("DISPATCHFROMSTATENAME") == "Delhi"
         assert pwc.findtext("DISPATCHFROMPINCODE") == "110042"
+
+
+def test_ey_address_selection_is_specific_to_buyer_registration():
+    from app.services.ey_clients import lookup_ey_client
+    from app.services.ey_rates import EyRateCard
+    from app.services.ey_tally import ey_tally_ledgers
+    settings = ey_tally_ledgers(EyRateCard())
+    for gstin, address in [("06AACCP8967E1Z5", None),
+                           ("06AAEFE1763C1ZW", "HARYANA"),
+                           ("06ACHFS9180N1ZD", "HARYANA")]:
+        [v] = _parse(render_tally_xml([_voucher(party=lookup_ey_client(gstin))], settings)).iter("VOUCHER")
+        assert v.findtext("PARTYADDRESSTYPE") == address
+        assert v.findtext("PARTYGSTIN") == gstin
