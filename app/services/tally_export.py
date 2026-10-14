@@ -53,6 +53,8 @@ class TallyLedgers:
     dispatch_state: str = ""
     dispatch_pincode: str = ""
     dispatch_place: str = ""
+    party_address_names: tuple[tuple[str, str], ...] = ()
+    include_buyer_address_type: bool = True
 
 
 # Dispatch values match the user-verified v3 import and manual Delhi exports.
@@ -259,6 +261,7 @@ def _tax_entry(ledger: str, amount: Decimal, gst_rate: Decimal = Decimal("18")) 
 def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
     p = v.party
     state = p.state_name
+    party_address = dict(ledgers.party_address_names).get(state, state if state != "Haryana" else "")
     pin = _pincode(p.address)
     address = "".join(_tag("ADDRESS", line) for line in _address_lines(p.address))
     buyer_address = "".join(_tag("BASICBUYERADDRESS", line) for line in _address_lines(p.address))
@@ -299,10 +302,8 @@ def _voucher(v: TallyVoucher, ledgers: TallyLedgers) -> str:
         + dispatch
         + _tag("GSTREGISTRATIONTYPE", "Regular")
         + _tag("VATDEALERTYPE", "Regular")
-        # Haryana is the primary address in the supplied Tally samples;
-        # named address selectors are used only for the other registrations.
-        + (_tag("BUYERADDRESSTYPE", state) if state != "Haryana" else "")
-        + (_tag("PARTYADDRESSTYPE", state) if state != "Haryana" else "")
+        + (_tag("BUYERADDRESSTYPE", party_address) if party_address and ledgers.include_buyer_address_type else "")
+        + (_tag("PARTYADDRESSTYPE", party_address) if party_address else "")
         + _tag("BILLTOPLACE", state.upper())
         + _tag("SHIPTOPLACE", state.upper())
         + _tag("STATENAME", state)

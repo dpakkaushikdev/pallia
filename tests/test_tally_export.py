@@ -189,3 +189,43 @@ def test_split_kolkata_pincode_is_normalized_in_buyer_and_consignee():
     [v] = _parse(render_tally_xml([_voucher(party=lookup_ey_client("19AAEFE1763C1ZP"))])).iter("VOUCHER")
     assert v.findtext("PARTYPINCODE") == "700016"
     assert v.findtext("CONSIGNEEPINCODE") == "700016"
+
+
+def test_ey_haryana_uses_named_registration_from_manual_tally_export():
+    from app.services.ey_clients import lookup_ey_client
+    from app.services.ey_rates import EyRateCard
+    from app.services.ey_tally import ey_tally_ledgers
+    [v] = _parse(render_tally_xml([_voucher(party=lookup_ey_client("06AAEFE1763C1ZW"))],
+                                 ey_tally_ledgers(EyRateCard()))).iter("VOUCHER")
+    assert v.findtext("PARTYADDRESSTYPE") == "HARYANA"
+    assert v.find("BUYERADDRESSTYPE") is None
+    assert v.findtext("PARTYGSTIN") == "06AAEFE1763C1ZW"
+
+
+def test_pwc_v3_and_ey_corrected_formats_stay_separate():
+    from app.services.ey_clients import lookup_ey_client
+    from app.services.ey_rates import EyRateCard
+    from app.services.ey_tally import ey_tally_ledgers
+    ey_settings = ey_tally_ledgers(EyRateCard())
+    # All five registrations in the user-verified corrected EY import.
+    for gstin, address, pin in [
+        ("19AAEFE1763C1ZP", "West Bengal", "700016"),
+        ("06AAEFE1763C1ZW", "HARYANA", "122003"),
+        ("29AAEFE1763C2ZN", "Karnataka", "560001"),
+        ("07AAEFE1763C1ZU", "Delhi", "110037"),
+    ]:
+        [ey] = _parse(render_tally_xml([_voucher(party=lookup_ey_client(gstin))], ey_settings)).iter("VOUCHER")
+        assert ey.findtext("PARTYADDRESSTYPE") == address
+        assert ey.find("BUYERADDRESSTYPE") is None
+        assert ey.findtext("PARTYPINCODE") == pin
+        assert ey.findtext("DISPATCHFROMSTATENAME") == "Haryana"
+        assert ey.findtext("DISPATCHFROMPINCODE") == "122098"
+        sales = next(e for e in ey.findall("LEDGERENTRIES.LIST") if e.findall("RATEDETAILS.LIST"))
+        assert sales.findtext("GSTRATEINFERAPPLICABILITY") == "As per Masters/Company"
+        assert sales.findtext("RATEDETAILS.LIST/GSTRATE") == "2.5"
+    for gstin, address in [("06AARFG0505D1ZT", None), ("27AARFG0505D1ZP", "Maharashtra"), ("09AARFG0505D1ZN", "Uttar Pradesh")]:
+        [pwc] = _parse(render_tally_xml([_voucher(party=lookup_client(gstin))])).iter("VOUCHER")
+        assert pwc.findtext("PARTYADDRESSTYPE") == address
+        assert pwc.findtext("BUYERADDRESSTYPE") == address
+        assert pwc.findtext("DISPATCHFROMSTATENAME") == "Delhi"
+        assert pwc.findtext("DISPATCHFROMPINCODE") == "110042"

@@ -29,4 +29,7 @@ def ey_tally_ledgers(rates):
         dispatch_state="Haryana",
         dispatch_pincode="122098",
         dispatch_place="Gurugram",
+        party_address_names=(("Haryana", "HARYANA"), ("Maharashtra", "MAHARASHTRA"),
+                             ("Uttar Pradesh", "Uttar Pradesh")),
+        include_buyer_address_type=False,
     )
