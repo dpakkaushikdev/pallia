@@ -9,6 +9,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.services.amount_words import amount_in_words
+from app.services.invoice_spacing import space_before_total
 from app.services.eee_taxi_pdf import LOGO_PATH, _FONT_RUPEE, _styles
 from app.services.ey_clients import SELLER_ADDRESS, SELLER_GSTIN, ey_is_local, ey_tax, lookup_ey_client
 
@@ -83,12 +84,19 @@ def generate_ey_pdf(row, invoice_no, invoice_date, description, output_path: Pat
     taxes = [("OUTPUT CGST @2.5%", cgst), ("OUTPUT SGST @2.5%", sgst)] if local else [("OUTPUT IGST @5%", igst)]
     for label, amount in taxes:
         lines.append(["", p(label, "smb"), "", "", "", p(f"{amount:,.2f}", "smr")])
+    blank_index = len(lines)
+    lines.append(["", "", "", "", "", ""])
     lines.append(["", p("Total", "smb"), "", "", "", Paragraph(f'<font name="{_FONT_RUPEE}">&#8377;</font> {total:,.2f}', styles["smbr"])])
     items = table(lines, [9*mm, width-83*mm, 19*mm, 15*mm, 18*mm, 22*mm])
+    prefix = [p("TAX INVOICE", "title"), Spacer(1, 4*mm), header]
+    gap = space_before_total(prefix, items, width)
+    heights = list(items._rowHeights)
+    heights[blank_index] += gap
+    items = table(lines, [9*mm, width-83*mm, 19*mm, 15*mm, 18*mm, 22*mm], row_heights=heights)
     words = amount_in_words(total).replace("Rupees ", "INR ", 1)
     signature = table([[p("for " + COMPANY)], [Spacer(1, 38)], [p("Authorised Signatory")]], [width*.4-8], False)
     footer = table([[p(f"Amount Chargeable (in words)\n{words}\n\nRemarks:\n{row.route_no}"), signature]], [width*.6, width*.4])
-    story = [p("TAX INVOICE", "title"), Spacer(1, 4*mm), header, items, footer,
+    story = [*prefix, items, footer,
              Spacer(1, 2*mm), p("This is a Computer Generated Invoice", "xsc")]
     SimpleDocTemplate(str(output_path), pagesize=A4, leftMargin=10*mm, rightMargin=10*mm,
                       topMargin=10*mm, bottomMargin=10*mm).build(story)

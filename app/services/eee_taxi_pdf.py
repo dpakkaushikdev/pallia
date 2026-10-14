@@ -286,8 +286,8 @@ def generate_eee_taxi_invoice_pdf(
     else:
         item_rows.append(["", _p("Output IGST @18%", st["sm"]), "", "", "", _p(_amt(ctx.igst), st["smr"])])
 
-    for _ in range(8):
-        item_rows.append(["", "", "", "", "", ""])
+    blank_index = len(item_rows)
+    item_rows.append(["", "", "", "", "", ""])
 
     n = len(item_rows)
     item_rows.append(["", "", "", "", _p("Total", st["smb"]), _p(f'<font name="{_FONT_RUPEE}">₹</font> {_amt(ctx.total_amount)}', st["smbr"])])
@@ -305,6 +305,12 @@ def generate_eee_taxi_invoice_pdf(
     for col in [1, 2, 3, 4, 5]:
         sc.append(("LINEBEFORE", (col, 0), (col, n), 0.3, colors.black))
     items_tbl = Table(item_rows, colWidths=cw)
+    items_tbl.setStyle(TableStyle(sc))
+    from app.services.invoice_spacing import space_before_total
+    gap = space_before_total(story, items_tbl, CW, top_margin=8*mm)
+    heights = list(items_tbl._rowHeights)
+    heights[blank_index] += gap
+    items_tbl = Table(item_rows, colWidths=cw, rowHeights=heights)
     items_tbl.setStyle(TableStyle(sc))
     story.append(items_tbl)
 
