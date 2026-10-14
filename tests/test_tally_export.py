@@ -242,3 +242,23 @@ def test_ey_address_selection_is_specific_to_buyer_registration():
         [v] = _parse(render_tally_xml([_voucher(party=lookup_ey_client(gstin))], settings)).iter("VOUCHER")
         assert v.findtext("PARTYADDRESSTYPE") == address
         assert v.findtext("PARTYGSTIN") == gstin
+
+
+def test_ey_primary_address_fix_applies_across_batches_and_invoice_numbers():
+    from app.services.ey_clients import lookup_ey_client
+    from app.services.ey_rates import EyRateCard
+    from app.services.ey_tally import ey_tally_ledgers
+    cases = [(1173, "06AACCP8967E1Z5"), (1180, "06AACCP8967E1Z5"),
+             (1202, "06AACCP8967E1Z5"), (1284, "06AACCP8967E1Z5"),
+             (1182, "06ACHFS9180N1ZD")]
+    vouchers = [_voucher(invoice_no=f"HR/HO/26-27/{number}", party=lookup_ey_client(gstin))
+                for number, gstin in cases]
+    root = _parse(render_tally_xml(vouchers, ey_tally_ledgers(EyRateCard())))
+    result = list(root.iter("VOUCHER"))
+    assert len(result) == len(cases)
+    for v, (number, gstin) in zip(result, cases):
+        assert v.findtext("VOUCHERNUMBER") == f"HR/HO/26-27/{number}"
+        assert v.findtext("PARTYGSTIN") == gstin
+        assert v.find("PARTYADDRESSTYPE") is None
+        assert v.find("BUYERADDRESSTYPE") is None
+        assert sum(_entries(v).values()) == 0
