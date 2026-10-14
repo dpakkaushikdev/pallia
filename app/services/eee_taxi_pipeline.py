@@ -24,6 +24,7 @@ per-instance and ephemeral. File paths are only a fallback for local runs.
 from __future__ import annotations
 
 import io
+import re
 import zipfile
 from datetime import date
 from decimal import Decimal
@@ -340,6 +341,13 @@ def generate_next_invoice(batch_id: str, db: Session) -> dict:
     }
 
 
+def archive_pdf_filename(inv: EeeTaxiInvoice, suffix: str) -> str:
+    """Name exported PDFs by DS number (stored as route_no)."""
+    number = (inv.route_no or "").strip() or inv.invoice_no or inv.id
+    safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", number).rstrip(" .")
+    return f"{safe}_{suffix}.pdf"
+
+
 def build_zip(batch_id: str, db: Session, booking_type: str | None = None, with_documents: bool = False) -> bytes:
     """Return a ZIP archive of signed PDFs in the batch.
 
@@ -360,12 +368,9 @@ def build_zip(batch_id: str, db: Session, booking_type: str | None = None, with_
         for inv in invoices:
             data = signed_pdf_bytes(inv)
             if data:
-                if with_documents:
-                    # Supporting pages are already part of the PDF and were
-                    # included before DSC signing during invoice generation.
-                    zf.writestr(signed_filename(inv), data)
-                else:
-                    zf.writestr(signed_filename(inv), data)
+                # Preserve signed bytes, including any supporting pages.
+                suffix = "combined" if with_documents else "Invoice"
+                zf.writestr(archive_pdf_filename(inv, suffix), data)
     return buf.getvalue()
 
 
@@ -394,6 +399,5 @@ def build_documents_zip(batch_id: str, db: Session, booking_type: str | None = N
                 writer.add_page(page)
             output = io.BytesIO()
             writer.write(output)
-            safe_invoice_no = (invoice.invoice_no or invoice.id).replace("/", "-").replace("\\", "-")
-            zf.writestr(f"{safe_invoice_no}.pdf", output.getvalue())
+            zf.writestr(archive_pdf_filename(invoice, "Doc"), output.getvalue())
     return buf.getvalue()
