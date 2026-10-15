@@ -82,6 +82,32 @@ def has_signed_pdf(inv: EeeTaxiInvoice) -> bool:
     )
 
 
+def invoice_page_bytes(data: bytes) -> bytes:
+    """Extract the unsigned invoice before signing; never use on signed PDFs."""
+    from pypdf import PdfReader, PdfWriter
+    reader = PdfReader(io.BytesIO(data))
+    if len(reader.pages) == 1:
+        return data
+    writer = PdfWriter()
+    writer.add_page(reader.pages[0])
+    output = io.BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def invoice_only_signed_bytes(inv: EeeTaxiInvoice) -> bytes | None:
+    from pypdf import PdfReader
+    if inv.signed_invoice_data:
+        return bytes(inv.signed_invoice_data)
+    data = signed_pdf_bytes(inv)
+    if data and len(PdfReader(io.BytesIO(data)).pages) > 1:
+        raise ValueError(
+            f"Invoice {inv.invoice_no or inv.id} was signed with supporting pages. "
+            "Regenerate and sign it again to download a separately signed invoice-only PDF."
+        )
+    return data
+
+
 def signed_filename(inv: EeeTaxiInvoice) -> str:
     if inv.signed_pdf_path:
         return Path(inv.signed_pdf_path).name
@@ -303,6 +329,9 @@ def generate_next_invoice(batch_id: str, db: Session) -> dict:
         pdf_path.write_bytes(inv_rec.pdf_data)
 
         if sign_mode == "dummy":
+            invoice_path = output_dir / f"{pdf_path.stem}_invoice.pdf"
+            invoice_path.write_bytes(invoice_page_bytes(inv_rec.pdf_data))
+            inv_rec.signed_invoice_data = sign_eee_taxi_pdf_dummy(invoice_path, sig_box=sig_box).read_bytes()
             signed_path = sign_eee_taxi_pdf_dummy(pdf_path, sig_box=sig_box)
             inv_rec.signed_pdf_path = str(signed_path)
             inv_rec.signed_pdf_data = signed_path.read_bytes()
@@ -366,9 +395,9 @@ def build_zip(batch_id: str, db: Session, booking_type: str | None = None, with_
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for inv in invoices:
-            data = signed_pdf_bytes(inv)
+            data = signed_pdf_bytes(inv) if with_documents else invoice_only_signed_bytes(inv)
             if data:
-                # Preserve signed bytes, including any supporting pages.
+                # Both variants were signed separately; preserve their exact bytes.
                 suffix = "combined" if with_documents else "Invoice"
                 zf.writestr(archive_pdf_filename(inv, suffix), data)
     return buf.getvalue()

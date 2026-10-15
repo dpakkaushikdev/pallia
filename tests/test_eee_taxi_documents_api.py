@@ -184,22 +184,24 @@ def test_save_password_edit_and_audit(client, admin, edit_password):
 
 
 def test_ten_rows_count_and_date_filters(client, admin):
-    from datetime import datetime
+    from datetime import date, datetime
     for index in range(12):
         entry=create(client, admin, "pwc", f"PAGE-{index:02}")
         upload(client, admin, entry)
         client.post(f"{URL}/{entry['id']}/save",json={},headers=admin).raise_for_status()
         with SessionLocal() as db:
-            db.get(EeeTaxiDocumentEntry, entry["id"]).updated_at=datetime(2026,10,8,18,30)
+            record = db.get(EeeTaxiDocumentEntry, entry["id"])
+            record.document_date = date(2026, 10, 9)
+            record.updated_at = datetime(2026, 10, 15, 12)
             db.commit()
-    params={"search":"PAGE-","client_profile":"pwc","updated_from":"2026-10-09","updated_to":"2026-10-09"}
+    params={"search":"PAGE-","client_profile":"pwc","document_date_from":"2026-10-09","document_date_to":"2026-10-09"}
     first=client.get(URL,params=params,headers=admin).json()
     assert first["total"] == 12 and len(first["entries"]) == 10 and first["total_all"] >= 12
     second=client.get(URL,params={**params,"offset":10},headers=admin).json()
     assert len(second["entries"]) == 2
     assert not set(e["id"] for e in first["entries"]) & set(e["id"] for e in second["entries"])
-    assert client.get(URL,params={**params,"updated_to":"2026-10-08"},headers=admin).status_code == 400
-    assert client.get(URL,params={"search":"PAGE-","updated_to":"2026-10-08"},headers=admin).json()["total"] == 0
+    assert client.get(URL,params={**params,"document_date_to":"2026-10-08"},headers=admin).status_code == 400
+    assert client.get(URL,params={"search":"PAGE-","document_date_to":"2026-10-08"},headers=admin).json()["total"] == 0
 
 
 def test_invoice_document_copy_survives_bulk_cleanup(client, admin, edit_password):
@@ -259,17 +261,17 @@ def test_document_startup_migration_keeps_old_saved_entries(monkeypatch):
 
 
 def test_history_thirty_latest_all_statuses_date_filter_and_bulk_delete(client, admin, edit_password):
-    from datetime import datetime, timedelta
+    from datetime import date, datetime, timedelta
     from app.models import EeeTaxiDocumentFile
     from hashlib import sha256
     ids=[]
     with SessionLocal() as db:
         for index in range(32):
-            entry=EeeTaxiDocumentEntry(client_profile="pwc",route_no=f"HISTORY-{index:02}",created_by="admin@test.com",is_saved=True,edit_protected=True,updated_at=datetime(2026,10,9,6)+timedelta(minutes=index),revision=1,used_revision=1 if index%2 else 0)
+            entry=EeeTaxiDocumentEntry(client_profile="pwc",route_no=f"HISTORY-{index:02}",document_date=date(2026,10,9),created_by="admin@test.com",is_saved=True,edit_protected=True,updated_at=datetime(2026,10,9,6)+timedelta(minutes=index),revision=1,used_revision=1 if index%2 else 0)
             entry.files.append(EeeTaxiDocumentFile(category="ds",filename="ds.png",content_type="image/png",size=len(png()),sha256=sha256(png()).hexdigest(),data=png(),uploaded_by="admin@test.com"))
             db.add(entry);db.flush();ids.append(entry.id)
         db.commit()
-    params={"search":"HISTORY-","limit":30,"updated_from":"2026-10-09","updated_to":"2026-10-09"}
+    params={"search":"HISTORY-","limit":30,"document_date_from":"2026-10-09","document_date_to":"2026-10-09"}
     result=client.get(URL,params=params,headers=admin)
     assert result.status_code == 200,result.text
     data=result.json()
@@ -279,8 +281,69 @@ def test_history_thirty_latest_all_statuses_date_filter_and_bulk_delete(client, 
     assert len(client.get(URL,params={**params,"offset":30},headers=admin).json()["entries"]) == 2
     assert client.get(URL,params={**params,"used":True},headers=admin).json()["total"] == 16
     assert client.get(URL,params={**params,"used":False},headers=admin).json()["total"] == 16
-    assert client.get(URL,params={**params,"updated_from":"2026-10-10","updated_to":"2026-10-10"},headers=admin).json()["total"] == 0
+    assert client.get(URL,params={**params,"document_date_from":"2026-10-10","document_date_to":"2026-10-10"},headers=admin).json()["total"] == 0
     body={"ids":ids[-3:],"used_only":False,"edit_password":edit_password}
     assert client.post(URL+"/bulk-delete",json={**body,"edit_password":"wrong"},headers=admin).status_code == 403
     assert client.post(URL+"/bulk-delete",json=body,headers=admin).json()["deleted"] == 3
     assert client.get(URL,params=params,headers=admin).json()["total"] == 29
+
+
+@pytest.mark.parametrize("has_documents", [False, True])
+def test_separately_signed_invoice_and_combined_exports(client, admin, has_documents):
+    import zipfile
+    from datetime import date
+    from pypdf import PdfReader
+    from app.models import EeeTaxiBatch, EeeTaxiInvoice, EeeTaxiInvoiceStatus
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    output = io.BytesIO()
+    writer.write(output)
+    invoice_data = output.getvalue()
+    writer.add_blank_page(width=200, height=200)
+    output = io.BytesIO()
+    writer.write(output)
+    combined_data = output.getvalue() if has_documents else invoice_data
+    with SessionLocal() as db:
+        batch = EeeTaxiBatch(invoice_date=date(2026, 10, 15), start_suffix=1)
+        db.add(batch)
+        db.flush()
+        invoice = EeeTaxiInvoice(batch_id=batch.id, row_index=0, route_no="ZIP-SIGNED",
+            status=EeeTaxiInvoiceStatus.AWAITING_SIGNATURE, pdf_data=combined_data)
+        db.add(invoice)
+        db.commit()
+        base = f"/api/eee-taxi/batch/{batch.id}"
+        invoice_url = f"{base}/invoice/{invoice.id}"
+    response = client.get(invoice_url + "/unsigned?invoice_only=true", headers=admin)
+    assert response.status_code == 200
+    assert response.headers["X-Has-Supporting-Documents"] == str(has_documents).lower()
+    assert len(PdfReader(io.BytesIO(response.content)).pages) == 1
+    assert client.get(invoice_url + "/unsigned", headers=admin).content == combined_data
+    response = client.post(invoice_url + "/signed", headers=admin,
+        files={"file": ("combined.pdf", combined_data, "application/pdf")})
+    assert response.status_code == (400 if has_documents else 200)
+    if not has_documents:
+        with SessionLocal() as db:
+            inv = db.get(EeeTaxiInvoice, invoice.id)
+            inv.status = EeeTaxiInvoiceStatus.AWAITING_SIGNATURE
+            db.commit()
+    response = client.post(invoice_url + "/signed", headers=admin, files={
+        "file": ("combined.pdf", combined_data, "application/pdf"),
+        "invoice_file": ("invoice.pdf", invoice_data, "application/pdf")})
+    assert response.status_code == 200, response.text
+    for url, name, expected in [
+        ("/download-all", "ZIP-SIGNED_Invoice.pdf", invoice_data),
+        ("/download-all?with_documents=true", "ZIP-SIGNED_combined.pdf", combined_data),
+    ]:
+        response = client.get(base + url, headers=admin)
+        assert response.status_code == 200, response.text
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            assert archive.namelist() == [name]
+            assert archive.read(name) == expected
+    response = client.get(base + "/download-documents", headers=admin)
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        if not has_documents:
+            assert archive.namelist() == []
+            return
+        reader = PdfReader(io.BytesIO(archive.read("ZIP-SIGNED_Doc.pdf")))
+        assert len(reader.pages) == 1
+        assert reader.pages[0].mediabox.width == 200

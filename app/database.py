@@ -146,6 +146,8 @@ def _migrate_existing_db() -> None:
             conn.commit()
         if "eee_taxi_invoices" in inspector.get_table_names():
             existing = {c["name"] for c in inspector.get_columns("eee_taxi_invoices")}
+            if "signed_invoice_data" not in existing:
+                conn.execute(text(f"ALTER TABLE eee_taxi_invoices ADD COLUMN signed_invoice_data {binary_type}"))
             if "document_zip_data" not in existing:
                 conn.execute(text(f"ALTER TABLE eee_taxi_invoices ADD COLUMN document_zip_data {binary_type}"))
             if "pdf_data" not in existing:

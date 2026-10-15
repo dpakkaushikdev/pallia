@@ -387,7 +387,7 @@ def _get_batch_invoice(db, batch_id: str, invoice_id: str) -> EeeTaxiInvoice:
 
 
 @router.get("/batch/{batch_id}/invoice/{invoice_id}/unsigned")
-def get_unsigned_invoice(batch_id: str, invoice_id: str):
+def get_unsigned_invoice(batch_id: str, invoice_id: str, invoice_only: bool = False):
     """Unsigned PDF for the local signing helper (USB mode only)."""
     with SessionLocal() as db:
         inv = _get_batch_invoice(db, batch_id, invoice_id)
@@ -396,20 +396,38 @@ def get_unsigned_invoice(batch_id: str, invoice_id: str):
         data = unsigned_pdf_bytes(inv)
         if not data:
             raise HTTPException(status_code=404, detail="Unsigned PDF is missing.")
+        from app.services.eee_taxi_pipeline import invoice_page_bytes
+        invoice_data = invoice_page_bytes(data)
+        has_documents = invoice_data != data
+        if invoice_only:
+            data = invoice_data
         name = Path(inv.pdf_path).name if inv.pdf_path else f"{invoice_id}.pdf"
     return Response(
         content=data,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{name}"'},
+        headers={"Content-Disposition": f'inline; filename="{name}"',
+                 "X-Has-Supporting-Documents": str(has_documents).lower()},
     )
 
 
 @router.post("/batch/{batch_id}/invoice/{invoice_id}/signed")
-async def upload_signed_invoice(batch_id: str, invoice_id: str, file: UploadFile):
+async def upload_signed_invoice(batch_id: str, invoice_id: str, file: UploadFile,
+                                invoice_file: UploadFile | None = None):
     """Store the PDF signed by the local helper and mark the invoice done."""
     data = await file.read()
     if not data.startswith(b"%PDF"):
         raise HTTPException(status_code=400, detail="Uploaded file is not a PDF.")
+    import io
+    from pypdf import PdfReader
+    try:
+        page_count = len(PdfReader(io.BytesIO(data)).pages)
+        invoice_data = await invoice_file.read() if invoice_file else data
+        if len(PdfReader(io.BytesIO(invoice_data)).pages) != 1:
+            raise ValueError("A separately signed one-page invoice is required with supporting documents.")
+        if page_count < 1:
+            raise ValueError("Signed PDF has no pages.")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     with SessionLocal() as db:
         inv = _get_batch_invoice(db, batch_id, invoice_id)
@@ -419,8 +437,8 @@ async def upload_signed_invoice(batch_id: str, invoice_id: str, file: UploadFile
             raise HTTPException(status_code=409, detail=f"Invoice is not awaiting signature (status: {inv.status}).")
 
         inv.signed_pdf_data = data
-        # The unsigned copy has served its purpose and is never handed out
-        # again; dropping it halves what this invoice costs in the database.
+        inv.signed_invoice_data = invoice_data
+        # Signed variants supersede the unsigned copy.
         inv.pdf_data = None
         if inv.pdf_path:
             signed_path = Path(inv.pdf_path).with_name(f"{Path(inv.pdf_path).stem}_signed.pdf")
@@ -492,7 +510,10 @@ def download_all(batch_id: str, with_documents: bool = False):
             raise HTTPException(status_code=404, detail="Batch not found.")
         if batch.status not in _DOWNLOADABLE:
             raise HTTPException(status_code=409, detail="Batch not yet completed.")
-        zip_bytes = build_zip(batch_id, db, with_documents=with_documents)
+        try:
+            zip_bytes = build_zip(batch_id, db, with_documents=with_documents)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     filename = f"eee_taxi_{'with_documents' if with_documents else 'invoices'}_{batch_id[:8]}.zip"
     return Response(
@@ -526,7 +547,10 @@ def download_p2p(batch_id: str):
             raise HTTPException(status_code=404, detail="Batch not found.")
         if batch.status not in _DOWNLOADABLE:
             raise HTTPException(status_code=409, detail="Batch not yet completed.")
-        zip_bytes = build_zip(batch_id, db, booking_type="p2p")
+        try:
+            zip_bytes = build_zip(batch_id, db, booking_type="p2p")
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     filename = f"eee_taxi_p2p_{batch_id[:8]}.zip"
     return Response(
@@ -545,7 +569,10 @@ def download_rental(batch_id: str):
             raise HTTPException(status_code=404, detail="Batch not found.")
         if batch.status not in _DOWNLOADABLE:
             raise HTTPException(status_code=409, detail="Batch not yet completed.")
-        zip_bytes = build_zip(batch_id, db, booking_type="rental")
+        try:
+            zip_bytes = build_zip(batch_id, db, booking_type="rental")
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     filename = f"eee_taxi_rental_{batch_id[:8]}.zip"
     return Response(

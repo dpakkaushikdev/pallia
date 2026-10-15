@@ -303,6 +303,7 @@ class EeeTaxiInvoice(Base):
     # (Vercel's disk is per-instance and ephemeral). Disk paths are a fallback.
     pdf_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     signed_pdf_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    signed_invoice_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
     document_zip_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
     # Signature box (x1, y1, x2, y2) in PDF points, captured at generation time
     # and handed to the local signing helper so the stamp lands in the footer.

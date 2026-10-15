@@ -1056,7 +1056,7 @@
 <div class="ed-filters">
  <label>DS no/Route No<input type="text" id="edSearch" maxlength="64" placeholder="Find DS/Route number"></label>
  <label>Client<select id="edFilterClient"><option value="">All clients</option><option value="ey">EY</option><option value="pwc">PWC</option></select></label>
- <label>Updated from<input id="edFrom" type="date"></label><label>Updated to<input id="edTo" type="date"></label>
+ <label>Document date from<input id="edFrom" type="date"></label><label>Document date to<input id="edTo" type="date"></label>
  <button class="btn" id="edSearchButton">Apply filters</button><button class="btn secondary" id="edClear">Clear</button></div>
  <div class="meta" id="edCount"></div>
 
@@ -4003,34 +4003,44 @@ function eetFatalSignError(msg) { const e = new Error(msg); e.fatal = true; retu
 
 async function eetSignOne(inv) {
   const base = "/api/eee-taxi/batch/" + _eetBatchId + "/invoice/" + inv.id;
-
-  const pdfRes = await fetch(base + "/unsigned", { headers: authHeaders() });
-  if (pdfRes.status === 401) { logout(); throw eetFatalSignError("Session expired. Log in again."); }
-  if (!pdfRes.ok) throw new Error("Could not fetch the unsigned PDF from the server.");
-  const pdfB64 = _arrayBufferToBase64(await pdfRes.arrayBuffer());
-
-  let signRes;
-  try {
-    signRes = await fetch(`${SIGN_HELPER_URL}/sign`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pdf_b64: pdfB64, pin: _eetPin, token_serial: _eetTokenSerial, signing_profile: "eee", sig_box: inv.sig_box || null }),
-    });
-  } catch (_) {
-    throw eetFatalSignError("Signing helper stopped responding. Start PalliaSignHelper.exe and click Retry.");
+  async function signPdf(pdfB64) {
+    let signRes;
+    try {
+      signRes = await fetch(`${SIGN_HELPER_URL}/sign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pdf_b64: pdfB64, pin: _eetPin, token_serial: _eetTokenSerial, signing_profile: "eee", sig_box: inv.sig_box || null }),
+      });
+    } catch (_) {
+      throw eetFatalSignError("Signing helper stopped responding. Start PalliaSignHelper.exe and click Retry.");
+    }
+    if (signRes.status === 409) { const err = await signRes.json(); throw eetFatalSignError(err.detail); }
+    if (signRes.status === 401) throw eetFatalSignError("Incorrect DSC PIN. Correct the PIN above and click Retry.");
+    if (signRes.status === 503) throw eetFatalSignError("USB token not found. Plug in the DSC pendrive and click Retry.");
+    if (!signRes.ok) {
+      const err = await signRes.json().catch(() => ({}));
+      throw new Error(err.detail || "Signing failed.");
+    }
+    const { signed_pdf_b64 } = await signRes.json();
+    return Uint8Array.from(atob(signed_pdf_b64), c => c.charCodeAt(0));
   }
-  if (signRes.status === 409) { const err = await signRes.json(); throw eetFatalSignError(err.detail); }
-  if (signRes.status === 401) throw eetFatalSignError("Incorrect DSC PIN. Correct the PIN above and click Retry.");
-  if (signRes.status === 503) throw eetFatalSignError("USB token not found. Plug in the DSC pendrive and click Retry.");
-  if (!signRes.ok) {
-    const err = await signRes.json().catch(() => ({}));
-    throw new Error(err.detail || "Signing failed.");
+  async function fetchUnsigned(query) {
+    const res = await fetch(base + "/unsigned" + query, { headers: authHeaders() });
+    if (res.status === 401) { logout(); throw eetFatalSignError("Session expired. Log in again."); }
+    if (!res.ok) throw new Error("Could not fetch the unsigned PDF from the server.");
+    return res;
   }
-  const { signed_pdf_b64 } = await signRes.json();
-
-  const bytes = Uint8Array.from(atob(signed_pdf_b64), c => c.charCodeAt(0));
+  const invoiceRes = await fetchUnsigned("?invoice_only=true");
+  const hasDocuments = invoiceRes.headers.get("X-Has-Supporting-Documents") === "true";
+  const invoiceBytes = await signPdf(_arrayBufferToBase64(await invoiceRes.arrayBuffer()));
+  let combinedBytes = invoiceBytes;
+  if (hasDocuments) {
+    const combinedRes = await fetchUnsigned("");
+    combinedBytes = await signPdf(_arrayBufferToBase64(await combinedRes.arrayBuffer()));
+  }
   const fd = new FormData();
-  fd.append("file", new Blob([bytes], { type: "application/pdf" }), "signed.pdf");
+  fd.append("file", new Blob([combinedBytes], { type: "application/pdf" }), "signed.pdf");
+  fd.append("invoice_file", new Blob([invoiceBytes], { type: "application/pdf" }), "invoice_signed.pdf");
   const up = await fetch(base + "/signed", { method: "POST", headers: authHeaders(), body: fd });
   if (!up.ok) {
     const err = await up.json().catch(() => ({}));
