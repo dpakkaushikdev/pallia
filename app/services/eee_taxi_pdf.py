@@ -196,17 +196,31 @@ def generate_eee_taxi_invoice_pdf(
 
     inv_d  = _d(ctx.invoice_date)
     trip_d = _d(ctx.trip_date)
-    ref    = f"{ctx.invoice_no} dt. {inv_d}"
+    # Give identifiers more room within the existing header width.
+    meta_widths = [rw*0.28, rw*0.32, rw*0.20, rw*0.20]
+    identifier_width = meta_widths[1] - 6  # three-point padding on each side
+
+    def identifier(text: str, *, reference: bool = False) -> Paragraph:
+        style = st["xs"]
+        text_width = pdfmetrics.stringWidth(text, style.fontName, style.fontSize)
+        if text_width > identifier_width:
+            style = ParagraphStyle("identifier", parent=style,
+                                   fontSize=style.fontSize * identifier_width / text_width)
+        content = escape(text)
+        if reference:
+            content += f"<br/>dt. {inv_d}"
+        return _p(content, style)
+
     meta_rows = [
-        [_p("Invoice No.", st["xsb"]),         _p(ctx.invoice_no, st["xs"]), _p("Dated", st["xsb"]),          _p(inv_d, st["xs"])],
+        [_p("Invoice No.", st["xsb"]),         identifier(ctx.invoice_no), _p("Dated", st["xsb"]),          _p(inv_d, st["xs"])],
         [_p("Delivery Note", st["xs"]),         _p("", st["xs"]),             _p("", st["xs"]),                 _p("", st["xs"])],
-        [_p("Reference No. &amp; Date.", st["xsb"]), _p(ref, st["xs"]),      _p("Other References", st["xs"]), _p("", st["xs"])],
-        [_p("Buyer's Order No.", st["xsb"]),    _p(ctx.route_no, st["xs"]),  _p("Dated", st["xsb"]),          _p(trip_d, st["xs"])],
+        [_p("Reference No. &amp; Date.", st["xsb"]), identifier(ctx.invoice_no, reference=True), _p("Other References", st["xs"]), _p("", st["xs"])],
+        [_p("Buyer's Order No.", st["xsb"]),    identifier(ctx.route_no),  _p("Dated", st["xsb"]),          _p(trip_d, st["xs"])],
         [_p("Dispatch Doc No.", st["xs"]),       _p("", st["xs"]),             _p("Delivery Note Date", st["xs"]), _p("", st["xs"])],
         [_p("Dispatched through", st["xs"]),     _p("", st["xs"]),             _p("Destination", st["xs"]),     _p("", st["xs"])],
         [_p("Bill of Lading/LR-RR No.", st["xsb"]), _p(f"dt. {trip_d}", st["xs"]), _p("Motor Vehicle No.", st["xsb"]), _p(escape(ctx.car_no), st["xs"])],
     ]
-    meta_tbl = Table(meta_rows, colWidths=[rw*0.32, rw*0.24, rw*0.22, rw*0.22])
+    meta_tbl = Table(meta_rows, colWidths=meta_widths)
     meta_tbl.setStyle(TableStyle([
         ("BOX",(0,0),(-1,-1),0.5,colors.black), ("INNERGRID",(0,0),(-1,-1),0.3,colors.black),
         ("LEFTPADDING",(0,0),(-1,-1),3), ("RIGHTPADDING",(0,0),(-1,-1),3),
