@@ -30,8 +30,12 @@ class EyFare:
 
 def calculate_ey_fare(row, rates: EyRateCard) -> EyFare:
     minutes = duration_minutes(row.trip_duration_str)
+    # Night eligibility uses the Pick up / Drop Time columns, not Trip Duration
+    # (which can be garage to garage). A drop earlier than pickup is next day.
     start = clock_minutes(row.pickup_time_str)
-    end = start + minutes
+    end = clock_minutes(row.drop_time_str)
+    if end < start:
+        end += 1440
     night = ZERO
     for day in range(-1, end // 1440 + 1):
         night_start = day * 1440 + rates.night_start_hour * 60 + rates.night_start_minute

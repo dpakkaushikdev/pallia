@@ -83,16 +83,44 @@ def test_p2p_formula_minimum_and_grace(duration, kms, expected):
     assert result.night == 0
 
 
-@pytest.mark.parametrize("pickup,duration,night,fare", [("22:00", "1:00", 0, "322"), ("23:00", "2:00", 250, "617.50"), ("04:30", "1:00", 250, "572")])
-def test_p2p_night_charge_applies_when_trip_overlaps_night_window(pickup, duration, night, fare):
-    result = calculate_ey_fare(row(**{"Pick up Time": pickup, "Trip Duration": duration}), EyRateCard())
+@pytest.mark.parametrize("pickup,drop,duration,night,fare", [("22:00", "23:00", "1:00", 0, "322"),
+    ("23:00", "01:00", "2:00", 250, "617.50"), ("04:30", "05:30", "1:00", 250, "572")])
+def test_p2p_night_charge_applies_when_trip_overlaps_night_window(pickup, drop, duration, night, fare):
+    result = calculate_ey_fare(row(**{"Pick up Time": pickup, "Drop Time": drop, "Trip Duration": duration}), EyRateCard())
     assert result.night == night
     assert result.fare == Decimal(fare)
 
 
+@pytest.mark.parametrize("pickup,drop,night", [
+    ("20:15", "22:00", 0), ("20:00", "23:00", 0), ("20:00", "23:01", 250),
+    ("22:30", "00:40", 250), ("23:30", "00:50", 250), ("00:10", "01:00", 250),
+    ("04:30", "06:00", 250), ("05:00", "07:00", 0),
+])
+def test_night_charge_uses_pickup_and_drop_time_columns(pickup, drop, night):
+    # Trip Duration (garage to garage here) must not move the trip into the night window.
+    trip = row(**{"Package": "1300", "Pick up Time": pickup, "Drop Time": drop, "Trip Duration": "3:06"})
+    assert calculate_ey_fare(trip, EyRateCard()).night == night
+
+
+def test_night_charge_follows_rate_master_window_and_amount():
+    rates = EyRateCard(night_charge=Decimal("300"), night_start_hour=22, night_end_hour=6)
+    trip = row(**{"Pick up Time": "20:15", "Drop Time": "22:00", "Trip Duration": "1:45"})
+    late = row(**{"Pick up Time": "20:15", "Drop Time": "22:01", "Trip Duration": "1:46"})
+    assert calculate_ey_fare(trip, rates).night == 0
+    assert calculate_ey_fare(late, rates).night == 300
+
+
+def test_test_xlsx_trips_with_garage_duration_get_no_night_charge():
+    trip = row(**{"Package": "1300", "Pick up Time": "20:15", "Drop Time": "22:00",
+                  "Trip Duration": "3:06", "Total kms": "69"})
+    result = calculate_ey_fare(trip, EyRateCard())
+    assert result.night == 0
+    assert result.fare == Decimal("1426")
+
+
 def test_ey_p2p_invoice_description_matches_reference_format():
     rates = EyRateCard()
-    trip = apply_ey_fares([row(**{"Pick up Time": "17:00", "Trip Duration": "0:46", "Total kms": "5"})], rates)[0]
+    trip = apply_ey_fares([row(**{"Pick up Time": "17:00", "Drop Time": "17:46", "Trip Duration": "0:46", "Total kms": "5"})], rates)[0]
     lines = fare_description(trip, rates)
     assert "Total Hrs 46 Mins (31*1.5 = 46.5)" in lines
     assert "Total Kms 5 Km (5*21.00 = 105)" in lines
@@ -151,17 +179,17 @@ def test_rental_packages_extras_and_upgrade_boundaries(pkg, duration, kms, label
     assert result.fare == Decimal(fare)
 
 
-@pytest.mark.parametrize("start,duration,night", [("22:00", "1:00", 0), ("23:00", "1:00", 250),
-    ("04:59", "0:01", 250), ("05:00", "1:00", 0), ("22:00", "8:00", 250)])
-def test_rental_night_window_including_crossing_midnight(start, duration, night):
-    result = calculate_ey_fare(row(**{"Package": "1800", "Pick up Time": start, "Trip Duration": duration}), EyRateCard())
-    assert result.night == night
+@pytest.mark.parametrize("start,drop,duration,night", [("22:00", "23:00", "1:00", 0), ("23:00", "00:00", "1:00", 250),
+    ("04:59", "05:00", "0:01", 250), ("05:00", "06:00", "1:00", 0), ("22:00", "06:00", "8:00", 250)])
+def test_rental_night_window_including_crossing_midnight(start, drop, duration, night):
+    trip = row(**{"Package": "1800", "Pick up Time": start, "Drop Time": drop, "Trip Duration": duration})
+    assert calculate_ey_fare(trip, EyRateCard()).night == night
 
 
 def test_ey_night_charge_boundary_supports_minutes():
     rates = EyRateCard(night_start_hour=23, night_start_minute=1)
-    before_start = calculate_ey_fare(row(**{"Pick up Time": "23:00", "Trip Duration": "0:01"}), rates)
-    at_start = calculate_ey_fare(row(**{"Pick up Time": "23:01", "Trip Duration": "0:01"}), rates)
+    before_start = calculate_ey_fare(row(**{"Pick up Time": "23:00", "Drop Time": "23:01", "Trip Duration": "0:01"}), rates)
+    at_start = calculate_ey_fare(row(**{"Pick up Time": "23:01", "Drop Time": "23:02", "Trip Duration": "0:01"}), rates)
     assert before_start.night == 0
     assert at_start.night == 250
 
@@ -232,7 +260,7 @@ def test_calculated_csv_roundtrip_keeps_toll_separate():
 
 def test_p2p_override_cannot_remove_night_charge():
     rates = EyRateCard()
-    rows = [row(**{"Pick up Time": "23:00", "Trip Duration": "2:00"})]
+    rows = [row(**{"Pick up Time": "23:00", "Drop Time": "01:00", "Trip Duration": "2:00"})]
     with pytest.raises(ValueError, match="minimum plus night charge"):
         apply_ey_fares(rows, rates, {0: Decimal("571.99")})
 
