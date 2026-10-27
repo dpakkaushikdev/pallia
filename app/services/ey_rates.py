@@ -33,6 +33,7 @@ class EyRateCard(BaseModel):
     extra_minute_rate: Decimal = Field(default=Decimal("2"), ge=0, le=1000, decimal_places=2)
     rental_grace_minutes: int = Field(default=15, ge=0, le=120)
     medium_upgrade_minutes: int = Field(default=300, ge=1, le=1440)
+    medium_upgrade_kms: int = Field(default=50, ge=1, le=2000)
     large_upgrade_minutes: int = Field(default=420, ge=1, le=1440)
     large_upgrade_kms: int = Field(default=70, ge=1, le=2000)
     night_charge: Decimal = Field(default=Decimal("250"), ge=0, le=10000, decimal_places=2)
@@ -63,6 +64,8 @@ class EyRateCard(BaseModel):
             raise ValueError("First upgrade must fall between the first and second package hours.")
         if not self.packages[1].hours * 60 <= self.large_upgrade_minutes < self.packages[2].hours * 60:
             raise ValueError("Second upgrade must fall between the second and third package hours.")
+        if not self.packages[0].kms <= self.medium_upgrade_kms < self.packages[1].kms:
+            raise ValueError("6/60 km threshold must fall between the first and second package limits.")
         if not self.packages[1].kms <= self.large_upgrade_kms < self.packages[2].kms:
             raise ValueError("Large-package km threshold must fall between the second and third package limits.")
         if (self.night_start_hour, self.night_start_minute) == (self.night_end_hour, self.night_end_minute):

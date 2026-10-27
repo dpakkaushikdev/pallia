@@ -172,11 +172,33 @@ def test_ey_rental_kilometres_and_vehicle_model_appear_in_invoice(tmp_path):
     (1300, "7:00", "70", "6/60", "1530"), (1300, "7:01", "70", "8/80", "1800"),
     (1300, "6:00", "70.1", "8/80", "1800"), (900, "7:01", "40", "8/80", "1800"),
     (1800, "1:00", "10", "8/80", "1800"), (1800, "8:16", "81", "8/80", "1816"),
+    (900, "3:00", "50", "4/40", "1040"), (900, "3:00", "50.5", "6/60", "1300"),
+    (900, "3:00", "51", "6/60", "1300"), (900, "3:00", "65", "6/60", "1370"),
+    (900, "3:00", "70", "6/60", "1440"), (900, "3:00", "71", "8/80", "1800"),
+    (1300, "3:00", "51", "6/60", "1300"),
 ])
 def test_rental_packages_extras_and_upgrade_boundaries(pkg, duration, kms, label, fare):
     result = calculate_ey_fare(row(**{"Package": str(pkg), "Trip Duration": duration, "Total kms": kms}), EyRateCard())
     assert result.package_label == label
     assert result.fare == Decimal(fare)
+
+
+def test_small_to_medium_km_threshold_comes_from_rate_master():
+    rates = EyRateCard(medium_upgrade_kms=55)
+    stays = calculate_ey_fare(row(**{"Package": "900", "Trip Duration": "3:00", "Total kms": "55"}), rates)
+    moves = calculate_ey_fare(row(**{"Package": "900", "Trip Duration": "3:00", "Total kms": "56"}), rates)
+    assert stays.package_label == "4/40" and stays.fare == Decimal("1110")
+    assert moves.package_label == "6/60" and moves.fare == Decimal("1300")
+
+
+@pytest.mark.parametrize("kms", [39, 60])
+def test_small_to_medium_km_threshold_must_sit_between_package_limits(kms):
+    with pytest.raises(ValueError, match="6/60 km threshold"):
+        EyRateCard(medium_upgrade_kms=kms)
+
+
+def test_saved_rates_without_km_threshold_default_to_50():
+    assert EyRateCard.model_validate(EyRateCard().model_dump(mode="json", exclude={"medium_upgrade_kms"})).medium_upgrade_kms == 50
 
 
 @pytest.mark.parametrize("start,drop,duration,night", [("22:00", "23:00", "1:00", 0), ("23:00", "00:00", "1:00", 250),

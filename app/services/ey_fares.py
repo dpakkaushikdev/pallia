@@ -54,13 +54,15 @@ def calculate_ey_fare(row, rates: EyRateCard) -> EyFare:
     package = next((p for p in rates.packages if p.fare == row.package), None)
     if package is None:
         raise ValueError(f"Unknown EY rental package: {row.package}")
-    # EY upgrades are strictly after the thresholds; exactly 5h/7h/70km
+    # EY upgrades are strictly after the thresholds; exactly 5h/50km/7h/70km
     # stays in the starting/current package and incurs its extra charges.
     if package != rates.packages[-1] and (
         minutes > rates.large_upgrade_minutes or row.billing_kms > rates.large_upgrade_kms
     ):
         package = rates.packages[-1]
-    elif package == rates.packages[0] and minutes > rates.medium_upgrade_minutes:
+    elif package == rates.packages[0] and (
+        minutes > rates.medium_upgrade_minutes or row.billing_kms > rates.medium_upgrade_kms
+    ):
         package = rates.packages[1]
     extra_minutes = max(0, minutes - package.hours * 60 - rates.rental_grace_minutes)
     extra_time_minutes = max(0, minutes - package.hours * 60)

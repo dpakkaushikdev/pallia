@@ -1395,7 +1395,7 @@
           <p class="meta">The CSV Package fare selects the starting package. Extra time is charged per minute after package hours and one grace period.</p>
           <div id="eyPackageFields"></div>
           <div class="grid-3" id="eyRentalFields" style="margin-top:16px;"></div>
-          <p class="meta">Upgrade 4h/40km to 6h/60km after 5 hours; upgrade to 8h/80km after 7 hours or 70 km. Exactly at a threshold, the current package's extra charges still apply.</p>
+          <p class="meta">Upgrade 4h/40km to 6h/60km after 5 hours or 50 km; upgrade to 8h/80km after 7 hours or 70 km. Exactly at a threshold, the current package's extra charges still apply.</p>
           <div class="grid-3" id="eyUpgradeFields" style="margin-top:12px;"></div>
           <p class="meta">Night charges apply to rentals only when the trip overlaps the night window. Rental kilometres use the same whole-kilometre treatment as PWC.</p>
         </div>
@@ -5404,7 +5404,7 @@ let _ey = { saved: null, password: null };
 const EY_FIELDS = {
   eyP2pFields: { p2p_per_minute: "Per minute (Rs)", p2p_per_km: "Per km (Rs)", p2p_grace_minutes: "Grace minutes", p2p_minimum: "Minimum fare (Rs)" },
   eyRentalFields: { extra_km_rate: "Extra km (Rs)", extra_minute_rate: "Extra minute (Rs)", rental_grace_minutes: "Extra-time grace minutes", night_charge: "Rental night charge (Rs)", night_start_hour: "Night starts hour (0–23)", night_start_minute: "Night starts minute (0–59)", night_end_hour: "Night ends hour (0–23)", night_end_minute: "Night ends minute (0–59)" },
-  eyUpgradeFields: { medium_upgrade_minutes: "4/40 to 6/60 after total minutes", large_upgrade_minutes: "Upgrade to 8/80 after total minutes", large_upgrade_kms: "Upgrade to 8/80 after total km" },
+  eyUpgradeFields: { medium_upgrade_minutes: "4/40 to 6/60 after total minutes", medium_upgrade_kms: "4/40 to 6/60 after total km", large_upgrade_minutes: "Upgrade to 8/80 after total minutes", large_upgrade_kms: "Upgrade to 8/80 after total km" },
   eyTallyFields: { tally_company: "Exact Tally company name", tally_voucher_type: "Tally voucher type", tally_registration: "GST registration name", tally_sales_local: "Local rental ledger", tally_sales_interstate: "Interstate rental ledger", tally_toll: "Local toll and parking ledger", tally_toll_interstate: "Interstate toll and parking ledger", tally_cgst: "CGST ledger", tally_sgst: "SGST ledger", tally_igst: "IGST ledger" },
 };
 function eyMessage(text, ok = false) {
