@@ -49,7 +49,8 @@ def calculate_ey_fare(row, rates: EyRateCard) -> EyFare:
         charged = max(0, minutes - rates.p2p_grace_minutes)
         time_charge = charged * rates.p2p_per_minute
         km_charge = row.total_kms * rates.p2p_per_km
-        fare = (max(rates.p2p_minimum, time_charge + km_charge) + night).quantize(Decimal("0.01"))
+        # The night charge counts toward the minimum, not on top of it.
+        fare = max(rates.p2p_minimum, time_charge + km_charge + night).quantize(Decimal("0.01"))
         return EyFare(ZERO, charged, time_charge, row.total_kms, km_charge, night, fare)
     package = next((p for p in rates.packages if p.fare == row.package), None)
     if package is None:
@@ -104,9 +105,8 @@ def apply_ey_fares(rows, rates, overrides=None):
     result = []
     for row in rows:
         fare = overrides.get(row.row_index, calculate_ey_fare(row, rates).fare)
-        minimum = rates.p2p_minimum + calculate_ey_fare(row, rates).night if row.booking_type == "p2p" else ZERO
-        if row.booking_type == "p2p" and fare < minimum:
-            raise ValueError(f"EY row {row.row_index + 2}: fare cannot be below the P2P minimum plus night charge {minimum}.")
+        if row.booking_type == "p2p" and fare < rates.p2p_minimum:
+            raise ValueError(f"EY row {row.row_index + 2}: fare cannot be below the P2P minimum {rates.p2p_minimum}.")
         result.append(replace(row, trip_fare=fare, tax_base=fare, total_amount=ZERO))
     return result
 
