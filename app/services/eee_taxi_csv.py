@@ -98,6 +98,10 @@ class EeeTaxiRow:
     drop_zone: str = ""     # "Drop Zone" column
     eng_code: str = ""      # EY buyer's order number
     client_profile: str = "pwc"
+    # Separate charge columns (summed into `parking`); used only to flag missing documents.
+    toll_amount: Decimal = Decimal("0")
+    mcd_amount: Decimal = Decimal("0")
+    parking_amount: Decimal = Decimal("0")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -263,7 +267,8 @@ def parse_eee_taxi_csv(
 
         # ── Fare columns ──────────────────────────────────────────────────────
         trip_fare = _dec(col("trip fare"))
-        toll      = _dec(col("mcd")) + _dec(col("parking")) + _dec(col("toll"))
+        mcd_amount, parking_amount, toll_amount = _dec(col("mcd")), _dec(col("parking")), _dec(col("toll"))
+        toll      = mcd_amount + parking_amount + toll_amount
         tax_base  = trip_fare
         total     = _dec(col("total trip fare"))
 
@@ -295,6 +300,9 @@ def parse_eee_taxi_csv(
             pickup_zone=col("pickup zone"),
             drop_zone=drop_zone,
             eng_code=col("eng code"),
+            toll_amount=toll_amount,
+            mcd_amount=mcd_amount,
+            parking_amount=parking_amount,
         ))
         idx += 1
 

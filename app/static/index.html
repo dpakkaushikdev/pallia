@@ -5106,7 +5106,7 @@ function eetRenderReview() {
     return `<tr class="${out ? "removed" : ""} ${r.warnings.length ? "warn" : ""}">
       <td class="inv">${rcEsc(r.route_no || "—")}${r.eng_code ? `<div class="meta">Eng Code: ${rcEsc(r.eng_code)}</div>` : ""}${warn}</td>
       <td>${rcEsc(new Date(r.trip_date + "T00:00:00").toLocaleDateString("en-IN"))}</td>
-      <td>${r.document_count ? `<span class="text-ok">Available</span><div class="meta">${r.document_count} file${r.document_count === 1 ? "" : "s"}</div>` : '<span class="meta">NA</span>'}</td>
+      <td>${r.document_count ? `<span class="text-ok">Available</span><div class="meta">${r.document_count} file${r.document_count === 1 ? "" : "s"}</div>` : '<span class="meta">NA</span>'}${(r.missing_documents || []).length ? `<div class="meta" style="color:var(--err);font-size:11px;">Missing: ${rcEsc(r.missing_documents.join(", "))}</div>` : ""}</td>
       <td>${rcEsc(r.guest_name)}<div class="meta" style="font-size:11px;">${rcEsc(r.entity_name)}</div></td>
       <td>${r.booking_type === "rental" ? "Rental" : "P2P"}</td>
       <td class="inv">${rcEsc(r.car_no)}</td>

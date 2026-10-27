@@ -18,7 +18,7 @@ from app.services.eee_taxi_cost_centres import get_cost_centre_state, normalize_
 from app.services.eee_taxi_csv import EeeTaxiRow
 from app.services.eee_taxi_pdf import compute_tax
 from app.services.eee_taxi_profiles import row_client, row_tax
-from app.services.eee_taxi_documents import available_documents, normalize_route
+from app.services.eee_taxi_documents import available_documents, missing_documents, normalize_route
 
 _TOLERANCE = Decimal("0.01")
 
@@ -39,6 +39,7 @@ class ReviewRow:
     warnings: tuple[str, ...]
     eng_code: str = ""
     document_count: int = 0
+    missing_documents: tuple[str, ...] = ()
 
     def to_dict(self) -> dict:
         return {
@@ -57,6 +58,7 @@ class ReviewRow:
             "eng_code": self.eng_code,
             "document_count": self.document_count,
             "document_status": "Available" if self.document_count else "NA",
+            "missing_documents": list(self.missing_documents),
         }
 
 
@@ -116,6 +118,7 @@ def review_rows(db: Session, rows: list[EeeTaxiRow], client_master=None, client_
         base = row.tax_base + row.parking
         gst = sum(row_tax(row))
         total = row.total_amount or base + gst
+        files = documents.get(normalize_route(row.route_no), {})
         out.append(ReviewRow(
             row_index=row.row_index,
             route_no=row.route_no,
@@ -130,6 +133,7 @@ def review_rows(db: Session, rows: list[EeeTaxiRow], client_master=None, client_
             total=total,
             warnings=tuple(_row_warnings(row, total, repeats, invoiced, cost_centres, client_master)),
             eng_code=row.eng_code,
-            document_count=documents.get(normalize_route(row.route_no), 0),
+            document_count=sum(files.values()),
+            missing_documents=missing_documents(row, client_profile, set(files)),
         ))
     return out

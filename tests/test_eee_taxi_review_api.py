@@ -151,11 +151,14 @@ def test_upload_review_document_availability_is_optional_and_client_specific(cli
         assert calculated.status_code == 200,calculated.text
         baseline=preview()
         assert [row["document_status"] for row in baseline] == ["NA","NA"]
+        assert baseline[0]["missing_documents"] == ["DS","Parking","Toll / MCD","GPS"]
+        assert baseline[1]["missing_documents"] == []
         document("pwc"," ggn-0qrt ")
         document("ey","GGN-OYFS")
         document("pwc","GGN-OYFS",saved=False)
         rows=preview()
         assert rows[0]["document_status"] == "Available" and rows[0]["document_count"] == 1
+        assert rows[0]["missing_documents"] == ["Parking","Toll / MCD","GPS"]
         assert rows[1]["document_status"] == "NA" and rows[1]["document_count"] == 0
         assert rows[0]["warnings"] == baseline[0]["warnings"]
         assert rows[1]["warnings"] == baseline[1]["warnings"]
