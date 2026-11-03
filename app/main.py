@@ -31,6 +31,7 @@ from app.api import eee_taxi_rates as eee_taxi_rates_api
 from app.api import eee_taxi_tally as eee_taxi_tally_api
 from app.api import eee_taxi_vehicles as eee_taxi_vehicles_api
 from app.api import eee_taxi_drivers as eee_taxi_drivers_api
+from app.api import eee_taxi_mis as eee_taxi_mis_api
 from app.api import pallia_verification as pallia_verification_api
 from app.api import ey_rates as ey_rates_api
 from app.config import settings
@@ -72,6 +73,7 @@ app.include_router(eee_taxi_clients_api.router)
 app.include_router(eee_taxi_tally_api.router)
 app.include_router(eee_taxi_vehicles_api.router)
 app.include_router(eee_taxi_drivers_api.router)
+app.include_router(eee_taxi_mis_api.router)
 app.include_router(pallia_verification_api.router)
 
 

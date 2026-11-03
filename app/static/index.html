@@ -288,7 +288,7 @@
     .btn.xs { padding: 3px 8px; font-size: 12px; }
 
     /* ── Inputs ── */
-    input[type="text"], input[type="search"], input[type="date"], input[type="number"], input[type="email"], input[type="password"], textarea, select {
+    input[type="text"], input[type="search"], input[type="date"], input[type="time"], input[type="number"], input[type="email"], input[type="password"], textarea, select {
       background: var(--panel);
       border: 1px solid var(--input-border);
       border-radius: var(--radius-sm);
@@ -558,6 +558,40 @@
     .ed-bulk-tools {display:flex;align-items:center;gap:12px;}
     .ed-status-badge {display:inline-flex;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:600;background:#eff6ff;color:#1d4ed8;}
     .ed-status-badge.used {background:#ecfdf5;color:#047857;}
+    /* ── EEE-Taxi MIS ── */
+    .mis-head {display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;}
+    .mis-head h1 {font-size:20px;font-weight:600;margin:0 0 4px;}
+    .mis-actions {display:flex;gap:8px;flex-wrap:wrap;}
+    .mis-upload {display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-top:16px;padding:14px 16px;border:1px dashed var(--input-border);border-radius:8px;background:var(--panel-2);}
+    .mis-upload label {display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:500;flex:0 1 220px;}
+    .mis-upload .meta {flex:1 1 260px;align-self:center;}
+    .mis-stats {display:flex;flex-wrap:wrap;margin:0 0 14px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--panel);}
+    .mis-stat {flex:1 1 150px;padding:10px 16px;border-right:1px solid var(--border);}
+    .mis-stat:last-child {border-right:0;}
+    .mis-stat b {display:block;font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;}
+    .mis-stat span {font-size:12px;color:var(--muted);}
+    .mis-stat.warn b {color:var(--warn);}
+    .mis-stat.ok b {color:var(--ok);}
+    #pane-eee-mis .ed-table-wrap {max-height:640px;overflow:auto;border:1px solid var(--border);border-radius:8px;}
+    #pane-eee-mis thead th {position:sticky;top:0;z-index:1;background:var(--panel);white-space:nowrap;padding:9px 10px;}
+    #pane-eee-mis tbody td {white-space:nowrap;padding:8px 10px;font-size:13px;}
+    #pane-eee-mis tbody tr[data-id] {cursor:pointer;}
+    #pane-eee-mis td.num {text-align:right;font-variant-numeric:tabular-nums;}
+    #pane-eee-mis td.cut {max-width:220px;overflow:hidden;text-overflow:ellipsis;}
+    #pane-eee-mis tr.mis-flag td:first-child {box-shadow:inset 3px 0 0 var(--warn);}
+    .mis-issue {display:inline-block;font-size:11.5px;font-weight:500;color:var(--warn);background:var(--warn-bg);border-radius:4px;padding:1px 6px;margin:1px 3px 1px 0;}
+    .mis-ok {font-size:12px;color:var(--ok);}
+    .modal.mis-form {max-width:980px;padding:22px 24px;}
+    .mis-form fieldset {border:0;border-top:1px solid var(--border);padding:12px 0 6px;margin:0;min-width:0;}
+    .mis-form legend {font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding-right:8px;}
+    .mis-grid {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 14px;}
+    .mis-grid label {display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:500;min-width:0;}
+    .mis-grid label.wide {grid-column:span 2;}
+    .mis-grid input {width:100%;box-sizing:border-box;}
+    .mis-grid .field-hint {margin-top:0;min-height:15px;}
+    .mis-form .modal-actions {justify-content:flex-end;flex-wrap:wrap;}
+    .mis-form .modal-actions .btn {flex:0 0 auto;}
+    @media(max-width:760px) {.mis-grid {grid-template-columns:repeat(2,minmax(0,1fr));}}
     #pane-eee-document-history .ed-table-wrap {max-height:680px;overflow:auto;border:1px solid var(--border);border-radius:8px;}
     #pane-eee-document-history thead th {position:sticky;top:0;z-index:1;background:var(--panel);}
     .ed-record-docs {display:grid;gap:6px;min-width:140px;padding:2px;}
@@ -1073,6 +1107,49 @@
  <div class="ed-list-toolbar"><div class="meta" id="ehCount" role="status"></div><div class="ed-bulk-tools"><span class="meta" id="ehSelected">0 selected</span><button class="btn danger sm" id="ehDelete" disabled>Delete selected</button></div></div>
  <div class="ed-table-wrap"><table class="data-table"><thead><tr><th><input type="checkbox" id="ehAll" aria-label="Select all visible entries"></th><th>DS no/Route No</th><th>Client</th><th>Document date</th><th>DS</th><th>Parking</th><th>Toll / MCD</th><th>GPS</th><th>Email Screenshot</th><th>Status</th><th>Updated</th><th>Edited by / date</th><th>Actions</th></tr></thead><tbody id="ehEntries"></tbody></table></div>
  <div style="display:flex;gap:8px;align-items:center;margin-top:12px;"><button class="btn secondary sm" id="ehPrevious">Previous</button><span class="meta" id="ehPageInfo"></span><button class="btn secondary sm" id="ehNext">Next</button></div></div></div>
+    <div class="tab-pane" id="pane-eee-mis">
+      <div class="card" style="padding:20px;">
+        <div class="mis-head">
+          <div>
+            <h1>MIS</h1>
+            <p class="meta">One row per trip. Upload the MMT Trip Report or add trips by hand; click a row to edit it. Drivers and cabs are checked against the masters.</p>
+          </div>
+          <div class="mis-actions">
+            <button class="btn" onclick="misOpenForm()">Add trip</button>
+            <button class="btn secondary" id="misExport" onclick="misExport()">Download Excel</button>
+          </div>
+        </div>
+        <div class="mis-upload">
+          <label>Dispatcher name<input type="text" id="misDispatcher" maxlength="120" placeholder="Your name" autocomplete="off"></label>
+          <button class="btn secondary" id="misUploadBtn" onclick="$('#misFile').click()">Upload MMT file (.xlsx)</button>
+          <input type="file" id="misFile" accept=".xlsx" class="hidden" onchange="misUpload(this)">
+          <span class="meta">MMT portal export, sheet "Trip Report". Trips already in the MIS (same External Id) are skipped, so the same file can be uploaded again safely.</span>
+        </div>
+        <div id="misMsg" class="hidden" style="margin-top:14px;" aria-live="polite"></div>
+        <div class="ed-filters">
+          <label>Search<input type="search" id="misSearch" maxlength="120" placeholder="Guest, driver, cab or route number" oninput="misRender()"></label>
+          <label>Trip date from<input type="date" id="misFrom" onchange="misLoad()"></label>
+          <label>Trip date to<input type="date" id="misTo" onchange="misLoad()"></label>
+          <label>Company<select id="misCompany" onchange="misLoad()"><option value="">All companies</option><option>MMT</option><option>EY</option><option>PWC</option></select></label>
+          <label>Show<select id="misShow" onchange="misRender()"><option value="">All trips</option><option value="fix">Needs fixing</option></select></label>
+        </div>
+        <div class="mis-stats" id="misStats" role="status"></div>
+        <div class="ed-list-toolbar"><div class="meta" id="misCount"></div><div class="ed-bulk-tools"><span class="meta" id="misSelected">0 selected</span><button class="btn danger sm" id="misDelete" onclick="misDeleteSelected()" disabled>Delete selected</button></div></div>
+        <div class="ed-table-wrap">
+          <table class="data-table">
+            <thead><tr><th><input type="checkbox" id="misAll" aria-label="Select all shown trips" onchange="misSelectAll(this.checked)"></th><th>Date</th><th>Pick up</th><th>Drop</th><th>Company</th><th>DS no/Route No</th><th>Guest</th><th>Driver</th><th>Cab No</th><th>Zones</th><th>Package</th><th style="text-align:right;">Kms</th><th style="text-align:right;">Trip Fare</th><th>Check</th></tr></thead>
+            <tbody id="misRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <datalist id="misCompanies"><option>MMT</option><option>EY</option><option>PWC</option></datalist>
+      <datalist id="misZones"></datalist>
+      <datalist id="misPackages"></datalist>
+      <datalist id="misDriverIds"></datalist>
+      <datalist id="misDriverNames"></datalist>
+      <datalist id="misCabs"></datalist>
+    </div>
+
     <div class="tab-pane" id="pane-eee-billing">
       <div class="page-hd">
         <h1>EEE-Taxi — Invoice Generation</h1>
@@ -2012,7 +2089,8 @@ function buildSidebar() {
   eeeSubNav.id = "eeeSubNav";
 
   const eeeSubs = [
-    { id: "eee-billing",    label: "Billing",    icon: _ico('<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>') },
+    { id: "eee-mis",        label: "MIS",        icon: _ico('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/>') },
+    { id: "eee-billing",    label: "Billing",   icon: _ico('<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>') },
     { id: "eee-operations", label: "Operations", icon: _ico('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>') },
     { id: "eee-history",    label: "Invoice History", icon: _ico('<path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 5 6.3L3 8"/><path d="M12 7v5l4 2"/>') },
     { id: "eee-tally",      label: "Tally Export", icon: _ico('<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>') },
@@ -2037,6 +2115,7 @@ function buildSidebar() {
 }
 
 const EEE_SUB_DEFS = [
+  { id: "eee-mis",        label: "EEE-Taxi — MIS" },
   { id: "eee-billing",    label: "EEE-Taxi — Billing" },
   { id: "eee-operations", label: "EEE-Taxi — Operations" },
   { id: "eee-history",    label: "EEE-Taxi — Invoice History" },
@@ -2085,6 +2164,7 @@ function switchTab(tabId) {
   if (tabId === "pallia-master") pMasterLoad();
   if (tabId === "admin") refreshUsers();
   if (tabId === "eee-rates") { rcLoad(); ccLoad(); eyLoad(); cmLoad(); vmLoad(); dmLoad(); }
+  if (tabId === "eee-mis") misInit();
   if (tabId === "eee-history") historyLoad();
   if (tabId === "eee-tally") txLoad();
   if (tabId === "eee-documents") edLoad();
@@ -5388,6 +5468,290 @@ async function dmSave() {
     dmMessage("Driver master saved.", true);
   } catch (error) { dmMessage(error.message); }
   finally { button.disabled = false; }
+}
+
+// ── EEE-Taxi MIS: trips uploaded from the MMT export or typed in, edited one at a time ──
+// [key, label, kind]; kind is date, time, num, wide, or list:<datalist id>.
+const MIS_FORM = [
+  ["Trip", [["date", "Date *", "date"], ["company_name", "Company Name *", "list:misCompanies"], ["route_no", "DS no/Route No"], ["package", "Package", "list:misPackages"], ["guest_name", "Guest Name", "wide"], ["dispatcher_name", "Dispatcher Name"], ["duty_closed_by", "Duty closed by"]]],
+  ["Driver and cab", [["driver_id", "Driver ID (Truein)", "list:misDriverIds"], ["driver_name", "Driver Name", "list:misDriverNames"], ["driver_contact", "Driver Cont No"], ["cab_no", "Cab No", "list:misCabs"]]],
+  ["Route and timing", [["pickup_address", "Pickup Address", "wide"], ["pickup_zone", "Pickup Zone", "list:misZones"], ["pickup_time", "Pick up Time", "time"], ["drop_location", "Drop Location", "wide"], ["drop_zone", "Drop Zone", "list:misZones"], ["drop_time", "Drop Time", "time"], ["trip_end_date", "Trip End Date", "date"], ["trip_duration", "Trip Duration"], ["hub_out", "Hub Out", "time"], ["hub_in", "Hub In", "time"], ["driver_hours", "Driver Hours"]]],
+  ["Distance", [["start_odometer", "Start Odometer", "num"], ["end_odometer", "End Odometer", "num"], ["total_kms", "Total kms", "num"], ["dead_run_kms", "Dead Run Kms", "num"]]],
+  ["Charges and payment", [["trip_fare", "Trip Fare", "num"], ["extra_km_charges", "Km/Extra/Km Charges", "num"], ["extra_time_charges", "Time Extra/Time Charges", "num"], ["night_charge", "Night Charge 11pm to 5am", "num"], ["mcd", "MCD", "num"], ["parking", "Parking", "num"], ["toll", "Toll", "num"], ["cash_to_receive", "Cash to be Received", "num"], ["mmt_base_cost", "MMT Base Cost", "num"], ["mmt_prepaid_amount", "MMT Prepaid Amt", "num"], ["b2c_payment_status", "B2C payment Status"], ["remarks", "Remarks", "wide"]]],
+];
+const MIS_AUTO = { trip_duration: "Auto from times", total_kms: "Auto from odometers, or type" };
+// Kept for "Save & add another": the next trip is usually the same day, driver and cab.
+const MIS_KEEP = ["date", "company_name", "dispatcher_name", "driver_id", "driver_name", "driver_contact", "cab_no"];
+let _mis = { trips: [], lookups: null, selected: new Set(), truncated: false, started: false };
+
+function misMessage(text, ok = false) {
+  $("#misMsg").className = text ? "extraction-note " + (ok ? "ok" : "err") : "hidden";
+  $("#misMsg").textContent = text;
+}
+function misIstToday() { return new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10); }
+function misDmy(iso) { return iso ? iso.split("-").reverse().join("/") : ""; }
+function misMoney(n) { return "₹" + Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 }); }
+function misPlural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
+function misDigits(s) { return (s || "").replace(/\D/g, "").slice(-10); }
+function misRecallDispatcher() { try { return localStorage.getItem("misDispatcher") || ""; } catch (_) { return ""; } }
+function misRememberDispatcher(name) { try { localStorage.setItem("misDispatcher", name); } catch (_) { /* private window */ } }
+
+async function misInit() {
+  if (!_mis.started) {
+    _mis.started = true;
+    const today = misIstToday();
+    $("#misFrom").value = today.slice(0, 8) + "01";
+    $("#misTo").value = today;
+    $("#misDispatcher").value = misRecallDispatcher() || (currentUser && currentUser.full_name) || "";
+    $("#misDispatcher").addEventListener("change", e => misRememberDispatcher(e.target.value.trim()));
+    $("#misRows").addEventListener("click", misRowClick);
+  }
+  await Promise.all([misLoadLookups(), misLoad()]);
+}
+async function misLoadLookups() {
+  try {
+    _mis.lookups = await api("/api/eee-taxi/mis/lookups");
+    const options = values => values.map(v => `<option value="${rcEsc(v)}">`).join("");
+    $("#misDriverIds").innerHTML = _mis.lookups.drivers.filter(d => d.truein_id).map(d => `<option value="${rcEsc(d.truein_id)}">${rcEsc(d.name)}</option>`).join("");
+    $("#misDriverNames").innerHTML = options([...new Set(_mis.lookups.drivers.map(d => d.name))]);
+    $("#misCabs").innerHTML = options(_mis.lookups.cabs);
+  } catch (error) { misMessage("Could not load the driver and vehicle masters: " + error.message); }
+}
+function misQuery() {
+  const params = new URLSearchParams();
+  [["date_from", "#misFrom"], ["date_to", "#misTo"], ["company", "#misCompany"]].forEach(([key, sel]) => { if ($(sel).value) params.set(key, $(sel).value); });
+  return params;
+}
+async function misLoad() {
+  try {
+    const data = await api("/api/eee-taxi/mis?" + misQuery());
+    _mis.trips = data.trips;
+    _mis.truncated = data.truncated;
+    const fill = (sel, base, values) => { $(sel).innerHTML = [...new Set([...base, ...values.filter(Boolean)])].map(v => `<option value="${rcEsc(v)}">`).join(""); };
+    fill("#misZones", ["Airport", "Delhi", "Gurgaon", "Noida"], data.trips.flatMap(t => [t.pickup_zone, t.drop_zone]));
+    fill("#misPackages", ["City to Airport", "Airport to City"], data.trips.map(t => t.package));
+    misRender();
+  } catch (error) { misMessage("Could not load trips: " + error.message); }
+}
+function misVisible() {
+  const query = $("#misSearch").value.trim().toLowerCase();
+  const onlyFix = $("#misShow").value === "fix";
+  return _mis.trips.filter(t => (!onlyFix || t.issues.length) && (!query ||
+    [t.guest_name, t.driver_name, t.driver_id, t.cab_no, t.route_no, t.pickup_address, t.drop_location].join(" ").toLowerCase().includes(query)));
+}
+function misRender() {
+  const trips = misVisible();
+  const shown = new Set(trips.map(t => t.id));
+  _mis.selected = new Set([..._mis.selected].filter(id => shown.has(id)));
+  const sum = key => trips.reduce((total, t) => total + (Number(t[key]) || 0), 0);
+  const fix = trips.filter(t => t.issues.length).length;
+  $("#misStats").innerHTML = [
+    ["", trips.length.toLocaleString("en-IN"), trips.length === 1 ? "trip" : "trips"],
+    ["", misMoney(sum("trip_fare")), "trip fare"],
+    ["", Math.round(sum("total_kms")).toLocaleString("en-IN"), "km"],
+    [fix ? "warn" : "ok", fix || (trips.length ? "All" : "0"), fix ? "need fixing" : "match the masters"],
+  ].map(([cls, value, label]) => `<div class="mis-stat ${cls}"><b>${rcEsc(String(value))}</b><span>${rcEsc(label)}</span></div>`).join("");
+  $("#misCount").textContent = `Showing ${trips.length} of ${misPlural(_mis.trips.length, "trip")}` +
+    (_mis.truncated ? ". Only the latest 3000 are loaded; narrow the dates to see older trips." : "");
+  $("#misRows").innerHTML = trips.map(t => {
+    const zones = t.pickup_zone || t.drop_zone ? `${t.pickup_zone || "–"} → ${t.drop_zone || "–"}` : "";
+    const check = t.issues.length ? t.issues.map(i => `<span class="mis-issue">${rcEsc(i)}</span>`).join("") : '<span class="mis-ok">OK</span>';
+    return `<tr data-id="${rcEsc(t.id)}" class="${t.issues.length ? "mis-flag" : ""}" title="Click to edit">
+      <td><input type="checkbox" data-pick="${rcEsc(t.id)}" ${_mis.selected.has(t.id) ? "checked" : ""} aria-label="Select trip ${rcEsc(t.route_no)}"></td>
+      <td>${misDmy(t.date)}</td><td>${rcEsc(t.pickup_time)}</td><td>${rcEsc(t.drop_time)}</td><td>${rcEsc(t.company_name)}</td>
+      <td>${rcEsc(t.route_no)}</td><td class="cut">${rcEsc(t.guest_name)}</td>
+      <td>${rcEsc(t.driver_name)}<div class="meta">${rcEsc(t.driver_id)}</div></td><td>${rcEsc(t.cab_no)}</td>
+      <td>${rcEsc(zones)}</td><td>${rcEsc(t.package)}</td><td class="num">${rcEsc(t.total_kms)}</td>
+      <td class="num">${t.trip_fare ? misMoney(t.trip_fare) : ""}</td><td>${check}</td></tr>`;
+  }).join("") || `<tr><td colspan="14" class="meta" style="padding:18px;">${_mis.trips.length ? "No trips match the search." : "No trips in these dates. Upload the MMT file or add a trip."}</td></tr>`;
+  misUpdateSelection();
+}
+function misRowClick(event) {
+  const box = event.target.closest("[data-pick]");
+  if (box) {
+    box.checked ? _mis.selected.add(box.dataset.pick) : _mis.selected.delete(box.dataset.pick);
+    misUpdateSelection();
+    return;
+  }
+  if (event.target.closest("td:first-child")) return;
+  const row = event.target.closest("tr[data-id]");
+  if (row) misOpenForm(_mis.trips.find(t => t.id === row.dataset.id));
+}
+function misUpdateSelection() {
+  const boxes = [...$$("#misRows [data-pick]")];
+  $("#misSelected").textContent = `${_mis.selected.size} selected`;
+  $("#misDelete").disabled = !_mis.selected.size;
+  $("#misAll").checked = boxes.length > 0 && boxes.every(b => b.checked);
+}
+function misSelectAll(on) {
+  [...$$("#misRows [data-pick]")].forEach(box => { box.checked = on; on ? _mis.selected.add(box.dataset.pick) : _mis.selected.delete(box.dataset.pick); });
+  misUpdateSelection();
+}
+function misDeleteTrips(ids, after = () => {}) {
+  rcModal({ title: `Delete ${misPlural(ids.length, "trip")}?`, sub: "Deleted trips are removed from the MIS at once. Uploading the MMT file again brings MMT trips back.", okText: "Delete",
+    onOk: async () => {
+      const result = await api("/api/eee-taxi/mis/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
+      _mis.selected.clear();
+      after();
+      await misLoad();
+      misMessage(`Deleted ${misPlural(result.deleted, "trip")}.`, true);
+    } });
+}
+function misDeleteSelected() { misDeleteTrips([..._mis.selected]); }
+
+async function misUpload(input) {
+  const file = input.files[0];
+  input.value = "";
+  if (!file) return;
+  const dispatcher = $("#misDispatcher").value.trim();
+  if (!dispatcher) { misMessage("Enter the dispatcher name, then upload the file again."); $("#misDispatcher").focus(); return; }
+  misRememberDispatcher(dispatcher);
+  const form = new FormData();
+  form.append("file", file);
+  form.append("dispatcher_name", dispatcher);
+  const button = $("#misUploadBtn");
+  button.disabled = true;
+  button.textContent = "Uploading…";
+  try {
+    const result = await api("/api/eee-taxi/mis/upload-mmt", { method: "POST", body: form });
+    // Widen the filters so the uploaded trips are on screen.
+    if (result.first_date && result.first_date < $("#misFrom").value) $("#misFrom").value = result.first_date;
+    if (result.last_date && $("#misTo").value && result.last_date > $("#misTo").value) $("#misTo").value = result.last_date;
+    if (result.added && !["", "MMT"].includes($("#misCompany").value)) $("#misCompany").value = "";
+    await misLoad();
+    const parts = [`Added ${misPlural(result.added, "trip")} from ${file.name}.`];
+    if (result.skipped_existing) parts.push(`${result.skipped_existing} already in the MIS were skipped.`);
+    if (result.need_fixing) parts.push(`${result.need_fixing} need fixing (amber): driver or cab is not in the masters.`);
+    if (result.errors.length) parts.push(`${misPlural(result.errors.length, "row")} could not be read: ${result.errors.slice(0, 5).join(" | ")}${result.errors.length > 5 ? " …" : ""}`);
+    misMessage(parts.join(" "), !result.errors.length);
+  } catch (error) { misMessage("Upload failed: " + error.message); }
+  finally { button.disabled = false; button.textContent = "Upload MMT file (.xlsx)"; }
+}
+
+async function misExport() {
+  const params = misQuery();
+  if ($("#misSearch").value.trim()) params.set("q", $("#misSearch").value.trim());
+  const button = $("#misExport");
+  button.disabled = true;
+  try {
+    const resp = await fetch("/api/eee-taxi/mis/export?" + params, { headers: { Authorization: `Bearer ${authToken}` } });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.statusText);
+    const url = URL.createObjectURL(await resp.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = ((resp.headers.get("content-disposition") || "").match(/filename="([^"]+)"/) || [])[1] || "MIS.xlsx";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) { misMessage("Download failed: " + error.message); }
+  finally { button.disabled = false; }
+}
+
+// Same matching order as the server: Truein ID, then phone, then a name only one driver has.
+function misFindDriver(values) {
+  const drivers = (_mis.lookups && _mis.lookups.drivers) || [];
+  const id = (values.driver_id || "").toUpperCase();
+  const phone = misDigits(values.driver_contact);
+  const sameName = drivers.filter(d => d.name.toLowerCase() === (values.driver_name || "").toLowerCase());
+  return (id && drivers.find(d => d.truein_id && d.truein_id.toUpperCase() === id))
+    || (phone.length === 10 && drivers.find(d => misDigits(d.mobile) === phone))
+    || (sameName.length === 1 ? sameName[0] : null);
+}
+function misField([key, label, kind = ""], value) {
+  const type = kind === "date" || kind === "time" ? kind : "text";
+  const list = kind.startsWith("list:") ? ` list="${kind.slice(5)}"` : "";
+  const numeric = kind === "num" ? ' inputmode="decimal"' : "";
+  const hint = MIS_AUTO[key] ? ` placeholder="${MIS_AUTO[key]}"` : "";
+  const check = key === "driver_name" || key === "cab_no" ? `<span class="field-hint" data-check="${key}"></span>` : "";
+  return `<label class="${kind === "wide" ? "wide" : ""}">${rcEsc(label)}<input type="${type}" data-m="${key}"${list}${numeric}${hint} value="${rcEsc(value || "")}" autocomplete="off">${check}</label>`;
+}
+function misFormValues(form) {
+  return Object.fromEntries([...form.querySelectorAll("[data-m]")].map(input => [input.dataset.m, input.value.trim()]));
+}
+function misCheckMasters(form) {
+  if (!_mis.lookups) return;
+  const values = misFormValues(form);
+  const show = (key, text, ok) => {
+    const hint = form.querySelector(`[data-check="${key}"]`);
+    hint.className = "field-hint " + (ok ? "mis-ok" : "warn");
+    hint.textContent = text;
+  };
+  const driver = misFindDriver(values);
+  if (!values.driver_id && !values.driver_name && !values.driver_contact) show("driver_name", "", true);
+  else if (!driver) show("driver_name", "Not in the driver master", false);
+  else show("driver_name", driver.status === "Deactive" ? "Deactive in the driver master" : "In the driver master", driver.status !== "Deactive");
+  const plate = values.cab_no.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!plate) show("cab_no", "", true);
+  else show("cab_no", _mis.lookups.cabs.includes(plate) ? "In the vehicle master" : "Not in the vehicle master", _mis.lookups.cabs.includes(plate));
+}
+function misFillDriver(form, changedKey) {
+  const values = misFormValues(form);
+  const only = { driver_id: "", driver_name: "", driver_contact: "", [changedKey]: values[changedKey] };
+  const driver = values[changedKey] && misFindDriver(only);
+  if (driver) {
+    form.querySelector('[data-m="driver_id"]').value = driver.truein_id;
+    form.querySelector('[data-m="driver_name"]').value = driver.name;
+    form.querySelector('[data-m="driver_contact"]').value = misDigits(driver.mobile);
+  }
+  misCheckMasters(form);
+}
+
+function misOpenForm(trip = null) {
+  const isNew = !trip;
+  const values = trip || { date: misIstToday(), company_name: $("#misCompany").value || "MMT", dispatcher_name: $("#misDispatcher").value.trim() };
+  const wrap = document.createElement("div");
+  wrap.className = "modal-backdrop";
+  wrap.innerHTML = `<form class="modal mis-form" role="dialog" aria-modal="true" aria-labelledby="misFormTitle" novalidate>
+      <h3 id="misFormTitle">${isNew ? "Add trip" : "Edit trip"}</h3>
+      <p class="modal-sub">${isNew ? "Only Date and Company Name are required; the rest can be filled in later. Ctrl+Enter saves."
+        : rcEsc(`Last saved by ${trip.updated_by || trip.created_by}${trip.source === "mmt_upload" ? " · uploaded from MMT" : ""}. Ctrl+Enter saves.`)}</p>
+      ${MIS_FORM.map(([title, fields]) => `<fieldset><legend>${title}</legend><div class="mis-grid">${fields.map(f => misField(f, values[f[0]])).join("")}</div></fieldset>`).join("")}
+      <div class="text-err" data-err style="min-height:18px;margin-top:8px;" aria-live="assertive"></div>
+      <div class="modal-actions">
+        ${isNew ? "" : '<button type="button" class="btn danger" data-delete style="margin-right:auto;">Delete trip</button>'}
+        <button type="button" class="btn secondary" data-cancel>Cancel</button>
+        ${isNew ? '<button type="button" class="btn secondary" data-again>Save &amp; add another</button>' : ""}
+        <button type="submit" class="btn">Save trip</button>
+      </div>
+    </form>`;
+  document.body.appendChild(wrap);
+  const form = wrap.querySelector("form");
+  const err = wrap.querySelector("[data-err]");
+  const close = () => wrap.remove();
+  const save = async again => {
+    const body = misFormValues(form);
+    if (!body.date || !body.company_name) { err.className = "text-err"; err.textContent = "Date and Company Name are required."; return; }
+    err.textContent = "";
+    form.querySelectorAll("button").forEach(b => { b.disabled = true; });
+    try {
+      await api("/api/eee-taxi/mis" + (isNew ? "" : "/" + encodeURIComponent(trip.id)),
+        { method: isNew ? "POST" : "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      await misLoad();
+      misMessage(isNew ? "Trip added." : "Trip saved.", true);
+      if (!again) { close(); return; }
+      form.querySelectorAll("[data-m]").forEach(input => { if (!MIS_KEEP.includes(input.dataset.m)) input.value = ""; });
+      err.className = "mis-ok";
+      err.textContent = "Trip saved. Enter the next one.";
+      form.querySelector('[data-m="guest_name"]').focus();
+    } catch (error) { err.className = "text-err"; err.textContent = error.message; }
+    finally { form.querySelectorAll("button").forEach(b => { b.disabled = false; }); }
+  };
+  form.addEventListener("submit", e => { e.preventDefault(); save(false); });
+  form.addEventListener("change", e => {
+    const key = e.target.dataset.m;
+    if (["driver_id", "driver_name", "driver_contact"].includes(key)) misFillDriver(form, key);
+    if (key === "cab_no") { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""); misCheckMasters(form); }
+  });
+  wrap.querySelector("[data-cancel]").onclick = close;
+  if (isNew) wrap.querySelector("[data-again]").onclick = () => save(true);
+  else wrap.querySelector("[data-delete]").onclick = () => misDeleteTrips([trip.id], close);
+  wrap.addEventListener("keydown", e => {
+    if (e.key === "Escape" && document.body.lastElementChild === wrap) close();
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(false); }
+    // Plain Enter in a field would submit half a trip; Ctrl+Enter is the save shortcut.
+    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && e.target.tagName === "INPUT") e.preventDefault();
+  });
+  misCheckMasters(form);
+  form.querySelector(isNew ? '[data-m="route_no"]' : '[data-m="guest_name"]').focus();
 }
 
 // Buyer entity masters are separate for PWC and EY and share the masters password.
