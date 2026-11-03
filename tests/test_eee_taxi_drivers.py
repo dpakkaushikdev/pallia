@@ -122,3 +122,14 @@ def test_master_workbook_keeps_useful_driver_details_only():
         "date_of_joining": "09/03/2026", "dl_expiry": "19/02/2038", "emergency_contact_name": "Test Contact",
         "emergency_contact_number": "9000000002", "emergency_contact_relationship": "Parent",
     }
+
+
+@pytest.mark.parametrize("given, kept", [("Active", "Active"), ("active ", "Active"), ("Deactive", "Deactive"),
+                                         ("Inactive", "Deactive"), ("INACTIVE", "Deactive"), ("", "")])
+def test_driver_status_is_active_or_deactive(given, kept):
+    assert DriverRows(rows=[{**DRIVER, "status": given}]).rows[0].status == kept
+
+
+def test_driver_status_rejects_other_values():
+    with pytest.raises(ValueError, match="Active or Deactive"):
+        DriverRows(rows=[{**DRIVER, "status": "On leave"}])

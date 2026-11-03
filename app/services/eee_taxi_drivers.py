@@ -8,10 +8,13 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from app.models import EeeTaxiDriverMaster
+
+# Inactive and Deactive mean the same, so only two statuses are kept.
+DRIVER_STATUSES = {"active": "Active", "deactive": "Deactive", "inactive": "Deactive"}
 
 
 class DriverRow(BaseModel):
@@ -32,6 +35,15 @@ class DriverRow(BaseModel):
     emergency_contact_name: str = Field(default="", max_length=120)
     emergency_contact_number: str = Field(default="", max_length=20)
     emergency_contact_relationship: str = Field(default="", max_length=40)
+
+    @field_validator("status")
+    @classmethod
+    def one_of_two_statuses(cls, value: str) -> str:
+        if not value:
+            return ""
+        if value.lower() not in DRIVER_STATUSES:
+            raise ValueError("Status must be Active or Deactive.")
+        return DRIVER_STATUSES[value.lower()]
 
 
 class DriverRows(BaseModel):

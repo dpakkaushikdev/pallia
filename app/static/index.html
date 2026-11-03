@@ -4379,7 +4379,9 @@ function rcModal({ title, sub = "", bodyHtml = "", fields = [], okText = "OK", o
       ${sub ? `<p class="modal-sub">${rcEsc(sub)}</p>` : ""}
       ${bodyHtml}
       ${fields.map(f => `<label class="field" style="margin-top:10px;">${rcEsc(f.label)}</label>
-        <input type="${f.type || "password"}" data-f="${f.id}" value="${rcEsc(f.value ?? "")}" autocomplete="off">`).join("")}
+        ${f.options
+          ? `<select data-f="${f.id}">${f.options.map(o => `<option${o === f.value ? " selected" : ""}>${rcEsc(o)}</option>`).join("")}</select>`
+          : `<input type="${f.type || "password"}" data-f="${f.id}" value="${rcEsc(f.value ?? "")}" autocomplete="off">`}`).join("")}
       <div class="text-err" data-err style="min-height:18px;margin-top:10px;"></div>
       <div class="modal-actions">
         <button class="btn secondary" data-cancel>Cancel</button>
@@ -5307,9 +5309,9 @@ function mstFillFilter(selector, rows, key) {
 function mstRowActions(prefix, index) {
   return `<td style="white-space:nowrap;"><button class="btn secondary sm" onclick="${prefix}EditRow(${index})">Edit</button> <button class="btn secondary sm" onclick="${prefix}DeleteRow(${index})">Delete</button></td>`;
 }
-function mstRowForm(title, fields, row, onSave) {
+function mstRowForm(title, fields, row, onSave, choices = {}) {
   rcModal({ title, okText: "Done",
-    fields: Object.entries(fields).map(([id, label]) => ({ id, label, type: "text", value: row[id] || "" })),
+    fields: Object.entries(fields).map(([id, label]) => ({ id, label, type: "text", value: row[id] || "", options: choices[id] })),
     onOk: values => { Object.keys(values).forEach(k => { values[k] = values[k].trim(); }); onSave(values); } });
 }
 function mstConfirmDelete(title, onDelete) {
@@ -5319,6 +5321,7 @@ function mstConfirmDelete(title, onDelete) {
 // Driver master: add, edit or delete one driver at a time, then save with the masters password.
 const DM_FIELDS = { name: "Name", truein_id: "Truein ID", mobile: "Mobile", alternate_mobile: "Alternate mobile", father_name: "Father name", email: "Email", status: "Status", availability: "Availability", branch: "Branch", department: "Department", date_of_joining: "Date of joining (DD/MM/YYYY)", dl_expiry: "DL expiry (DD/MM/YYYY)", emergency_contact_name: "Emergency contact name", emergency_contact_number: "Emergency contact number", emergency_contact_relationship: "Emergency contact relationship" };
 const DM_COLUMNS = ["name", "truein_id", "mobile", "status", "department", "branch", "dl_expiry"];
+const DM_CHOICES = { status: ["Active", "Deactive"] };
 let _dm = { saved: [], rows: [], editing: false, password: null };
 function dmMessage(text, ok = false) {
   $("#dmMsg").className = text ? "extraction-note " + (ok ? "ok" : "err") : "hidden";
@@ -5361,14 +5364,14 @@ function dmEditRow(index) {
     if (!values.name) throw new Error("Name is required.");
     _dm.rows[index] = { ..._dm.rows[index], ...values };
     dmRender(); dmMessage("Driver updated. Click Save driver master to keep the change.", true);
-  });
+  }, DM_CHOICES);
 }
 function dmAddRow() {
   mstRowForm("Add driver", DM_FIELDS, {}, values => {
     if (!values.name) throw new Error("Name is required.");
     _dm.rows.unshift({ driver_id: "", ...values });
     dmRender(); dmMessage("Driver added. Click Save driver master to keep the change.", true);
-  });
+  }, DM_CHOICES);
 }
 function dmDeleteRow(index) {
   mstConfirmDelete(`Delete driver ${_dm.rows[index].name}?`, () => {
