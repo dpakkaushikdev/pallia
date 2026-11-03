@@ -517,7 +517,7 @@
 
     /* ── Modal ── */
     .modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,0.45); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 16px; }
-    .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 24px 26px; width: 100%; max-width: 440px; box-shadow: 0 20px 48px rgba(15,23,42,0.18); }
+    .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 24px 26px; width: 100%; max-width: 440px; max-height: calc(100vh - 32px); overflow-y: auto; box-shadow: 0 20px 48px rgba(15,23,42,0.18); }
     .modal h3 { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
     .modal p.modal-sub { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
     .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
@@ -1294,6 +1294,7 @@
         <button class="seg-btn" role="tab" aria-selected="false" data-mst="clients" onclick="mstShow('clients')">Client entities</button>
         <button class="seg-btn" role="tab" aria-selected="false" data-mst="cc" onclick="mstShow('cc')">Cost centres</button>
         <button class="seg-btn" role="tab" aria-selected="false" data-mst="vehicles" onclick="mstShow('vehicles')">Vehicle master</button>
+        <button class="seg-btn" role="tab" aria-selected="false" data-mst="drivers" onclick="mstShow('drivers')">Driver master</button>
       </div>
 
       <section id="mstRates">
@@ -1444,7 +1445,8 @@
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <input type="file" id="vmCsv" accept=".csv,text/csv" class="hidden" onchange="vmImport()">
             <button class="btn secondary sm" id="vmImportBtn" onclick="$('#vmCsv').click()">Import vehicle CSV</button>
-            <button class="btn sm" id="vmEdit" onclick="vmStartEdit()">Edit makes</button>
+            <button class="btn sm" id="vmEdit" onclick="vmStartEdit()">Edit vehicles</button>
+            <button class="btn secondary sm hidden" id="vmAdd" onclick="vmAddRow()">Add vehicle</button>
             <button class="btn secondary sm hidden" id="vmCancel" onclick="vmCancel()">Cancel</button>
             <button class="btn sm hidden" id="vmSave" onclick="vmSave()">Save vehicle master</button>
           </div>
@@ -1454,9 +1456,26 @@
         <div class="card" style="overflow:auto;">
           <input type="search" id="vmSearch" placeholder="Search registration or make" oninput="vmRender()" aria-label="Search vehicle master" style="margin-bottom:12px;">
           <table class="data-table" id="vmTable">
-            <thead><tr><th>Vehicle registration</th><th>Make</th><th>Availability</th><th>Pollution expiry</th><th>Registration date</th><th>Chassis number</th><th>Engine number</th></tr></thead>
+            <thead><tr><th>Vehicle registration</th><th>Make</th><th>Availability</th><th>Pollution expiry</th><th>Registration date</th><th>Chassis number</th><th>Engine number</th><th id="vmActionsTh" class="hidden">Actions</th></tr></thead>
             <tbody></tbody>
           </table>
+        </div>
+      </section>
+      <section id="mstDrivers" class="hidden">
+        <div class="sec-hd">
+          <div class="meta" id="dmMeta">Loading...</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn sm" id="dmEdit" onclick="dmStartEdit()">Edit drivers</button>
+            <button class="btn secondary sm hidden" id="dmAdd" onclick="dmAddRow()">Add driver</button>
+            <button class="btn secondary sm hidden" id="dmCancel" onclick="dmCancel()">Cancel</button>
+            <button class="btn sm hidden" id="dmSave" onclick="dmSave()">Save driver master</button>
+          </div>
+        </div>
+        <p class="meta">EEE-Taxi drivers with their Truein ID and contact details. Unlock with the masters password to add, edit or delete a driver, then save.</p>
+        <div id="dmMsg" class="hidden" style="margin-bottom:12px;" aria-live="polite"></div>
+        <div class="card" style="overflow:auto;">
+          <input type="search" id="dmSearch" placeholder="Search name, Truein ID or mobile" oninput="dmRender()" aria-label="Search driver master" style="margin-bottom:12px;">
+          <table class="data-table" id="dmTable"><thead><tr></tr></thead><tbody></tbody></table>
         </div>
       </section>
       <section id="mstCc" class="hidden">
@@ -2057,7 +2076,7 @@ function switchTab(tabId) {
   if (tabId === "pallia-verification") pVerifyLoad();
   if (tabId === "pallia-master") pMasterLoad();
   if (tabId === "admin") refreshUsers();
-  if (tabId === "eee-rates") { rcLoad(); ccLoad(); eyLoad(); cmLoad(); vmLoad(); }
+  if (tabId === "eee-rates") { rcLoad(); ccLoad(); eyLoad(); cmLoad(); vmLoad(); dmLoad(); }
   if (tabId === "eee-history") historyLoad();
   if (tabId === "eee-tally") txLoad();
   if (tabId === "eee-documents") edLoad();
@@ -4190,6 +4209,7 @@ function mstShow(which) {
   $("#mstEy").classList.toggle("hidden", which !== "ey");
   $("#mstClients").classList.toggle("hidden", which !== "clients");
   $("#mstVehicles").classList.toggle("hidden", which !== "vehicles");
+  $("#mstDrivers").classList.toggle("hidden", which !== "drivers");
 }
 
 const RC_LABELS = {
@@ -4351,7 +4371,7 @@ function rcModal({ title, sub = "", bodyHtml = "", fields = [], okText = "OK", o
       ${sub ? `<p class="modal-sub">${rcEsc(sub)}</p>` : ""}
       ${bodyHtml}
       ${fields.map(f => `<label class="field" style="margin-top:10px;">${rcEsc(f.label)}</label>
-        <input type="${f.type || "password"}" data-f="${f.id}" autocomplete="off">`).join("")}
+        <input type="${f.type || "password"}" data-f="${f.id}" value="${rcEsc(f.value ?? "")}" autocomplete="off">`).join("")}
       <div class="text-err" data-err style="min-height:18px;margin-top:10px;"></div>
       <div class="modal-actions">
         <button class="btn secondary" data-cancel>Cancel</button>
@@ -5187,11 +5207,11 @@ function vmRender() {
   const query = $("#vmSearch").value.trim().toLowerCase();
   $("#vmTable tbody").innerHTML = _vm.rows.map((row, index) => {
     if (query && !`${row.vehicle_no} ${row.make}`.toLowerCase().includes(query)) return "";
-    const make = _vm.editing
-      ? `<input value="${rcEsc(row.make)}" maxlength="100" aria-label="Make for ${rcEsc(row.vehicle_no)}" onchange="_vm.rows[${index}].make=this.value">`
-      : rcEsc(row.make);
-    return `<tr><td>${rcEsc(row.vehicle_no)}</td><td>${make}</td>${["availability", "pollution_expiry", "registration_date", "chassis_no", "engine_no"].map(key => `<td>${rcEsc(row[key] || "")}</td>`).join("")}</tr>`;
+    const actions = _vm.editing ? mstRowActions("vm", index) : "";
+    return `<tr>${Object.keys(VM_FIELDS).map(key => `<td>${rcEsc(row[key] || "")}</td>`).join("")}${actions}</tr>`;
   }).join("");
+  $("#vmActionsTh").classList.toggle("hidden", !_vm.editing);
+  $("#vmAdd").classList.toggle("hidden", !_vm.editing);
   $("#vmEdit").classList.toggle("hidden", _vm.editing);
   $("#vmCancel").classList.toggle("hidden", !_vm.editing);
   $("#vmSave").classList.toggle("hidden", !_vm.editing);
@@ -5232,6 +5252,27 @@ async function vmImport() {
   } catch (error) { vmMessage(error.message); }
   finally { button.disabled = false; $("#vmCsv").value = ""; }
 }
+const VM_FIELDS = { vehicle_no: "Vehicle registration", make: "Make", availability: "Availability", pollution_expiry: "Pollution expiry (DD/MM/YYYY)", registration_date: "Registration date (DD/MM/YYYY)", chassis_no: "Chassis number", engine_no: "Engine number" };
+function vmEditRow(index) {
+  mstRowForm("Edit vehicle", VM_FIELDS, _vm.rows[index], values => {
+    if (!values.vehicle_no || !values.make) throw new Error("Vehicle registration and make are required.");
+    _vm.rows[index] = { ..._vm.rows[index], ...values };
+    vmRender(); vmMessage("Vehicle updated. Click Save vehicle master to keep the change.", true);
+  });
+}
+function vmAddRow() {
+  mstRowForm("Add vehicle", VM_FIELDS, {}, values => {
+    if (!values.vehicle_no || !values.make) throw new Error("Vehicle registration and make are required.");
+    _vm.rows.unshift(values);
+    vmRender(); vmMessage("Vehicle added. Click Save vehicle master to keep the change.", true);
+  });
+}
+function vmDeleteRow(index) {
+  mstConfirmDelete(`Delete vehicle ${_vm.rows[index].vehicle_no}?`, () => {
+    _vm.rows.splice(index, 1);
+    vmRender(); vmMessage("Vehicle removed. Click Save vehicle master to keep the change.", true);
+  });
+}
 async function vmSave() {
   const button = $("#vmSave");
   button.disabled = true;
@@ -5240,6 +5281,88 @@ async function vmSave() {
     await vmLoad();
     vmMessage("Vehicle master saved. New PDFs and Tally exports will use these makes.", true);
   } catch (error) { vmMessage(error.message); }
+  finally { button.disabled = false; }
+}
+
+// Row-at-a-time editing shared by the vehicle and driver masters.
+function mstRowActions(prefix, index) {
+  return `<td style="white-space:nowrap;"><button class="btn secondary sm" onclick="${prefix}EditRow(${index})">Edit</button> <button class="btn secondary sm" onclick="${prefix}DeleteRow(${index})">Delete</button></td>`;
+}
+function mstRowForm(title, fields, row, onSave) {
+  rcModal({ title, okText: "Done",
+    fields: Object.entries(fields).map(([id, label]) => ({ id, label, type: "text", value: row[id] || "" })),
+    onOk: values => { Object.keys(values).forEach(k => { values[k] = values[k].trim(); }); onSave(values); } });
+}
+function mstConfirmDelete(title, onDelete) {
+  rcModal({ title, sub: "The row is removed when you save the master.", okText: "Delete", onOk: () => onDelete() });
+}
+
+// Driver master: add, edit or delete one driver at a time, then save with the masters password.
+const DM_FIELDS = { name: "Name", truein_id: "Truein ID", mobile: "Mobile", alternate_mobile: "Alternate mobile", father_name: "Father name", email: "Email", status: "Status", availability: "Availability", branch: "Branch", department: "Department", date_of_joining: "Date of joining (DD/MM/YYYY)", dl_expiry: "DL expiry (DD/MM/YYYY)", emergency_contact_name: "Emergency contact name", emergency_contact_number: "Emergency contact number", emergency_contact_relationship: "Emergency contact relationship" };
+const DM_COLUMNS = ["name", "truein_id", "mobile", "status", "department", "branch", "dl_expiry"];
+let _dm = { saved: [], rows: [], editing: false, password: null };
+function dmMessage(text, ok = false) {
+  $("#dmMsg").className = text ? "extraction-note " + (ok ? "ok" : "err") : "hidden";
+  $("#dmMsg").textContent = text;
+}
+function dmRender() {
+  const query = $("#dmSearch").value.trim().toLowerCase();
+  $("#dmTable thead tr").innerHTML = DM_COLUMNS.map(key => `<th>${rcEsc(DM_FIELDS[key].replace(/ \(.*\)$/, ""))}</th>`).join("") + (_dm.editing ? "<th>Actions</th>" : "");
+  $("#dmTable tbody").innerHTML = _dm.rows.map((row, index) => {
+    if (query && !`${row.name} ${row.truein_id} ${row.mobile}`.toLowerCase().includes(query)) return "";
+    return `<tr>${DM_COLUMNS.map(key => `<td>${rcEsc(row[key] || "")}</td>`).join("")}${_dm.editing ? mstRowActions("dm", index) : ""}</tr>`;
+  }).join("") || `<tr><td colspan="${DM_COLUMNS.length + 1}" class="meta">No drivers.</td></tr>`;
+  $("#dmEdit").classList.toggle("hidden", _dm.editing);
+  ["#dmAdd", "#dmCancel", "#dmSave"].forEach(id => $(id).classList.toggle("hidden", !_dm.editing));
+}
+async function dmLoad() {
+  try {
+    const data = await api("/api/eee-taxi/drivers");
+    _dm = { saved: data.rows, rows: structuredClone(data.rows), editing: false, password: null };
+    _mstHasPassword = data.has_edit_password;
+    $("#dmMeta").textContent = `${data.rows.length} drivers` + (data.updated_by ? `; last saved by ${data.updated_by}` : "");
+    dmMessage("");
+    dmRender();
+  } catch (error) { dmMessage("Could not load driver master: " + error.message); }
+}
+function dmStartEdit() {
+  mstUnlock(password => { _dm.password = password; _dm.editing = true; dmRender(); });
+}
+function dmCancel() {
+  _dm.rows = structuredClone(_dm.saved);
+  _dm.editing = false;
+  _dm.password = null;
+  dmRender();
+  dmMessage("Changes discarded.", true);
+}
+function dmEditRow(index) {
+  mstRowForm("Edit driver", DM_FIELDS, _dm.rows[index], values => {
+    if (!values.name) throw new Error("Name is required.");
+    _dm.rows[index] = { ..._dm.rows[index], ...values };
+    dmRender(); dmMessage("Driver updated. Click Save driver master to keep the change.", true);
+  });
+}
+function dmAddRow() {
+  mstRowForm("Add driver", DM_FIELDS, {}, values => {
+    if (!values.name) throw new Error("Name is required.");
+    _dm.rows.unshift({ driver_id: "", ...values });
+    dmRender(); dmMessage("Driver added. Click Save driver master to keep the change.", true);
+  });
+}
+function dmDeleteRow(index) {
+  mstConfirmDelete(`Delete driver ${_dm.rows[index].name}?`, () => {
+    _dm.rows.splice(index, 1);
+    dmRender(); dmMessage("Driver removed. Click Save driver master to keep the change.", true);
+  });
+}
+async function dmSave() {
+  const button = $("#dmSave");
+  button.disabled = true;
+  try {
+    await api("/api/eee-taxi/drivers", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows: _dm.rows, edit_password: _dm.password }) });
+    await dmLoad();
+    dmMessage("Driver master saved.", true);
+  } catch (error) { dmMessage(error.message); }
   finally { button.disabled = false; }
 }
 

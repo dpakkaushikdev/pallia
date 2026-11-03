@@ -415,6 +415,16 @@ class EeeTaxiVehicleMaster(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class EeeTaxiDriverMaster(Base):
+    """EEE-Taxi drivers, edited one row at a time on the Masters page."""
+    __tablename__ = "eee_taxi_driver_master"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    rows: Mapped[list] = mapped_column(JSON, default=list)
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class PalliaVehicleMaster(Base):
     """Pallia fleet registrations for verification and other Pallia workflows."""
     __tablename__ = "pallia_vehicle_master"
