@@ -9,7 +9,8 @@ from app.database import SessionLocal
 from app.main import app
 from app.models import EeeTaxiDriverMaster, EeeTaxiMisTrip, EeeTaxiVehicleMaster, User, UserRole
 from app.services.auth import get_password_hash
-from app.services.eee_taxi_mis import MisTrip, trip_duration
+from app.services.eee_taxi_drivers import DriverRow
+from app.services.eee_taxi_mis import MasterIndex, MisTrip, trip_duration
 from app.services.eee_taxi_mis_excel import guess_zone
 
 ENDPOINT = "/api/eee-taxi/mis"
@@ -121,6 +122,25 @@ def test_driver_with_changed_phone_is_matched_by_unique_name(client, headers):
     assert trip["driver_id"] == "EEED/VK/9001" and trip["driver_contact"] == "9000000001" and trip["issues"] == []
 
 
+@pytest.mark.parametrize("mmt_name, found", [
+    ("test  driver.", True),   # spacing, case and dots ignored
+    ("Test", True),            # the only master name starting with it
+    ("Tes", False),            # too short to trust
+    ("Other Person", False),
+])
+def test_driver_id_from_name_when_phone_unknown(mmt_name, found):
+    index = MasterIndex(by_name={"testdriver": DriverRow(**DRIVER)},
+                        all_names=[("testdriver", DriverRow(**DRIVER))])
+    trip = index.fill(MisTrip(date="2026-11-02", company_name="MMT", driver_name=mmt_name, driver_contact="8000000000"))
+    assert (trip.driver_id == "EEED/VK/9001") is found
+
+
+def test_name_prefix_shared_by_two_drivers_is_not_guessed():
+    one, two = DriverRow(name="IMRAN 1", truein_id="A"), DriverRow(name="IMRAN 2", truein_id="B")
+    index = MasterIndex(by_name={"imran1": one, "imran2": two}, all_names=[("imran1", one), ("imran2", two)])
+    assert index.find_by_name("Imran") is None
+
+
 def test_bad_rows_are_reported_and_others_imported(client, headers):
     bad = dict(_mmt_row("NC2"), **{"Total Bill Amount": "abc"})
     result = _upload(client, headers, [_mmt_row("NC1"), bad]).json()
@@ -169,13 +189,17 @@ def test_filters_summary_and_export(client, headers):
     export = client.get(f"{ENDPOINT}/export", headers=headers)
     assert export.status_code == 200
     sheet = load_workbook(io.BytesIO(export.content)).active
-    assert sheet["A1"].value == "Date" and sheet["AL1"].value == "B2C payment Status" and sheet.max_row == 3
+    assert sheet["A1"].value == "Date" and sheet["AL1"].value == "B2C payment Status " and sheet.max_row == 3
     assert sheet["G2"].value == "NC2" and sheet["AB2"].value == 860   # oldest first; Trip Fare is a number
+    assert sheet["V1"].value == "Total \nkms" and sheet["A1"].fill.fgColor.rgb == "00FFE600"
+    assert sheet["E2"].value == 9000000001 and sheet["Q2"].number_format == "hh:mm"
 
 
 @pytest.mark.parametrize("address, zone", [
     ("Flat 2, Sector 29, Gurugram", "Gurgaon"), ("Noida Sector 62", "Noida"), ("Rohini, New Delhi 110085", "Delhi"),
-    ("Delhi Gurgaon Expressway", ""), ("Somewhere unknown", ""),
+    ("Indirapuram, Gaziabad, Delhi NCR", "Ghaziabad"), ("Vaishali 201010", "Ghaziabad"),
+    ("Sector 18, 201301", "Noida"), ("IGI Airport Terminal 3, New Delhi 110037", "Airport"),
+    ("Gurgaon Noida link", ""), ("Somewhere unknown", ""),
 ])
 def test_zone_guess(address, zone):
     assert guess_zone(address) == zone

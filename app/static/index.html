@@ -1137,7 +1137,7 @@
         <div class="ed-list-toolbar"><div class="meta" id="misCount"></div><div class="ed-bulk-tools"><span class="meta" id="misSelected">0 selected</span><button class="btn danger sm" id="misDelete" onclick="misDeleteSelected()" disabled>Delete selected</button></div></div>
         <div class="ed-table-wrap">
           <table class="data-table">
-            <thead><tr><th><input type="checkbox" id="misAll" aria-label="Select all shown trips" onchange="misSelectAll(this.checked)"></th><th>Date</th><th>Pick up</th><th>Drop</th><th>Company</th><th>DS no/Route No</th><th>Guest</th><th>Driver</th><th>Cab No</th><th>Zones</th><th>Package</th><th style="text-align:right;">Kms</th><th style="text-align:right;">Trip Fare</th><th>Check</th></tr></thead>
+            <thead><tr id="misHead"><th><input type="checkbox" id="misAll" aria-label="Select all shown trips" onchange="misSelectAll(this.checked)"></th></tr></thead>
             <tbody id="misRows"></tbody>
           </table>
         </div>
@@ -5479,6 +5479,8 @@ const MIS_FORM = [
   ["Distance", [["start_odometer", "Start Odometer", "num"], ["end_odometer", "End Odometer", "num"], ["total_kms", "Total kms", "num"], ["dead_run_kms", "Dead Run Kms", "num"]]],
   ["Charges and payment", [["trip_fare", "Trip Fare", "num"], ["extra_km_charges", "Km/Extra/Km Charges", "num"], ["extra_time_charges", "Time Extra/Time Charges", "num"], ["night_charge", "Night Charge 11pm to 5am", "num"], ["mcd", "MCD", "num"], ["parking", "Parking", "num"], ["toll", "Toll", "num"], ["cash_to_receive", "Cash to be Received", "num"], ["mmt_base_cost", "MMT Base Cost", "num"], ["mmt_prepaid_amount", "MMT Prepaid Amt", "num"], ["b2c_payment_status", "B2C payment Status"], ["remarks", "Remarks", "wide"]]],
 ];
+// The table shows every column of the team's MMT_MIS sheet, in the sheet's order.
+const MIS_SHEET = [["date", "Date", "date"], ["dispatcher_name", "Dispatcher Name"], ["driver_id", "Driver ID"], ["driver_name", "Driver Name"], ["driver_contact", "Driver Cont No"], ["cab_no", "Cab No"], ["route_no", "DS no/Route No"], ["company_name", "Company Name"], ["guest_name", "Guest Name", "long"], ["pickup_address", "Pickup Address", "long"], ["pickup_zone", "Pickup Zone"], ["pickup_time", "Pick up Time"], ["drop_location", "Drop Location", "long"], ["drop_zone", "Drop Zone"], ["drop_time", "Drop Time"], ["trip_end_date", "Trip End Date", "date"], ["trip_duration", "Trip Duration"], ["hub_out", "Hub Out"], ["hub_in", "Hub In"], ["start_odometer", "Start Odometer", "num"], ["end_odometer", "End Odometer", "num"], ["total_kms", "Total kms", "num"], ["dead_run_kms", "Dead Run Kms", "num"], ["package", "Package"], ["extra_km_charges", "Km/Extra/Km Charges", "num"], ["extra_time_charges", "Time Extra/Time Charges", "num"], ["night_charge", "Night Charge 11pm to 5am", "num"], ["trip_fare", "Trip Fare", "num"], ["mcd", "MCD", "num"], ["parking", "Parking", "num"], ["toll", "Toll", "num"], ["driver_hours", "Driver Hours"], ["cash_to_receive", "Cash to be Recieved", "num"], ["remarks", "Remarks", "long"], ["mmt_base_cost", "MMT Base Cost", "num"], ["mmt_prepaid_amount", "MMT Peripaid Amt", "num"], ["duty_closed_by", "Duty closed by"], ["b2c_payment_status", "B2C payment Status"]];
 const MIS_AUTO = { trip_duration: "Auto from times", total_kms: "Auto from odometers, or type" };
 // Kept for "Save & add another": the next trip is usually the same day, driver and cab.
 const MIS_KEEP = ["date", "company_name", "dispatcher_name", "driver_id", "driver_name", "driver_contact", "cab_no"];
@@ -5528,7 +5530,7 @@ async function misLoad() {
     _mis.trips = data.trips;
     _mis.truncated = data.truncated;
     const fill = (sel, base, values) => { $(sel).innerHTML = [...new Set([...base, ...values.filter(Boolean)])].map(v => `<option value="${rcEsc(v)}">`).join(""); };
-    fill("#misZones", ["Airport", "Delhi", "Gurgaon", "Noida"], data.trips.flatMap(t => [t.pickup_zone, t.drop_zone]));
+    fill("#misZones", ["Airport", "Delhi", "Gurgaon", "Noida", "Ghaziabad"], data.trips.flatMap(t => [t.pickup_zone, t.drop_zone]));
     fill("#misPackages", ["City to Airport", "Airport to City"], data.trips.map(t => t.package));
     misRender();
   } catch (error) { misMessage("Could not load trips: " + error.message); }
@@ -5553,17 +5555,20 @@ function misRender() {
   ].map(([cls, value, label]) => `<div class="mis-stat ${cls}"><b>${rcEsc(String(value))}</b><span>${rcEsc(label)}</span></div>`).join("");
   $("#misCount").textContent = `Showing ${trips.length} of ${misPlural(_mis.trips.length, "trip")}` +
     (_mis.truncated ? ". Only the latest 3000 are loaded; narrow the dates to see older trips." : "");
+  const head = $("#misHead");
+  if (head.children.length === 1) {
+    head.insertAdjacentHTML("beforeend", MIS_SHEET.map(([, label, kind]) => `<th${kind === "num" ? ' style="text-align:right;"' : ""}>${rcEsc(label)}</th>`).join("") + "<th>Check</th>");
+  }
   $("#misRows").innerHTML = trips.map(t => {
-    const zones = t.pickup_zone || t.drop_zone ? `${t.pickup_zone || "–"} → ${t.drop_zone || "–"}` : "";
     const check = t.issues.length ? t.issues.map(i => `<span class="mis-issue">${rcEsc(i)}</span>`).join("") : '<span class="mis-ok">OK</span>';
+    const cells = MIS_SHEET.map(([key, , kind]) => {
+      const value = kind === "date" ? misDmy(t[key]) : t[key] || "";
+      const cls = kind === "num" ? "num" : kind === "long" ? "cut" : "";
+      return `<td class="${cls}"${kind === "long" ? ` title="${rcEsc(value)}"` : ""}>${rcEsc(value)}</td>`;
+    }).join("");
     return `<tr data-id="${rcEsc(t.id)}" class="${t.issues.length ? "mis-flag" : ""}" title="Click to edit">
-      <td><input type="checkbox" data-pick="${rcEsc(t.id)}" ${_mis.selected.has(t.id) ? "checked" : ""} aria-label="Select trip ${rcEsc(t.route_no)}"></td>
-      <td>${misDmy(t.date)}</td><td>${rcEsc(t.pickup_time)}</td><td>${rcEsc(t.drop_time)}</td><td>${rcEsc(t.company_name)}</td>
-      <td>${rcEsc(t.route_no)}</td><td class="cut">${rcEsc(t.guest_name)}</td>
-      <td>${rcEsc(t.driver_name)}<div class="meta">${rcEsc(t.driver_id)}</div></td><td>${rcEsc(t.cab_no)}</td>
-      <td>${rcEsc(zones)}</td><td>${rcEsc(t.package)}</td><td class="num">${rcEsc(t.total_kms)}</td>
-      <td class="num">${t.trip_fare ? misMoney(t.trip_fare) : ""}</td><td>${check}</td></tr>`;
-  }).join("") || `<tr><td colspan="14" class="meta" style="padding:18px;">${_mis.trips.length ? "No trips match the search." : "No trips in these dates. Upload the MMT file or add a trip."}</td></tr>`;
+      <td><input type="checkbox" data-pick="${rcEsc(t.id)}" ${_mis.selected.has(t.id) ? "checked" : ""} aria-label="Select trip ${rcEsc(t.route_no)}"></td>${cells}<td>${check}</td></tr>`;
+  }).join("") || `<tr><td colspan="${MIS_SHEET.length + 2}" class="meta" style="padding:18px;">${_mis.trips.length ? "No trips match the search." : "No trips in these dates. Upload the MMT file or add a trip."}</td></tr>`;
   misUpdateSelection();
 }
 function misRowClick(event) {
@@ -5646,15 +5651,24 @@ async function misExport() {
   finally { button.disabled = false; }
 }
 
-// Same matching order as the server: Truein ID, then phone, then a name only one driver has.
+// Same matching order as the server: Truein ID, then phone, then name (ignoring spaces,
+// case and dots; else the only master name that starts with it).
+function misNameKey(name) { return (name || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+function misFindByName(drivers, name) {
+  const key = misNameKey(name);
+  if (!key) return null;
+  const same = drivers.filter(d => misNameKey(d.name) === key);
+  if (same.length) return same.length === 1 ? same[0] : null;
+  const starts = key.length >= 4 ? drivers.filter(d => misNameKey(d.name).startsWith(key)) : [];
+  return starts.length === 1 ? starts[0] : null;
+}
 function misFindDriver(values) {
   const drivers = (_mis.lookups && _mis.lookups.drivers) || [];
   const id = (values.driver_id || "").toUpperCase();
   const phone = misDigits(values.driver_contact);
-  const sameName = drivers.filter(d => d.name.toLowerCase() === (values.driver_name || "").toLowerCase());
   return (id && drivers.find(d => d.truein_id && d.truein_id.toUpperCase() === id))
     || (phone.length === 10 && drivers.find(d => misDigits(d.mobile) === phone))
-    || (sameName.length === 1 ? sameName[0] : null);
+    || misFindByName(drivers, values.driver_name);
 }
 function misField([key, label, kind = ""], value) {
   const type = kind === "date" || kind === "time" ? kind : "text";

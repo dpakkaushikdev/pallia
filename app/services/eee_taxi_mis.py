@@ -197,6 +197,14 @@ def normalize_phone(value: str) -> str:
     return digits
 
 
+MIN_NAME_PREFIX = 4
+
+
+def name_key(name: str) -> str:
+    """'Umakant  Dwivedi.' and 'UMAKANTDWIVEDI' compare equal."""
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
 def trip_duration(start_date: str, start_time: str, end_date: str, end_time: str) -> str:
     """'HH:MM' from pick-up to drop; a drop before pick-up with no end date means next day."""
     if not (start_date and start_time and end_time):
@@ -217,6 +225,7 @@ class MasterIndex:
     by_truein: dict[str, DriverRow] = field(default_factory=dict)
     by_phone: dict[str, DriverRow] = field(default_factory=dict)
     by_name: dict[str, DriverRow] = field(default_factory=dict)
+    all_names: list[tuple[str, DriverRow]] = field(default_factory=list)
     plates: set[str] = field(default_factory=set)
 
     @classmethod
@@ -229,15 +238,28 @@ class MasterIndex:
             for phone in (driver.mobile, driver.alternate_mobile):
                 if normalize_phone(phone):
                     index.by_phone.setdefault(normalize_phone(phone), driver)
-            names.setdefault(driver.name.lower(), []).append(driver)
+            names.setdefault(name_key(driver.name), []).append(driver)
         # A name shared by two drivers cannot identify either of them.
         index.by_name = {name: rows[0] for name, rows in names.items() if len(rows) == 1}
+        index.all_names = [(name, driver) for name, rows in names.items() for driver in rows]
         return index
+
+    def find_by_name(self, name: str) -> DriverRow | None:
+        """Same name ignoring spaces, case and dots; else the only master name starting with it."""
+        key = name_key(name)
+        if not key:
+            return None
+        if key in self.by_name:
+            return self.by_name[key]
+        if len(key) < MIN_NAME_PREFIX:
+            return None
+        starts = [driver for other, driver in self.all_names if other.startswith(key)]
+        return starts[0] if len(starts) == 1 else None
 
     def find_driver(self, trip: MisTrip) -> DriverRow | None:
         return (self.by_truein.get(trip.driver_id.upper())
                 or self.by_phone.get(trip.driver_contact)
-                or self.by_name.get(trip.driver_name.lower()))
+                or self.find_by_name(trip.driver_name))
 
     def fill(self, trip: MisTrip) -> MisTrip:
         """Copy the matched driver's Truein ID, master name and mobile onto the trip."""

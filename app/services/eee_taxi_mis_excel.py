@@ -7,7 +7,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from app.services.eee_taxi_mis import DATE_KEYS, MIS_COLUMNS, NUMBER_KEYS, TIME_KEYS, MisTrip, parse_trip
 
@@ -15,9 +15,16 @@ MMT_REQUIRED = {"External Id", "Vehicle Registration", "Driver Name", "Driver Ph
                 "Actual End Date", "Actual End Time", "Package", "Total Bill Amount"}
 MAX_IMPORT_ROWS = 2000
 AIRPORT = "Airport"
-# Pincode prefixes, then place names, for the non-airport end of a transfer.
-ZONE_PINCODES = {"110": "Delhi", "122": "Gurgaon", "201": "Noida"}
-ZONE_WORDS = {"gurgaon": "Gurgaon", "gurugram": "Gurgaon", "noida": "Noida", "delhi": "Delhi"}
+AIRPORT_WORDS = re.compile(r"\bairport\b|\bterminal\s*-?\s*[123]\b|\bigi\b|indira gandhi international", re.I)
+ZONE_WORDS = {"gurgaon": "Gurgaon", "gurugram": "Gurgaon", "noida": "Noida", "ghaziabad": "Ghaziabad",
+              "gaziabad": "Ghaziabad", "delhi": "Delhi"}
+# The team's sheet headers, exactly (line breaks and the trailing space included).
+SHEET_HEADERS = {
+    "total_kms": "Total \nkms", "dead_run_kms": "Dead  \nRun Kms", "extra_km_charges": "Km/Extra/\nKm Charges",
+    "extra_time_charges": "Time Extra/\nTime Charges", "night_charge": "Night Charge \n11pm to 5am",
+    "cash_to_receive": "Cash to \nbe Recieved", "b2c_payment_status": "B2C payment Status ",
+}
+HEADER_FILL = PatternFill("solid", fgColor="FFE600")
 
 
 def _text(value) -> str:
@@ -34,11 +41,28 @@ def _text(value) -> str:
     return "" if text == "-" else text
 
 
+def _pincode_zone(pincode: str) -> str:
+    if pincode.startswith("110"):
+        return "Delhi"
+    if pincode.startswith("122"):
+        return "Gurgaon"
+    if pincode.startswith("2013"):
+        return "Noida"
+    return "Ghaziabad" if pincode.startswith("201") else ""
+
+
 def guess_zone(address: str) -> str:
-    pincode = re.search(r"\b(\d{3})\d{3}\b", address or "")
-    if pincode and pincode[1] in ZONE_PINCODES:
-        return ZONE_PINCODES[pincode[1]]
-    found = {zone for word, zone in ZONE_WORDS.items() if word in (address or "").lower()}
+    """Airport, Delhi, Gurgaon, Noida or Ghaziabad from an address; blank when unsure."""
+    address = address or ""
+    if AIRPORT_WORDS.search(address):
+        return AIRPORT
+    pincode = re.search(r"\b\d{6}\b", address)
+    if pincode and _pincode_zone(pincode[0]):
+        return _pincode_zone(pincode[0])
+    found = {zone for word, zone in ZONE_WORDS.items() if word in address.lower()}
+    # NCR addresses often mention Delhi as well ("Indirapuram, Ghaziabad, Delhi NCR").
+    if len(found) > 1:
+        found.discard("Delhi")
     return found.pop() if len(found) == 1 else ""
 
 
@@ -58,6 +82,7 @@ def mmt_row_to_trip(raw: dict[str, str], dispatcher: str) -> dict[str, str]:
         "company_name": "MMT",
         "guest_name": raw.get("Passenger Name", ""),
         "pickup_address": pickup,
+        # Airport pick-ups are often just "1C / International", so the Package decides that end.
         "pickup_zone": AIRPORT if from_airport else guess_zone(pickup),
         "pickup_time": raw.get("Scheduled Start Time") or raw.get("Actual Start Time", ""),
         "drop_location": drop,
@@ -110,6 +135,10 @@ def _cell_value(key: str, value: str):
         return date.fromisoformat(value)
     if key in TIME_KEYS:
         return time.fromisoformat(value)
+    if key == "trip_duration" and re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", value):
+        return time.fromisoformat(value)
+    if key == "driver_contact" and value.isdigit():
+        return int(value)
     if key in NUMBER_KEYS:
         number = Decimal(value)
         return int(number) if number == number.to_integral_value() else float(number)
@@ -117,19 +146,22 @@ def _cell_value(key: str, value: str):
 
 
 def build_mis_workbook(trips: list[dict]) -> bytes:
+    """Same columns, header text and header style as the team's MMT_MIS.xlsx."""
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Sheet1"
-    sheet.append([header for _, header in MIS_COLUMNS])
+    sheet.append([SHEET_HEADERS.get(key, header) for key, header in MIS_COLUMNS])
     for cell in sheet[1]:
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill("solid", fgColor="FFFF00")
+        cell.font = Font(name="Arial", size=10, bold=True)
+        cell.fill = HEADER_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     for trip in trips:
         sheet.append([_cell_value(key, trip.get(key, "")) for key, _ in MIS_COLUMNS])
-    for index, (key, header) in enumerate(MIS_COLUMNS, 1):
+    for index, (key, _) in enumerate(MIS_COLUMNS, 1):
         letter = get_column_letter(index)
-        sheet.column_dimensions[letter].width = max(12, min(len(header) + 4, 40))
-        fmt = "dd-mm-yyyy" if key in DATE_KEYS else "hh:mm" if key in TIME_KEYS else None
+        sheet.column_dimensions[letter].width = {1: 11, 2: 17}.get(index, 13)
+        fmt = ("dd-mm-yyyy" if key in DATE_KEYS else
+               "hh:mm" if key in TIME_KEYS or key == "trip_duration" else None)
         if fmt:
             for cell in sheet[letter][1:]:
                 cell.number_format = fmt
