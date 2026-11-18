@@ -181,6 +181,15 @@ def _migrate_existing_db() -> None:
                     conn.execute(text(f"ALTER TABLE eee_taxi_document_entries ADD COLUMN {column} {definition}"))
             conn.commit()
 
+        if "eee_taxi_mis_trips" in inspector.get_table_names():
+            # Route numbers repeat daily for most clients, so the first version's
+            # one-route-per-client rule is dropped (SQLite cannot drop a constraint;
+            # only old local databases keep it).
+            if conn.dialect.name != "sqlite":
+                conn.execute(text("ALTER TABLE eee_taxi_mis_trips DROP CONSTRAINT IF EXISTS uq_eee_mis_company_route"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_eee_taxi_mis_trips_route_no ON eee_taxi_mis_trips (route_no)"))
+                conn.commit()
+
         _widen_varchar_columns(conn, inspect(conn))
         # external_api_events is created by create_all; no ALTER TABLE needed
 

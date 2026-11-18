@@ -10,14 +10,12 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from app.services.eee_taxi_mis import DATE_KEYS, MIS_COLUMNS, NUMBER_KEYS, TIME_KEYS, MisTrip, parse_trip
+from app.services.eee_taxi_mis_zones import guess_zone
 
 MMT_REQUIRED = {"External Id", "Vehicle Registration", "Driver Name", "Driver Phone",
                 "Actual End Date", "Actual End Time", "Package", "Total Bill Amount"}
 MAX_IMPORT_ROWS = 2000
 AIRPORT = "Airport"
-AIRPORT_WORDS = re.compile(r"\bairport\b|\bterminal\s*-?\s*[123]\b|\bigi\b|indira gandhi international", re.I)
-ZONE_WORDS = {"gurgaon": "Gurgaon", "gurugram": "Gurgaon", "noida": "Noida", "ghaziabad": "Ghaziabad",
-              "gaziabad": "Ghaziabad", "delhi": "Delhi"}
 # The team's sheet headers, exactly (line breaks and the trailing space included).
 SHEET_HEADERS = {
     "total_kms": "Total \nkms", "dead_run_kms": "Dead  \nRun Kms", "extra_km_charges": "Km/Extra/\nKm Charges",
@@ -39,31 +37,6 @@ def _text(value) -> str:
         return value.strftime("%H:%M")
     text = str(value).strip()
     return "" if text == "-" else text
-
-
-def _pincode_zone(pincode: str) -> str:
-    if pincode.startswith("110"):
-        return "Delhi"
-    if pincode.startswith("122"):
-        return "Gurgaon"
-    if pincode.startswith("2013"):
-        return "Noida"
-    return "Ghaziabad" if pincode.startswith("201") else ""
-
-
-def guess_zone(address: str) -> str:
-    """Airport, Delhi, Gurgaon, Noida or Ghaziabad from an address; blank when unsure."""
-    address = address or ""
-    if AIRPORT_WORDS.search(address):
-        return AIRPORT
-    pincode = re.search(r"\b\d{6}\b", address)
-    if pincode and _pincode_zone(pincode[0]):
-        return _pincode_zone(pincode[0])
-    found = {zone for word, zone in ZONE_WORDS.items() if word in address.lower()}
-    # NCR addresses often mention Delhi as well ("Indirapuram, Ghaziabad, Delhi NCR").
-    if len(found) > 1:
-        found.discard("Delhi")
-    return found.pop() if len(found) == 1 else ""
 
 
 def mmt_row_to_trip(raw: dict[str, str], dispatcher: str) -> dict[str, str]:
@@ -146,7 +119,7 @@ def _cell_value(key: str, value: str):
 
 
 def build_mis_workbook(trips: list[dict]) -> bytes:
-    """Same columns, header text and header style as the team's MMT_MIS.xlsx."""
+    """Same columns, header text and header style as the team's month sheets."""
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Sheet1"

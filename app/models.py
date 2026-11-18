@@ -430,14 +430,13 @@ class EeeTaxiMisTrip(Base):
 
     ``data`` holds every MIS column (see ``app.services.eee_taxi_mis``);
     company, route number and trip date are copied out for filtering and the
-    duplicate check on MMT uploads.
+    duplicate check. Route numbers are not unique: most clients reuse them daily.
     """
     __tablename__ = "eee_taxi_mis_trips"
-    __table_args__ = (UniqueConstraint("company_name", "route_no", name="uq_eee_mis_company_route"),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
     company_name: Mapped[str] = mapped_column(String(32), index=True)
-    route_no: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    route_no: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     trip_date: Mapped[date] = mapped_column(Date, index=True)
     data: Mapped[dict] = mapped_column(JSON)
     source: Mapped[str] = mapped_column(String(16), default="manual")

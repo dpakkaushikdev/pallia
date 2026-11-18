@@ -19,9 +19,10 @@ from sqlalchemy.orm import Session
 from app.models import EeeTaxiMisTrip
 from app.services.eee_taxi_cost_centres import normalize_vehicle_no
 from app.services.eee_taxi_drivers import DriverRow, get_driver_rows
+from app.services.eee_taxi_mis_zones import COMPANIES, canonical_company, canonical_zone, guess_zone  # noqa: F401
 from app.services.eee_taxi_vehicles import get_vehicle_rows
 
-# (key, Excel header) in MMT_MIS.xlsx order.
+# (key, Excel header) in the order of the team's "Corp Trips Mis" month sheets.
 MIS_COLUMNS = [
     ("date", "Date"), ("dispatcher_name", "Dispatcher Name"), ("driver_id", "Driver ID"),
     ("driver_name", "Driver Name"), ("driver_contact", "Driver Cont No"), ("cab_no", "Cab No"),
@@ -32,21 +33,30 @@ MIS_COLUMNS = [
     ("hub_in", "Hub In"), ("start_odometer", "Start Odometer"), ("end_odometer", "End Odometer"),
     ("total_kms", "Total kms"), ("dead_run_kms", "Dead Run Kms"), ("package", "Package"),
     ("extra_km_charges", "Km/Extra/Km Charges"), ("extra_time_charges", "Time Extra/Time Charges"),
-    ("night_charge", "Night Charge 11pm to 5am"), ("trip_fare", "Trip Fare"), ("mcd", "MCD"),
-    ("parking", "Parking"), ("toll", "Toll"), ("driver_hours", "Driver Hours"),
+    ("night_charge", "Night Charge 11pm to 5am"), ("trip_fare", "Trip Fare"), ("gst", "GST"), ("mcd", "MCD"),
+    ("parking", "Parking"), ("toll", "Toll"), ("total_trip_fare", "Total Trip Fare"), ("driver_hours", "Driver Hours"),
     ("cash_to_receive", "Cash to be Recieved"), ("remarks", "Remarks"), ("mmt_base_cost", "MMT Base Cost"),
     ("mmt_prepaid_amount", "MMT Peripaid Amt"), ("duty_closed_by", "Duty closed by"),
     ("b2c_payment_status", "B2C payment Status"),
 ]
 DATE_KEYS = ("date", "trip_end_date")
-TIME_KEYS = ("pickup_time", "drop_time", "hub_out", "hub_in")
+TIME_KEYS = ("pickup_time", "drop_time")
 NUMBER_KEYS = (
     "start_odometer", "end_odometer", "total_kms", "dead_run_kms", "extra_km_charges",
-    "extra_time_charges", "night_charge", "trip_fare", "mcd", "parking", "toll",
-    "cash_to_receive", "mmt_base_cost", "mmt_prepaid_amount",
+    "extra_time_charges", "night_charge", "trip_fare", "gst", "mcd", "parking", "toll",
+    "total_trip_fare", "cash_to_receive", "mmt_base_cost", "mmt_prepaid_amount",
 )
-COMPANIES = ("MMT", "EY", "PWC")
-MAX_LIST_ROWS = 3000
+# Trip Fare already holds the package and extras; these are added on top for the total.
+TOTAL_KEYS = ("trip_fare", "gst", "mcd", "parking", "toll")
+# What a dispatcher enters when a trip is booked; the rest is filled when the duty closes.
+DISPATCH_KEYS = (
+    "dispatcher_name", "driver_id", "driver_name", "driver_contact", "cab_no", "company_name", "guest_name",
+    "pickup_address", "pickup_zone", "pickup_time", "drop_location", "drop_zone", "hub_out",
+)
+# A trip stays Open until these are filled in.
+CLOSING_KEYS = ("trip_fare", "drop_time", "total_kms")
+STATUSES = ("Open", "Closed")
+MAX_LIST_ROWS = 8000   # a month is about 3,600 trips
 
 Short = Annotated[str, Field(default="", max_length=120)]
 Long = Annotated[str, Field(default="", max_length=500)]
@@ -71,8 +81,8 @@ class MisTrip(BaseModel):
     drop_time: str = ""
     trip_end_date: str = ""
     trip_duration: str = Field(default="", max_length=20)
-    hub_out: str = ""
-    hub_in: str = ""
+    hub_out: Short   # a place ("Vasant Kunj") or a note ("20km hub to hub"), not a time
+    hub_in: Short
     start_odometer: str = ""
     end_odometer: str = ""
     total_kms: str = ""
@@ -82,9 +92,11 @@ class MisTrip(BaseModel):
     extra_time_charges: str = ""
     night_charge: str = ""
     trip_fare: str = ""
+    gst: str = ""
     mcd: str = ""
     parking: str = ""
     toll: str = ""
+    total_trip_fare: str = ""
     driver_hours: str = Field(default="", max_length=20)
     cash_to_receive: str = ""
     remarks: Long
@@ -121,7 +133,30 @@ class MisTrip(BaseModel):
     @field_validator("company_name")
     @classmethod
     def company(cls, value: str) -> str:
-        return value.upper() if value.upper() in COMPANIES else value
+        """Spelled as in the client list ('mongo db' -> 'MongoDB'); other names are refused."""
+        match = canonical_company(value)
+        if match is None:
+            raise ValueError(f"'{value}' is not in the client list.")
+        return match
+
+    @field_validator("pickup_zone", "drop_zone")
+    @classmethod
+    def zone(cls, value: str) -> str:
+        return canonical_zone(value)
+
+    @field_validator("route_no")
+    @classmethod
+    def no_dash(cls, value: str) -> str:
+        return "" if value == "-" else value
+
+    @property
+    def missing(self) -> list[str]:
+        """Sheet names of the closing fields still empty."""
+        return [COLUMN_LABELS[key] for key in CLOSING_KEYS if not getattr(self, key)]
+
+    @property
+    def status(self) -> str:
+        return "Open" if self.missing else "Closed"
 
     @model_validator(mode="after")
     def derived_values(self):
@@ -133,6 +168,11 @@ class MisTrip(BaseModel):
             if kms < 0:
                 raise ValueError("End Odometer is lower than Start Odometer.")
             self.total_kms = format_number(str(kms))
+        if self.trip_fare:
+            total = sum(Decimal(getattr(self, key) or "0") for key in TOTAL_KEYS)
+            self.total_trip_fare = format_number(str(total))
+        self.pickup_zone = self.pickup_zone or guess_zone(self.pickup_address)
+        self.drop_zone = self.drop_zone or guess_zone(self.drop_location)
         return self
 
 
@@ -291,20 +331,45 @@ class MasterIndex:
 def trip_response(row: EeeTaxiMisTrip, index: MasterIndex) -> dict:
     trip = MisTrip(**row.data)
     return {
-        **trip.model_dump(), "id": row.id, "source": row.source,
+        **trip.model_dump(), "id": row.id, "source": row.source, "status": trip.status, "missing": trip.missing,
         "created_by": row.created_by, "updated_by": row.updated_by,
         "updated_at": row.updated_at.isoformat() + "Z", "issues": index.issues(trip),
     }
 
 
-def find_route_conflict(db: Session, trip: MisTrip, exclude_id: str | None = None) -> EeeTaxiMisTrip | None:
+def find_duplicate(db: Session, trip: MisTrip, exclude_id: str | None = None) -> EeeTaxiMisTrip | None:
+    """The same trip entered twice.
+
+    An MMT booking id is used once ever. Other clients reuse a route number
+    (often the guest's phone) day after day, so there a duplicate is the same
+    client, route, date and pick-up time.
+    """
     if not trip.route_no:
         return None
     query = db.query(EeeTaxiMisTrip).filter(
         EeeTaxiMisTrip.company_name == trip.company_name, EeeTaxiMisTrip.route_no == trip.route_no)
+    if trip.company_name != "MMT":
+        query = query.filter(EeeTaxiMisTrip.trip_date == date.fromisoformat(trip.date))
     if exclude_id:
         query = query.filter(EeeTaxiMisTrip.id != exclude_id)
-    return query.first()
+    if trip.company_name == "MMT":
+        return query.first()
+    return next((row for row in query if (row.data or {}).get("pickup_time", "") == trip.pickup_time), None)
+
+
+def copy_for_date(trip: MisTrip, new_date: str) -> MisTrip:
+    """A fresh open booking of the same run on another day (shuttle rosters repeat daily)."""
+    kept = {key: getattr(trip, key) for key in DISPATCH_KEYS}
+    # A phone number used as the route number stays the same; a booking number does not.
+    route_no = trip.route_no if re.fullmatch(r"\d{10}", trip.route_no) else ""
+    return MisTrip(date=new_date, route_no=route_no, **kept)
+
+
+def stamp_closer(trip: MisTrip, was_open: bool, closer: str) -> MisTrip:
+    """Fill Duty closed by with whoever closes the trip, unless it was typed in."""
+    if was_open and trip.status == "Closed" and not trip.duty_closed_by:
+        return trip.model_copy(update={"duty_closed_by": closer[:120]})
+    return trip
 
 
 def store_trip(row: EeeTaxiMisTrip, trip: MisTrip, editor: str) -> EeeTaxiMisTrip:

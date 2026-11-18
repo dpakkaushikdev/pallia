@@ -175,10 +175,83 @@ def test_manual_add_edit_delete(client, headers):
     assert client.get(ENDPOINT, headers=headers).json()["trips"] == []
 
 
-def test_duplicate_route_no_is_refused(client, headers):
+def test_dispatcher_opens_and_closer_closes_a_manual_trip(client, headers):
+    opened = client.post(ENDPOINT, json={"date": "2026-11-03", "company_name": "amazon", "guest_name": "Guest A",
+                                         "dispatcher_name": "Desk One"}, headers=headers).json()
+    assert opened["company_name"] == "Amazon" and opened["status"] == "Open" and opened["duty_closed_by"] == ""
+    assert [t["id"] for t in client.get(ENDPOINT, params={"status": "Open"}, headers=headers).json()["trips"]] == [opened["id"]]
+    assert client.get(ENDPOINT, params={"status": "Closed"}, headers=headers).json()["trips"] == []
+    fields = {k: v for k, v in opened.items() if k in MisTrip.model_fields}
+    half = client.put(f"{ENDPOINT}/{opened['id']}", json=dict(fields, trip_fare="900"), headers=headers).json()
+    assert half["status"] == "Open" and half["duty_closed_by"] == ""
+    closed = client.put(f"{ENDPOINT}/{opened['id']}", json=dict(fields, trip_fare="900", drop_time="10:30",
+                                                                total_kms="18"), headers=headers).json()
+    assert closed["status"] == "Closed" and closed["duty_closed_by"] == "mis@test.com"
+    body = client.get(ENDPOINT, params={"company": "AMAZON", "status": "Closed"}, headers=headers).json()
+    assert len(body["trips"]) == 1 and body["summary"]["open"] == 0
+
+
+def test_uploaded_mmt_trips_are_closed_and_not_stamped(client, headers):
+    _upload(client, headers, [_mmt_row("NC1"), dict(_mmt_row("NC2"), **{"Total Bill Amount": "-"})])
+    trips = {t["route_no"]: t for t in client.get(ENDPOINT, headers=headers).json()["trips"]}
+    assert (trips["NC1"]["status"], trips["NC2"]["status"]) == ("Closed", "Open")
+    assert trips["NC1"]["duty_closed_by"] == ""
+
+
+def test_unknown_client_is_refused(client, headers):
+    bad = client.post(ENDPOINT, json={"date": "2026-11-03", "company_name": "Acme"}, headers=headers)
+    assert bad.status_code == 422 and bad.json()["detail"] == "Company Name: 'Acme' is not in the client list."
+
+
+def test_mmt_booking_id_is_used_only_once(client, headers):
     _upload(client, headers, [_mmt_row("NC1")])
-    clash = client.post(ENDPOINT, json={"date": "2026-11-02", "company_name": "MMT", "route_no": "NC1"}, headers=headers)
+    clash = client.post(ENDPOINT, json={"date": "2026-11-09", "company_name": "MMT", "route_no": "NC1"}, headers=headers)
     assert clash.status_code == 409 and "NC1" in clash.json()["detail"]
+
+
+def test_other_clients_reuse_a_route_no_on_other_days_and_times(client, headers):
+    trip = {"date": "2026-11-02", "company_name": "Decathlon", "route_no": "9000000009", "pickup_time": "20:30"}
+    assert client.post(ENDPOINT, json=trip, headers=headers).status_code == 201
+    assert client.post(ENDPOINT, json=dict(trip, date="2026-11-03"), headers=headers).status_code == 201
+    assert client.post(ENDPOINT, json=dict(trip, pickup_time="23:00"), headers=headers).status_code == 201
+    assert client.post(ENDPOINT, json=trip, headers=headers).status_code == 409   # entered twice
+
+
+def test_copy_books_the_same_run_on_another_date_as_open_trips(client, headers):
+    done = {"date": "2026-11-02", "company_name": "Mongo DB", "route_no": "165761", "guest_name": "Guest A",
+            "driver_id": "EEED/VK/9001", "cab_no": "HR55ZZ0001", "pickup_address": "Sector 37, Gurugram",
+            "pickup_time": "07:40", "drop_location": "MongoDB office", "drop_zone": "gurgon", "drop_time": "08:30",
+            "total_kms": "18", "trip_fare": "725"}
+    first = client.post(ENDPOINT, json=done, headers=headers).json()
+    assert (first["company_name"], first["pickup_zone"], first["drop_zone"]) == ("MongoDB", "Gurgaon", "Gurgaon")
+    body = {"ids": [first["id"]], "date": "2026-11-03"}
+    assert client.post(f"{ENDPOINT}/copy", json=body, headers=headers).json() == {"added": 1, "skipped_existing": 0}
+    copy = client.get(ENDPOINT, params={"date_from": "2026-11-03"}, headers=headers).json()["trips"][0]
+    assert copy["status"] == "Open" and copy["missing"] == ["Trip Fare", "Drop Time", "Total kms"]
+    assert (copy["guest_name"], copy["cab_no"], copy["pickup_time"], copy["driver_name"]) == ("Guest A", "HR55ZZ0001", "07:40", "TEST DRIVER")
+    assert copy["route_no"] == "" and copy["trip_fare"] == ""    # a booking number is not carried over
+
+
+def test_total_trip_fare_adds_gst_mcd_parking_and_toll():
+    trip = MisTrip(date="2026-11-02", company_name="Dalmia", trip_fare="2152.5", mcd="100", parking="280",
+                   hub_out="Vasant Kunj", hub_in="20km hub to hub")
+    assert trip.total_trip_fare == "2532.5" and trip.hub_in == "20km hub to hub"
+    assert MisTrip(date="2026-11-02", company_name="Dalmia", mcd="100").total_trip_fare == ""
+
+
+@pytest.mark.parametrize("typed, saved", [
+    ("Rastey Cabs", "Rastey Cab"), ("raste cabs ", "Rastey Cab"), ("Mongo DB", "MongoDB"), ("ARC ETC", "ARC ETS"),
+    ("TataPlay", "TATA Play"), ("Supmere Gartner", "Supreme Gartner"), ("seahawk gartner", "Seahawk Gartner"),
+    ("Decathalon", "Decathlon"), ("maintenance", "Maintenance"),
+])
+def test_client_spellings_from_the_old_sheets_fold_to_one_name(typed, saved):
+    assert MisTrip(date="2026-11-02", company_name=typed).company_name == saved
+
+
+@pytest.mark.parametrize("typed, saved", [("Ghziabad", "Ghaziabad"), ("DElhi", "Delhi"), ("Aiport", "Airport"),
+                                          ("gr gurgaon", "Gr Gurgaon"), ("Disposal", "Disposal")])
+def test_zone_spellings_fold_to_one_name(typed, saved):
+    assert MisTrip(date="2026-11-02", company_name="EY", pickup_zone=typed).pickup_zone == saved
 
 
 def test_filters_summary_and_export(client, headers):
@@ -189,7 +262,7 @@ def test_filters_summary_and_export(client, headers):
     export = client.get(f"{ENDPOINT}/export", headers=headers)
     assert export.status_code == 200
     sheet = load_workbook(io.BytesIO(export.content)).active
-    assert sheet["A1"].value == "Date" and sheet["AL1"].value == "B2C payment Status " and sheet.max_row == 3
+    assert sheet["A1"].value == "Date" and sheet["AN1"].value == "B2C payment Status " and sheet.max_row == 3
     assert sheet["G2"].value == "NC2" and sheet["AB2"].value == 860   # oldest first; Trip Fare is a number
     assert sheet["V1"].value == "Total \nkms" and sheet["A1"].fill.fgColor.rgb == "00FFE600"
     assert sheet["E2"].value == 9000000001 and sheet["Q2"].number_format == "hh:mm"
@@ -199,7 +272,8 @@ def test_filters_summary_and_export(client, headers):
     ("Flat 2, Sector 29, Gurugram", "Gurgaon"), ("Noida Sector 62", "Noida"), ("Rohini, New Delhi 110085", "Delhi"),
     ("Indirapuram, Gaziabad, Delhi NCR", "Ghaziabad"), ("Vaishali 201010", "Ghaziabad"),
     ("Sector 18, 201301", "Noida"), ("IGI Airport Terminal 3, New Delhi 110037", "Airport"),
-    ("Gurgaon Noida link", ""), ("Somewhere unknown", ""),
+    ("Gurgaon Noida link", ""), ("Somewhere unknown", ""), ("Alpha 1, Greater Noida", "Greater Noida"),
+    ("Sector 19, Faridabad", "Faridabad"), ("NIT 121001", "Faridabad"), ("Terminal-2", "Airport"),
 ])
 def test_zone_guess(address, zone):
     assert guess_zone(address) == zone
