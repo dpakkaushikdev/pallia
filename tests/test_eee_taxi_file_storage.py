@@ -263,3 +263,20 @@ def test_generated_invoice_with_a_stored_document_goes_to_storage(client, admin,
             assert len(PdfReader(io.BytesIO(storage[inv.signed_invoice_key])).pages) == 1
     finally:
         _clear()
+
+
+def test_storage_request_is_retried_after_a_passing_server_error(monkeypatch):
+    import httpx
+    answers = [httpx.Response(520), httpx.Response(200, content=b"file")]
+
+    class Flaky:
+        def request(self, method, url, **kwargs):
+            response = answers.pop(0)
+            response.request = httpx.Request(method, url)
+            return response
+
+    monkeypatch.setattr(file_store, "_http", lambda: Flaky())
+    monkeypatch.setattr(file_store, "RETRY_WAIT_SECONDS", 0)
+
+    assert file_store.get("invoices/a.pdf") == b"file"
+    assert answers == []
