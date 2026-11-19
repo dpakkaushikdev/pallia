@@ -257,11 +257,13 @@ class EeeTaxiBatch(Base):
     # Everything needed to rebuild any row's invoice in a later request. The
     # browser drives generation one invoice at a time, and each request may
     # land on a different serverless instance, so nothing can stay in memory.
-    csv_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    calc_csv_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    card_fare_rows: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    rates_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    client_master_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Loaded only when a row has to be rebuilt (one query for the whole group),
+    # so status checks and lists do not pull the CSV and snapshots every time.
+    csv_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True, deferred_group="inputs")
+    calc_csv_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True, deferred_group="inputs")
+    card_fare_rows: Mapped[list | None] = mapped_column(JSON, nullable=True, deferred=True, deferred_group="inputs")
+    rates_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True, deferred=True, deferred_group="inputs")
+    client_master_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True, deferred=True, deferred_group="inputs")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
     invoices: Mapped[list["EeeTaxiInvoice"]] = relationship(
@@ -299,11 +301,17 @@ class EeeTaxiInvoice(Base):
     )
     pdf_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     signed_pdf_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    # PDF bytes live in the database so they survive serverless instances
-    # (Vercel's disk is per-instance and ephemeral). Disk paths are a fallback.
-    pdf_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    signed_pdf_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # PDFs live in file storage (the *_key columns) so they survive serverless
+    # instances; Vercel's disk is per-instance and ephemeral. The *_data columns
+    # hold the bytes only when storage is not configured, or for rows written
+    # before it was. They are deferred: reading an invoice row never pulls a PDF.
+    # Read and write them through app.services.eee_taxi_files.
+    pdf_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
+    signed_pdf_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
     signed_invoice_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
+    pdf_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    signed_pdf_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    signed_invoice_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     document_zip_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
     # Signature box (x1, y1, x2, y2) in PDF points, captured at generation time
     # and handed to the local signing helper so the stamp lands in the footer.
@@ -368,7 +376,9 @@ class EeeTaxiDocumentFile(Base):
     content_type: Mapped[str] = mapped_column(String(64))
     size: Mapped[int] = mapped_column(Integer)
     sha256: Mapped[str] = mapped_column(String(64))
+    # Empty when the file is in file storage under storage_key.
     data: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
+    storage_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     uploaded_by: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     entry: Mapped[EeeTaxiDocumentEntry] = relationship(back_populates="files")

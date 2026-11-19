@@ -163,6 +163,14 @@ def _migrate_existing_db() -> None:
             if "tally_exported_at" not in existing:
                 datetime_type = DateTime().compile(dialect=engine.dialect)
                 conn.execute(text(f"ALTER TABLE eee_taxi_invoices ADD COLUMN tally_exported_at {datetime_type}"))
+            for column in ("pdf_key", "signed_pdf_key", "signed_invoice_key"):
+                if column not in existing:
+                    conn.execute(text(f"ALTER TABLE eee_taxi_invoices ADD COLUMN {column} VARCHAR(255)"))
+            conn.commit()
+        if "eee_taxi_document_files" in inspector.get_table_names():
+            existing = {c["name"] for c in inspector.get_columns("eee_taxi_document_files")}
+            if "storage_key" not in existing:
+                conn.execute(text("ALTER TABLE eee_taxi_document_files ADD COLUMN storage_key VARCHAR(255)"))
             conn.commit()
 
         if "eee_taxi_document_entries" in inspector.get_table_names():

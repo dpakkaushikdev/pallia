@@ -14,6 +14,8 @@ from app.config import settings
 from app.database import SessionLocal
 from app.services.auth import require_permission
 from app.models import EeeTaxiBatch, EeeTaxiBatchStatus, EeeTaxiInvoice, EeeTaxiInvoiceStatus, User
+from app.services import file_store
+from app.services.eee_taxi_files import set_invoice_file
 from app.services.eee_taxi_csv import financial_year, format_invoice_no, parse_eee_taxi_csv
 from app.services.eee_taxi_fare_check import STATUS_OK, apply_card_fares, check_p2p_fares
 from app.services.eee_taxi_pipeline import (
@@ -436,14 +438,14 @@ async def upload_signed_invoice(batch_id: str, invoice_id: str, file: UploadFile
         if inv.status != EeeTaxiInvoiceStatus.AWAITING_SIGNATURE:
             raise HTTPException(status_code=409, detail=f"Invoice is not awaiting signature (status: {inv.status}).")
 
-        inv.signed_pdf_data = data
-        inv.signed_invoice_data = invoice_data
+        stale_keys = set_invoice_file(inv, "signed_pdf", data)
+        stale_keys += set_invoice_file(inv, "signed_invoice", invoice_data)
         # Signed variants supersede the unsigned copy.
-        inv.pdf_data = None
+        stale_keys += set_invoice_file(inv, "pdf", None)
         if inv.pdf_path:
             signed_path = Path(inv.pdf_path).with_name(f"{Path(inv.pdf_path).stem}_signed.pdf")
             inv.signed_pdf_path = str(signed_path)
-            try:   # best effort; the DB copy is authoritative
+            try:   # best effort; the stored copy is authoritative
                 signed_path.parent.mkdir(parents=True, exist_ok=True)
                 signed_path.write_bytes(data)
             except OSError as exc:
@@ -451,6 +453,7 @@ async def upload_signed_invoice(batch_id: str, invoice_id: str, file: UploadFile
         inv.status        = EeeTaxiInvoiceStatus.DONE
         inv.error_message = None
         db.commit()
+        file_store.delete(stale_keys)
 
         batch = db.get(EeeTaxiBatch, batch_id)
         status = finalize_batch_status(batch, db) if batch else None

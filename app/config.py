@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_key: str = ""
     supabase_analytics_table: str = "api_usage_events"
+    # Private Supabase Storage bucket for invoice PDFs and uploaded documents.
+    # Used when SUPABASE_URL and SUPABASE_KEY (service role) are also set.
+    file_storage_bucket: str = "billing-files"
     # Postgres connection string from Supabase's Connect dialog. When set it
     # replaces DATABASE_URL, so the app stores everything in Supabase.
     supabase_db_url: str = ""

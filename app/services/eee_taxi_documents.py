@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import select, func
 from app.models import EeeTaxiDocumentEntry, EeeTaxiDocumentAudit, EeeTaxiDocumentFile
+from app.services.eee_taxi_files import document_bytes
 
 
 def normalize_route(value):
@@ -114,12 +115,12 @@ def append_supporting_pages(invoice_pdf, files):
     for document in files:
         first_page = len(writer.pages)
         if document.content_type == "application/pdf":
-            supporting = PdfReader(io.BytesIO(document.data))
+            supporting = PdfReader(io.BytesIO(document_bytes(document)))
             if not supporting.pages:
                 continue
             writer.append(supporting)
         else:
-            image_pdf = _image_pdf(document.data, page_size)
+            image_pdf = _image_pdf(document_bytes(document), page_size)
             writer.append(PdfReader(io.BytesIO(image_pdf)))
         label = DOCUMENT_LABELS.get(document.category)
         if label:

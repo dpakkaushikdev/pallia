@@ -17,6 +17,8 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.models import EeeTaxiBatch, EeeTaxiInvoice, EeeTaxiInvoiceStatus
+from app.services import file_store
+from app.services.eee_taxi_files import invoice_file_keys
 from app.services.eee_taxi_clients import UnknownClientError, is_local, lookup_client
 from app.services.eee_taxi_cost_centres import get_cost_centre_state, normalize_vehicle_no
 from app.services.eee_taxi_csv import EeeTaxiRow
@@ -232,6 +234,7 @@ def delete_invoice(db: Session, invoice_id: str) -> EeeTaxiInvoice:
     if inv is None:
         raise LookupError("Invoice not found.")
     batch_id = inv.batch_id
+    stored_files = invoice_file_keys(inv)
     db.delete(inv)
     db.flush()
     if not db.query(EeeTaxiInvoice).filter(EeeTaxiInvoice.batch_id == batch_id).count():
@@ -239,6 +242,7 @@ def delete_invoice(db: Session, invoice_id: str) -> EeeTaxiInvoice:
         if batch is not None:
             db.delete(batch)
     db.commit()
+    file_store.delete(stored_files)
     return inv
 
 

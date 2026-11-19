@@ -1,4 +1,4 @@
-"""Shared EEE document records; attachments persist with the application's DB."""
+"""Shared EEE document records; the attached files are kept in file storage."""
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from hashlib import sha256
@@ -18,11 +18,14 @@ from app.database import get_db
 from app.models import EeeTaxiDocumentEntry, EeeTaxiDocumentFile, EeeTaxiDocumentAudit, User
 from app.api.eee_taxi_rates import check_edit_password
 from app.services.auth import require_permission
+from app.services import file_store
+from app.services.eee_taxi_files import document_bytes, document_keys, shrink_image, store_document
 
 router = APIRouter(prefix="/api/eee-taxi/documents", tags=["eee-taxi-documents"])
 eee_user = require_permission("eee_taxi")
 MAX_FILE_BYTES = 3 * 1024 * 1024
 CATEGORIES = ["ds", "parking", "toll_mcd", "gps"]
+IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
 
 
 class EntryIn(BaseModel):
@@ -141,10 +144,12 @@ def bulk_delete(body: BulkDeleteIn, user: User = Depends(eee_user), db: Session 
     if body.used_only and any(row.used_revision < row.revision for row in rows):
         raise HTTPException(409, "Bulk cleanup can delete only used entries. Refresh the history.")
     freed = sum(file.size for row in rows for file in row.files)
+    stored_files = [key for row in rows for key in document_keys(row.files)]
     for row in rows:
         audit(db, row, "deleted", user.email, {"files": len(row.files), "bytes": sum(f.size for f in row.files)})
         db.delete(row)
     db.commit()
+    file_store.delete(stored_files)
     return {"deleted": len(rows), "freed_bytes": freed}
 
 
@@ -180,8 +185,10 @@ def cancel_entry(entry_id: str, user: User = Depends(eee_user), db: Session = De
     if entry.is_saved or entry.edit_protected:
         raise HTTPException(409, "Saved entries cannot be canceled. Open the entry from Saved document entries to edit it.")
     audit(db, entry, "cancelled", user.email, {"files": len(entry.files), "bytes": sum(f.size for f in entry.files)})
+    stored_files = document_keys(entry.files)
     db.delete(entry)
     db.commit()
+    file_store.delete(stored_files)
     return {"cancelled": entry_id}
 
 
@@ -223,8 +230,10 @@ def delete_entry(entry_id: str, body: PasswordIn, user: User = Depends(eee_user)
     check_edit_password(db, body.edit_password, user)
     freed = sum(file.size for file in entry.files)
     audit(db, entry, "deleted", user.email, {"files": len(entry.files), "bytes": freed})
+    stored_files = document_keys(entry.files)
     db.delete(entry)
     db.commit()
+    file_store.delete(stored_files)
     return {"deleted": entry_id, "freed_bytes": freed}
 
 
@@ -274,19 +283,27 @@ def upload_file(entry_id: str, category: str = Form(...), file: UploadFile = Fil
     if len(data) > MAX_FILE_BYTES:
         raise HTTPException(413, "Each document must be 3 MB or smaller.")
     content_type, suffix = validate_file(data)
+    # The fingerprint is of the file as uploaded, so the same file is still
+    # recognised as a duplicate after it has been shrunk.
+    digest = sha256(data).hexdigest()
+    if content_type != "application/pdf":
+        data, content_type, suffix = shrink_image(data, content_type, suffix)
     filename = (file.filename or "screenshot").replace("\\", "/").split("/")[-1]
     filename = "".join(ch for ch in filename if ord(ch) >= 32).strip()[:240] or "document"
     if not filename.lower().endswith(suffix):
-        filename += suffix
-    digest = sha256(data).hexdigest()
+        stem, _, extension = filename.rpartition(".")
+        filename = (stem if stem and extension.lower() in IMAGE_EXTENSIONS else filename) + suffix
     if not any(f.category == category and f.sha256 == digest for f in entry.files):
+        column_data, storage_key = store_document(entry.id, data, content_type, suffix)
         entry.files.append(EeeTaxiDocumentFile(category=category, filename=filename,
-            content_type=content_type, size=len(data), sha256=digest, data=data, uploaded_by=user.email))
+            content_type=content_type, size=len(data), sha256=digest, data=column_data,
+            storage_key=storage_key, uploaded_by=user.email))
         changed(db, entry, user, "file_added", {"category": category, "filename": filename})
         try:
             db.commit()
         except IntegrityError:
             db.rollback()
+            file_store.delete([storage_key])
             # A simultaneous upload of the same attachment is idempotent.
             # Other constraint errors must still surface as failures.
             if not db.scalar(select(EeeTaxiDocumentFile.id).where(
@@ -305,9 +322,11 @@ def download_file(entry_id: str, file_id: str, inline: bool = False,
     if file is None or file.entry_id != entry_id:
         raise HTTPException(404, "Document not found.")
     disposition = "inline" if inline else "attachment"
-    return Response(file.data, media_type=file.content_type, headers={
+    # A stored file never changes, so the browser may keep its copy for a day
+    # instead of fetching it again on every preview.
+    return Response(document_bytes(file), media_type=file.content_type, headers={
         "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(file.filename, safe='')}",
-        "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+        "Cache-Control": "private, max-age=86400, immutable", "X-Content-Type-Options": "nosniff"})
 
 
 @router.delete("/{entry_id}/files/{file_id}")
@@ -317,8 +336,10 @@ def delete_file(entry_id: str, file_id: str, body: PasswordIn = PasswordIn(), us
     file = db.get(EeeTaxiDocumentFile, file_id)
     if file is None or file.entry_id != entry_id:
         raise HTTPException(404, "Document not found.")
+    stored_files = document_keys([file])
     db.delete(file)
     changed(db, entry, user, "file_removed", {"filename": file.filename, "category": file.category})
     db.commit()
+    file_store.delete(stored_files)
     db.expire(entry, ["files"])
     return entry_dict(entry)

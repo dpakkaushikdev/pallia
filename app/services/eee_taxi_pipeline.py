@@ -18,7 +18,7 @@ Each generate-next call rebuilds the row it needs from the CSV stored on the
 batch, because consecutive requests may land on different instances and
 nothing can be kept in memory between them.
 
-PDF bytes live in the database for the same reason: a serverless disk is
+PDFs live in file storage for the same reason: a serverless disk is
 per-instance and ephemeral. File paths are only a fallback for local runs.
 """
 from __future__ import annotations
@@ -35,6 +35,8 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import EeeTaxiBatch, EeeTaxiBatchStatus, EeeTaxiInvoice, EeeTaxiInvoiceStatus
+from app.services import file_store
+from app.services.eee_taxi_files import invoice_file, set_invoice_file
 from app.services.eee_taxi_clients import UnknownClientError, is_local, lookup_client
 from app.services.eee_taxi_csv import EeeTaxiRow, financial_year, format_invoice_no, parse_eee_taxi_csv
 from app.services.eee_taxi_fare_check import apply_card_fares
@@ -59,25 +61,28 @@ from app.services.eee_taxi_cost_centres import get_cost_centre_state, normalize_
 # ── PDF byte helpers ──────────────────────────────────────────────────────────
 
 def unsigned_pdf_bytes(inv: EeeTaxiInvoice) -> bytes | None:
-    """Unsigned PDF from the DB, falling back to the file on disk."""
-    if inv.pdf_data:
-        return bytes(inv.pdf_data)
+    """Unsigned PDF from storage, falling back to the file on disk."""
+    data = invoice_file(inv, "pdf")
+    if data:
+        return data
     if inv.pdf_path and Path(inv.pdf_path).exists():
         return Path(inv.pdf_path).read_bytes()
     return None
 
 
 def signed_pdf_bytes(inv: EeeTaxiInvoice) -> bytes | None:
-    """Signed PDF from the DB, falling back to the file on disk."""
-    if inv.signed_pdf_data:
-        return bytes(inv.signed_pdf_data)
+    """Signed PDF from storage, falling back to the file on disk."""
+    data = invoice_file(inv, "signed_pdf")
+    if data:
+        return data
     if inv.signed_pdf_path and Path(inv.signed_pdf_path).exists():
         return Path(inv.signed_pdf_path).read_bytes()
     return None
 
 
 def has_signed_pdf(inv: EeeTaxiInvoice) -> bool:
-    return bool(inv.signed_pdf_data) or bool(
+    """Answered without reading the PDF: an invoice is only 'done' once its signed copy is saved."""
+    return inv.status == EeeTaxiInvoiceStatus.DONE or bool(inv.signed_pdf_key) or bool(
         inv.signed_pdf_path and Path(inv.signed_pdf_path).exists()
     )
 
@@ -97,8 +102,9 @@ def invoice_page_bytes(data: bytes) -> bytes:
 
 def invoice_only_signed_bytes(inv: EeeTaxiInvoice) -> bytes | None:
     from pypdf import PdfReader
-    if inv.signed_invoice_data:
-        return bytes(inv.signed_invoice_data)
+    invoice_only = invoice_file(inv, "signed_invoice")
+    if invoice_only:
+        return invoice_only
     data = signed_pdf_bytes(inv)
     if data and len(PdfReader(io.BytesIO(data)).pages) > 1:
         raise ValueError(
@@ -124,8 +130,8 @@ def finalize_batch_status(batch: EeeTaxiBatch, db: Session) -> EeeTaxiBatchStatu
     upload, so the batch flips to completed/partial as soon as the browser
     has signed the last invoice.
     """
-    invoices = db.query(EeeTaxiInvoice).filter(EeeTaxiInvoice.batch_id == batch.id).all()
-    statuses = [inv.status for inv in invoices]
+    statuses = [status for (status,) in
+                db.query(EeeTaxiInvoice.status).filter(EeeTaxiInvoice.batch_id == batch.id)]
 
     if any(s in (EeeTaxiInvoiceStatus.PENDING, EeeTaxiInvoiceStatus.GENERATING) for s in statuses):
         status = EeeTaxiBatchStatus.PROCESSING
@@ -301,6 +307,7 @@ def generate_next_invoice(batch_id: str, db: Session) -> dict:
     inv_rec.status     = EeeTaxiInvoiceStatus.GENERATING
     db.commit()
 
+    stale_keys: list[str] = []
     try:
         rates = batch_rates(batch)
         rows  = batch_rows(batch, rates)
@@ -320,28 +327,37 @@ def generate_next_invoice(batch_id: str, db: Session) -> dict:
 
         inv_rec.booking_type = row.booking_type
         inv_rec.pdf_path     = str(pdf_path)
-        inv_rec.pdf_data     = pdf_path.read_bytes()
         inv_rec.sig_box      = [float(v) for v in sig_box] if sig_box else None
         from app.services.eee_taxi_documents import attach_documents
-        attach_documents(inv_rec, batch, db)
-        # Append supporting pages before either local dummy stamping or the
-        # user's USB DSC signature. This keeps the signature over every page.
-        pdf_path.write_bytes(inv_rec.pdf_data)
+        # The PDF is held on the row only while the pages are put together;
+        # no_autoflush keeps those working bytes from being written to the
+        # database before they go to file storage.
+        with db.no_autoflush:
+            inv_rec.pdf_data = pdf_path.read_bytes()
+            attach_documents(inv_rec, batch, db)
+            # Append supporting pages before either local dummy stamping or the
+            # user's USB DSC signature. This keeps the signature over every page.
+            pdf_bytes = inv_rec.pdf_data
+            inv_rec.pdf_data = None
+            pdf_path.write_bytes(pdf_bytes)
 
-        if sign_mode == "dummy":
-            invoice_path = output_dir / f"{pdf_path.stem}_invoice.pdf"
-            invoice_path.write_bytes(invoice_page_bytes(inv_rec.pdf_data))
-            inv_rec.signed_invoice_data = sign_eee_taxi_pdf_dummy(invoice_path, sig_box=sig_box).read_bytes()
-            signed_path = sign_eee_taxi_pdf_dummy(pdf_path, sig_box=sig_box)
-            inv_rec.signed_pdf_path = str(signed_path)
-            inv_rec.signed_pdf_data = signed_path.read_bytes()
-            inv_rec.pdf_data        = None   # signed copy supersedes it
-            inv_rec.status          = EeeTaxiInvoiceStatus.DONE
-            logger.info("Batch {}: invoice {} done (dummy signature).", batch_id, invoice_no)
-        else:
-            inv_rec.status = EeeTaxiInvoiceStatus.AWAITING_SIGNATURE
-            logger.info("Batch {}: invoice {} generated, awaiting USB signature.", batch_id, invoice_no)
+            if sign_mode == "dummy":
+                invoice_path = output_dir / f"{pdf_path.stem}_invoice.pdf"
+                invoice_path.write_bytes(invoice_page_bytes(pdf_bytes))
+                stale_keys += set_invoice_file(
+                    inv_rec, "signed_invoice", sign_eee_taxi_pdf_dummy(invoice_path, sig_box=sig_box).read_bytes())
+                signed_path = sign_eee_taxi_pdf_dummy(pdf_path, sig_box=sig_box)
+                inv_rec.signed_pdf_path = str(signed_path)
+                stale_keys += set_invoice_file(inv_rec, "signed_pdf", signed_path.read_bytes())
+                stale_keys += set_invoice_file(inv_rec, "pdf", None)   # signed copy supersedes it
+                inv_rec.status = EeeTaxiInvoiceStatus.DONE
+                logger.info("Batch {}: invoice {} done (dummy signature).", batch_id, invoice_no)
+            else:
+                stale_keys += set_invoice_file(inv_rec, "pdf", pdf_bytes)
+                inv_rec.status = EeeTaxiInvoiceStatus.AWAITING_SIGNATURE
+                logger.info("Batch {}: invoice {} generated, awaiting USB signature.", batch_id, invoice_no)
         db.commit()
+        file_store.delete(stale_keys)
 
     except Exception as exc:
         db.rollback()
