@@ -173,3 +173,40 @@ def test_upload_review_document_availability_is_optional_and_client_specific(cli
                 entry=db.get(EeeTaxiDocumentEntry,entry_id)
                 if entry is not None: db.delete(entry)
             db.commit()
+
+
+def test_numbers_of_a_batch_not_yet_generated_are_refused(client, admin):
+    files, data = _files()
+    assert client.post("/api/eee-taxi/batch", files=files, data=data, headers=admin).status_code == 200
+
+    files, data = _files()
+    resp = client.post("/api/eee-taxi/batch", files=files, data=data, headers=admin)
+    assert resp.status_code == 409
+    assert "DL/HO/26-27/1388" in resp.json()["detail"]
+
+
+def test_invoice_cut_off_while_generating_is_generated_again(client, admin):
+    from datetime import datetime, timedelta
+    from app.models import EeeTaxiInvoiceStatus
+    files, data = _files({"exclude_rows": "1"})
+    batch_id = client.post("/api/eee-taxi/batch", files=files, data=data, headers=admin).json()["batch_id"]
+    with SessionLocal() as db:
+        inv = db.query(EeeTaxiInvoice).filter(EeeTaxiInvoice.batch_id == batch_id).one()
+        inv.status = EeeTaxiInvoiceStatus.GENERATING
+        inv.generating_at = datetime.utcnow()
+        db.query(EeeTaxiBatch).filter(EeeTaxiBatch.id == batch_id).update({"status": "PROCESSING"})
+        db.commit()
+
+    # Still inside the time a request may take: left alone.
+    assert client.post(f"/api/eee-taxi/batch/{batch_id}/generate-next", headers=admin).json()["generated"] is None
+    with SessionLocal() as db:
+        inv = db.query(EeeTaxiInvoice).filter(EeeTaxiInvoice.batch_id == batch_id).one()
+        assert inv.status == EeeTaxiInvoiceStatus.GENERATING
+        inv.generating_at = datetime.utcnow() - timedelta(minutes=30)
+        db.commit()
+
+    # The batch page puts it back to pending, so the browser asks for it again.
+    shown = client.get(f"/api/eee-taxi/batch/{batch_id}", headers=admin).json()
+    assert [i["status"] for i in shown["invoices"]] == ["pending"]
+    done = client.post(f"/api/eee-taxi/batch/{batch_id}/generate-next", headers=admin).json()
+    assert done["generated"]["status"] == "done"

@@ -319,6 +319,9 @@ class EeeTaxiInvoice(Base):
     # When this invoice was last included in a Tally XML download (not proof
     # that it was imported; that happens in Tally).
     tally_exported_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # When a request claimed this invoice for generation. A row still
+    # "generating" long after this was cut off mid-request and is put back.
+    generating_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 

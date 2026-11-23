@@ -490,7 +490,7 @@ def test_invoice_history_includes_pending_invoices_and_filters_by_client_and_cre
     assert (history["page"], history["page_size"], history["pages"]) == (1, 40, 1)
     item = history["invoices"][0]
     assert item["status"] == "pending"
-    assert item["invoice_no"] is None
+    assert item["invoice_no"] == "HR/HO/26-27/0157"   # reserved when the batch is created
     assert item["route_no"] == "220426-NCR-0418"
     assert item["guest_name"] == "Armaan Goel"
     assert item["total"] == "369.60"

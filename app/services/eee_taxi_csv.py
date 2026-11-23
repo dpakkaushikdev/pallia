@@ -113,8 +113,45 @@ def _normalize_header(h: str) -> str:
     return s.lower()
 
 
-def _parse_date(s: str) -> date:
-    for fmt in ("%m/%d/%Y", "%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
+_SLASH_DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/\d{4}$")
+
+
+def slash_dates_day_first(values) -> bool | None:
+    """Work out whether a file writes dates as DD/MM/YYYY or MM/DD/YYYY.
+
+    A date such as 05/04/2026 fits both, so the whole file is read together:
+    one date whose first number is above 12 settles it as day-first, one whose
+    second number is above 12 as month-first. Returns None when no date in the
+    file settles it. Raises ValueError when the file mixes both.
+    """
+    day_first = month_first = False
+    for value in values:
+        m = _SLASH_DATE.match((value or "").strip())
+        if not m:
+            continue
+        first, second = int(m.group(1)), int(m.group(2))
+        if first > 12:
+            day_first = True
+        if second > 12:
+            month_first = True
+    if day_first and month_first:
+        raise ValueError(
+            "The Date column mixes DD/MM/YYYY and MM/DD/YYYY dates. "
+            "Please write every date the same way and re-upload.")
+    if day_first:
+        return True
+    if month_first:
+        return False
+    return None
+
+
+def _parse_date(s: str, day_first: bool | None = None) -> date:
+    # With nothing in the file to settle the order, month-first is tried first,
+    # as it always has been.
+    slash = ("%d/%m/%Y", "%m/%d/%Y") if day_first else ("%m/%d/%Y", "%d/%m/%Y")
+    if day_first is not None:
+        slash = slash[:1]
+    for fmt in (*slash, "%d-%m-%Y", "%Y-%m-%d"):
         try:
             return datetime.strptime(s.strip(), fmt).date()
         except ValueError:
@@ -191,9 +228,10 @@ def parse_eee_taxi_csv(
     caller can return a 400 and ask for re-upload.
     """
     text = file_bytes.decode("utf-8-sig")
-    reader = csv.reader(io.StringIO(text))
+    reader = list(csv.reader(io.StringIO(text)))
 
     rows_out: list[EeeTaxiRow] = []
+    day_first: bool | None = None
     header_map: dict[str, int] = {}
     original_headers: list[str] = []
     row_errors: list[str] = []
@@ -215,6 +253,9 @@ def parse_eee_taxi_csv(
             missing = [h for h in REQUIRED_HEADERS if h not in header_map]
             if missing:
                 raise ValueError(_header_mismatch_message(missing, raw))
+            date_col = header_map["date"]
+            day_first = slash_dates_day_first(
+                r[date_col] for r in reader if date_col < len(r))
             continue
 
         sheet_row += 1
@@ -241,7 +282,7 @@ def parse_eee_taxi_csv(
             row_errors.append(f"{label}: {entity_problem}")
             continue
         try:
-            trip_date = _parse_date(col("date"))
+            trip_date = _parse_date(col("date"), day_first)
         except ValueError:
             row_errors.append(f"{label}: cannot read Date {col('date')!r}")
             continue

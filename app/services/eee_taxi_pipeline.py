@@ -26,7 +26,7 @@ from __future__ import annotations
 import io
 import re
 import zipfile
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -270,6 +270,63 @@ def build_invoice_pdf(
     return pdf_path, sig_box
 
 
+# A request that is cut off mid-way (serverless time limit) never reaches its
+# error handler, so its invoice would stay "generating" for good. Longer than
+# any request can run, so a row still being worked on is never taken twice.
+STUCK_GENERATING_AFTER = timedelta(minutes=6)
+
+
+def release_stuck_invoices(batch_id: str, db: Session) -> int:
+    """Put invoices whose generation was interrupted back to pending."""
+    cutoff = datetime.utcnow() - STUCK_GENERATING_AFTER
+    released = (
+        db.query(EeeTaxiInvoice)
+        .filter(
+            EeeTaxiInvoice.batch_id == batch_id,
+            EeeTaxiInvoice.status == EeeTaxiInvoiceStatus.GENERATING,
+            (EeeTaxiInvoice.generating_at.is_(None)) | (EeeTaxiInvoice.generating_at < cutoff),
+        )
+        .update({EeeTaxiInvoice.status: EeeTaxiInvoiceStatus.PENDING}, synchronize_session=False)
+    )
+    if released:
+        db.commit()
+        logger.warning("Batch {}: {} interrupted invoice(s) put back to pending.", batch_id, released)
+    return released
+
+
+def _claim_next_invoice(batch_id: str, db: Session) -> EeeTaxiInvoice | None:
+    """Mark the next pending invoice as generating; only one request can win a row."""
+    for _ in range(5):
+        candidate = (
+            db.query(EeeTaxiInvoice)
+            .filter(
+                EeeTaxiInvoice.batch_id == batch_id,
+                EeeTaxiInvoice.status == EeeTaxiInvoiceStatus.PENDING,
+            )
+            .order_by(EeeTaxiInvoice.row_index)
+            .first()
+        )
+        if candidate is None:
+            return None
+        claimed = (
+            db.query(EeeTaxiInvoice)
+            .filter(
+                EeeTaxiInvoice.id == candidate.id,
+                EeeTaxiInvoice.status == EeeTaxiInvoiceStatus.PENDING,
+            )
+            .update(
+                {EeeTaxiInvoice.status: EeeTaxiInvoiceStatus.GENERATING,
+                 EeeTaxiInvoice.generating_at: datetime.utcnow()},
+                synchronize_session=False,
+            )
+        )
+        db.commit()
+        if claimed:
+            db.refresh(candidate)
+            return candidate
+    return None
+
+
 def generate_next_invoice(batch_id: str, db: Session) -> dict:
     """Generate the next pending invoice of a batch. Returns a progress dict.
 
@@ -280,15 +337,8 @@ def generate_next_invoice(batch_id: str, db: Session) -> dict:
     if batch is None:
         raise LookupError("Batch not found.")
 
-    inv_rec: EeeTaxiInvoice | None = (
-        db.query(EeeTaxiInvoice)
-        .filter(
-            EeeTaxiInvoice.batch_id == batch_id,
-            EeeTaxiInvoice.status == EeeTaxiInvoiceStatus.PENDING,
-        )
-        .order_by(EeeTaxiInvoice.row_index)
-        .first()
-    )
+    release_stuck_invoices(batch_id, db)
+    inv_rec = _claim_next_invoice(batch_id, db)
     if inv_rec is None:
         status = finalize_batch_status(batch, db)
         return {"generated": None, "remaining": 0, "batch_status": status}
@@ -304,7 +354,6 @@ def generate_next_invoice(batch_id: str, db: Session) -> dict:
         batch.client_profile or "pwc",
     )
     inv_rec.invoice_no = invoice_no
-    inv_rec.status     = EeeTaxiInvoiceStatus.GENERATING
     db.commit()
 
     stale_keys: list[str] = []

@@ -23,6 +23,7 @@ from app.services.eee_taxi_pipeline import (
     build_documents_zip,
     finalize_batch_status,
     generate_next_invoice,
+    release_stuck_invoices,
     has_signed_pdf,
     signed_filename,
     signed_pdf_bytes,
@@ -283,6 +284,9 @@ async def start_batch(
                 batch_id=batch_id,
                 row_index=row.row_index,
                 seq=seq,
+                # Written now, not at generation, so a second batch cannot be
+                # given the same numbers while this one is still waiting.
+                invoice_no=numbers[seq],
                 route_no=row.route_no.strip() or None,
                 entity_name=row.entity_name,
                 client_gstin=row.client_gstin,
@@ -331,6 +335,9 @@ def get_batch(batch_id: str):
         batch = db.get(EeeTaxiBatch, batch_id)
         if batch is None:
             raise HTTPException(status_code=404, detail="Batch not found.")
+        if batch.status == EeeTaxiBatchStatus.PROCESSING:
+            # The browser only asks for more work when it sees a pending row.
+            release_stuck_invoices(batch_id, db)
 
         invoices = (
             db.query(EeeTaxiInvoice)

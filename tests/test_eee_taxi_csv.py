@@ -82,3 +82,23 @@ def test_entity_name_must_match_gstin_owner():
     row = TRIP_P2P.replace("Price Waterhouse & Co LLP", "PricewaterhouseCoopers Services LLP")
     with pytest.raises(ValueError, match="belongs to PRICE WATERHOUSE & CO LLP"):
         _parse(HEADER + row)
+
+
+def test_one_clear_date_settles_day_first_for_the_whole_file():
+    from datetime import date
+    early = TRIP_P2P.replace("18/09/2026", "05/09/2026").replace("GGN-OYFS", "GGN-EARLY")
+    _, rows = _parse(HEADER + TRIP_1 + early)
+    assert [r.trip_date for r in rows] == [date(2026, 9, 17), date(2026, 9, 5)]
+
+
+def test_one_clear_date_settles_month_first_for_the_whole_file():
+    from datetime import date
+    text = (HEADER + TRIP_1.replace("17/09/2026", "09/17/2026")
+            + TRIP_P2P.replace("18/09/2026", "09/05/2026"))
+    _, rows = _parse(text)
+    assert [r.trip_date for r in rows] == [date(2026, 9, 17), date(2026, 9, 5)]
+
+
+def test_file_mixing_day_first_and_month_first_dates_is_refused():
+    with pytest.raises(ValueError, match="mixes DD/MM/YYYY and MM/DD/YYYY"):
+        _parse(HEADER + TRIP_1 + TRIP_P2P.replace("18/09/2026", "09/18/2026"))
