@@ -85,8 +85,11 @@ function misQuery() {
   return params;
 }
 async function misLoad() {
+  // A slow reply to an earlier date range must not replace a newer one.
+  const request = _mis.loadSeq = (_mis.loadSeq || 0) + 1;
   try {
     const data = await api("/api/eee-taxi/mis?" + misQuery());
+    if (request !== _mis.loadSeq) return;
     _mis.trips = data.trips;
     _mis.truncated = data.truncated;
     _mis.limit = MIS_PAGE;
@@ -498,6 +501,8 @@ function misOpenForm(trip = null, mode = trip ? "edit" : "new", seed = null) {
   const fare = form.querySelector('[data-m="trip_fare"]');
   if (fare && !fare.value) fare.dataset.auto = "1";
   const save = async after => {
+    // Ctrl+Enter reaches here even while a save is running; one save at a time.
+    if (form.querySelector('button[type="submit"]').disabled) return;
     // Close mode shows only the closing fields; the booking details ride along unchanged.
     const kept = Object.fromEntries(MIS_SHEET.map(([key]) => [key, base[key] || ""]));
     const body = { ...(isNew ? {} : kept), ...misFormValues(form) };

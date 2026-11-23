@@ -1930,7 +1930,8 @@ async function api(path, opts = {}) {
     opts.headers.Authorization = `Bearer ${authToken}`;
   }
   const res = await fetch(path, opts);
-  if (res.status === 401) { logout(); throw new Error("Session expired. Please sign in again."); }
+  // A 401 from the login call itself is a wrong password, not an expired session.
+  if (res.status === 401 && path !== "/api/auth/login") { logout(); throw new Error("Session expired. Please sign in again."); }
   if (res.status === 204) return null;
   const ct = res.headers.get("content-type") || "";
   const body = ct.includes("application/json") ? await res.json() : await res.text();
@@ -2320,8 +2321,8 @@ async function refreshApiDashboard() {
 
     // By API table
     $("#apiByApiTable tbody").innerHTML = data.by_api.map(a => `<tr>
-      <td><strong>${a.api_name}</strong></td>
-      <td class="meta">${a.model || "–"}</td>
+      <td><strong>${rcEsc(a.api_name)}</strong></td>
+      <td class="meta">${rcEsc(a.model || "–")}</td>
       <td>${a.total_calls}</td>
       <td style="color:var(--ok)">${a.successful}</td>
       <td style="color:${a.failed > 0 ? 'var(--err)' : 'var(--muted)'}">${a.failed}</td>
@@ -2332,16 +2333,16 @@ async function refreshApiDashboard() {
     // Recent calls
     $("#apiRecentTable tbody").innerHTML = data.recent.map(r => `<tr>
       <td class="meta">${r.created_at}</td>
-      <td><strong>${r.api_name}</strong></td>
-      <td class="meta">${r.model || "–"}</td>
+      <td><strong>${rcEsc(r.api_name)}</strong></td>
+      <td class="meta">${rcEsc(r.model || "–")}</td>
       <td><span class="badge ${r.success ? 'confirmed' : 'failed'}">${r.success ? "OK" : "FAIL"}</span></td>
       <td class="meta">${r.duration_ms != null ? r.duration_ms + " ms" : "–"}</td>
       <td>${r.charge_amount != null ? `₹${Number(r.charge_amount).toFixed(2)}` : "Rate not set"}</td>
-      <td class="meta" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.error_message || ''}">${r.error_message || "–"}</td>
+      <td class="meta" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${rcEsc(r.error_message || '')}">${rcEsc(r.error_message || "–")}</td>
     </tr>`).join("") || `<tr><td colspan="7" class="placeholder">No recent calls.</td></tr>`;
 
     $("#apiUserCallsTable tbody").innerHTML = (data.by_user || []).map(user => `<tr>
-      <td><strong>${user.full_name || user.email}</strong><div class="meta">${user.email}</div></td>
+      <td><strong>${rcEsc(user.full_name || user.email)}</strong><div class="meta">${rcEsc(user.email)}</div></td>
       <td>${user.total_calls}</td><td style="color:var(--ok)">${user.successful}</td>
       <td style="color:${user.failed ? 'var(--err)' : 'var(--muted)'}">${user.failed}</td>
       <td>₹${Number(user.estimated_charged || 0).toFixed(2)}</td>
@@ -2364,12 +2365,12 @@ async function refreshUsers() {
     tbody.innerHTML = users.map(u => {
       const perms = u.role === "admin"
         ? `<span class="badge admin">All (Admin)</span>`
-        : (u.permissions || []).map(p => `<span class="badge perm">${p}</span>`).join(" ") || `<span class="meta">None</span>`;
+        : (u.permissions || []).map(p => `<span class="badge perm">${rcEsc(p)}</span>`).join(" ") || `<span class="meta">None</span>`;
       const lastLogin = u.last_login ? new Date(u.last_login).toLocaleDateString() : "Never";
       return `<tr>
         <td>
-          <div style="font-weight:600;">${u.full_name || u.email.split("@")[0]}</div>
-          <div class="meta">${u.email}</div>
+          <div style="font-weight:600;">${rcEsc(u.full_name || u.email.split("@")[0])}</div>
+          <div class="meta">${rcEsc(u.email)}</div>
         </td>
         <td>${u.business === "both" ? "Both" : u.business === "eee_taxi" ? "EEE-Taxi" : "Pallia Trans"}</td>
         <td><span class="badge ${u.role}">${u.role}</span></td>
@@ -2578,7 +2579,7 @@ async function refreshBillingDashboard() {
     // Recent generated
     const gTbody = $("#recentGeneratedTable tbody");
     gTbody.innerHTML = generated.slice(0, 10).map(inv => `<tr>
-      <td style="font-weight:600;">${inv.invoice_no_full}</td>
+      <td style="font-weight:600;">${rcEsc(inv.invoice_no_full)}</td>
       <td>${inv.invoice_date}</td>
       <td style="display:flex;gap:6px;flex-wrap:wrap;">
         <button class="btn secondary xs" onclick="openInvoice('${inv.id}')">Open</button>
@@ -2617,7 +2618,7 @@ function renderInvoiceTable() {
   filtered.forEach(inv => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td style="font-weight:600;">${inv.invoice_no_full}</td>
+      <td style="font-weight:600;">${rcEsc(inv.invoice_no_full)}</td>
       <td>${inv.invoice_date}</td>
       <td><span class="badge ${inv.status}">${inv.status}</span></td>
       <td>${(inv.lrs||[]).length}</td>
@@ -3064,19 +3065,19 @@ function renderOneLR(lr) {
   wrap.className = "lr-card";
   wrap.id = `lr-${lr.id}`;
 
-  const rawOcr = (lr.ocr_text || "").replace(/</g, "&lt;");
+  const rawOcr = rcEsc(lr.ocr_text || "");
 
-  const gcnLabel = fields.gcn_no ? ` — GCN ${fields.gcn_no}` : "";
+  const gcnLabel = fields.gcn_no ? ` — GCN ${rcEsc(fields.gcn_no)}` : "";
   wrap.innerHTML = `
     <div class="lr-card-head">
       <div style="display:flex;align-items:center;gap:10px;">
         <span class="badge ${lr.status}">${lr.status.replace(/_/g," ")}</span>
-        <span style="font-weight:600;font-size:13px;">${lr.original_filename}${gcnLabel}</span>
+        <span style="font-weight:600;font-size:13px;">${rcEsc(lr.original_filename)}${gcnLabel}</span>
       </div>
       <button class="btn danger sm" onclick="removeLR('${lr.id}')">Remove</button>
     </div>
     <div class="lr-card-body">
-        ${extractionNote ? `<div class="extraction-note ${noteIsError?"err":"ok"}">${noteIsError?"⚠":"✓"} ${extractionNote}</div>` : ""}
+        ${extractionNote ? `<div class="extraction-note ${noteIsError?"err":"ok"}">${noteIsError?"⚠":"✓"} ${rcEsc(extractionNote)}</div>` : ""}
       <div class="lr-fields" id="lr-fields-${lr.id}"></div>
       <div class="do-section">
         <div class="do-section-title">Delivery Order Numbers</div>
@@ -3091,7 +3092,7 @@ function renderOneLR(lr) {
         <button class="btn" id="btnConfirm-${lr.id}" onclick="confirmLR('${lr.id}')">Save &amp; Confirm LR</button>
         <span id="lr-status-${lr.id}" class="meta"></span>
       </div>
-      ${lr.error_message ? `<div class="text-err" style="margin-top:6px;">${lr.error_message}</div>` : ""}
+      ${lr.error_message ? `<div class="text-err" style="margin-top:6px;">${rcEsc(lr.error_message)}</div>` : ""}
     </div>`;
 
   setTimeout(() => {
@@ -4098,8 +4099,8 @@ function eetRenderInvoices(invoices) {
     const errHtml = inv.error_message
       ? `<div style="font-size:11px;color:#ef4444;margin-top:3px;
                      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-              title="${inv.error_message.replace(/"/g,'&quot;')}">
-           ${inv.error_message}
+              title="${rcEsc(inv.error_message)}">
+           ${rcEsc(inv.error_message)}
          </div>`
       : "";
     const card = document.createElement("div");
@@ -4110,11 +4111,11 @@ function eetRenderInvoices(invoices) {
     card.innerHTML =
       `<div style="min-width:0;flex:1;">
          <div style="font-size:13px;font-weight:600;color:var(--text);">
-           ${inv.invoice_no || ("Row " + inv.row_index)}${typeTag}
+           ${rcEsc(inv.invoice_no || ("Row " + inv.row_index))}${typeTag}
          </div>
          <div style="font-size:11px;color:var(--text-dim);white-space:nowrap;
                      overflow:hidden;text-overflow:ellipsis;">
-           ${inv.route_no ? rcEsc(inv.route_no) + " · " : ""}${inv.entity_name || inv.client_gstin || ""}
+           ${inv.route_no ? rcEsc(inv.route_no) + " · " : ""}${rcEsc(inv.entity_name || inv.client_gstin || "")}
          </div>
          ${errHtml}
        </div>
@@ -4352,7 +4353,8 @@ function eetDownloadDocumentsOnly() { if (_eetBatchId) downloadWithAuth("/api/ee
 // Set today as default invoice date on tab load
 (function() {
   const el = document.getElementById("eetInvDate");
-  if (el && !el.value) el.value = new Date().toISOString().slice(0,10);
+  // Today in India, not in UTC: before 5:30 am the UTC date is still yesterday.
+  if (el && !el.value) el.value = new Date(Date.now() + 330 * 60000).toISOString().slice(0,10);
 })();
 
 // ── EEE-Taxi rate card ────────────────────────────────────────────
