@@ -19,6 +19,7 @@ import uuid
 from decimal import Decimal
 from datetime import date, datetime
 
+from sqlalchemy import false as sql_false
 from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -453,6 +454,8 @@ class EeeTaxiMisTrip(Base):
     trip_date: Mapped[date] = mapped_column(Date, index=True)
     data: Mapped[dict] = mapped_column(JSON)
     source: Mapped[str] = mapped_column(String(16), default="manual")
+    # Shown in the Pipeline view as well (future bookings); the trip itself is the same row.
+    in_pipeline: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sql_false())
     created_by: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)

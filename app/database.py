@@ -193,6 +193,10 @@ def _migrate_existing_db() -> None:
             conn.commit()
 
         if "eee_taxi_mis_trips" in inspector.get_table_names():
+            existing = {c["name"] for c in inspector.get_columns("eee_taxi_mis_trips")}
+            if "in_pipeline" not in existing:
+                conn.execute(text("ALTER TABLE eee_taxi_mis_trips ADD COLUMN in_pipeline BOOLEAN NOT NULL DEFAULT FALSE"))
+                conn.commit()
             # Route numbers repeat daily for most clients, so the first version's
             # one-route-per-client rule is dropped (SQLite cannot drop a constraint;
             # only old local databases keep it).

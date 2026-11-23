@@ -1,4 +1,4 @@
-"""EEE-Taxi MIS: list, add, edit, delete and upload corporate trips."""
+"""EEE-Taxi MIS: list, add, edit, delete and upload corporate trips; MongoDB rate list."""
 from __future__ import annotations
 
 import re
@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import EeeTaxiMisTrip, User
+from app.api.eee_taxi_rates import check_edit_password
 from app.services.auth import require_permission
 from app.services.eee_taxi_drivers import get_driver_rows
 from app.services.eee_taxi_mis import (
@@ -19,8 +20,10 @@ from app.services.eee_taxi_mis import (
     store_trip, trip_response,
 )
 from app.services.eee_taxi_mis_excel import build_mis_workbook, parse_mmt_export
+from app.services.eee_taxi_mis_mongodb import COMPANY as MONGODB, merge_file_values, parse_mongodb_report
 from app.services.eee_taxi_mis_zones import COMPANIES, ZONES, canonical_company
 from app.services.eee_taxi_vehicles import get_vehicle_rows
+from app.services.mongodb_rates import MongoRateList, get_mongodb_rates, mongodb_rate_response, save_mongodb_rates
 
 router = APIRouter(prefix="/api/eee-taxi/mis", tags=["eee-taxi"])
 _eee_user = require_permission("eee_taxi")
@@ -30,6 +33,18 @@ MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 class TripIds(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ids: list[str] = Field(min_length=1, max_length=3000)
+
+
+class PipelineChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ids: list[str] = Field(min_length=1, max_length=500)
+    in_pipeline: bool
+
+
+class MongoRateUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    edit_password: str = Field(min_length=1, max_length=128)
+    rates: MongoRateList
 
 
 class TripCopy(BaseModel):
@@ -48,8 +63,9 @@ def _client(company: str) -> str:
     return canonical_company(company) or company.strip()
 
 
-def _filtered(db: Session, date_from: date | None, date_to: date | None, company: str, q: str, status: str = ""):
-    rows, truncated = list_trips(db, date_from, date_to, _client(company))
+def _filtered(db: Session, date_from: date | None, date_to: date | None, company: str, q: str, status: str = "",
+              pipeline: bool = False):
+    rows, truncated = list_trips(db, date_from, date_to, _client(company), pipeline)
     index = MasterIndex.build(db)
     trips = [trip_response(row, index) for row in rows]
     query = q.strip().lower()
@@ -72,9 +88,10 @@ def _already_entered(conflict: EeeTaxiMisTrip) -> HTTPException:
 @router.get("")
 def read(date_from: date | None = None, date_to: date | None = None,
          company: str = Query("", max_length=32), q: str = Query("", max_length=120),
-         status: Literal["", "Open", "Closed"] = "",
+         status: Literal["", "Open", "Closed"] = "", pipeline: bool = False,
          _: User = Depends(_eee_user), db: Session = Depends(get_db)):
-    trips, truncated = _filtered(db, date_from, date_to, company, q, status)
+    """Trips of a date range; ``pipeline`` lists only the trips marked for the Pipeline view."""
+    trips, truncated = _filtered(db, date_from, date_to, company, q, status, pipeline)
     return {
         "trips": trips, "truncated": truncated,
         "summary": {"trips": len(trips), "open": sum(1 for t in trips if t["status"] == "Open"),
@@ -108,6 +125,18 @@ def export(date_from: date | None = None, date_to: date | None = None,
                     media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
+@router.get("/mongodb-rates")
+def read_mongodb_rates(_: User = Depends(_eee_user), db: Session = Depends(get_db)):
+    return mongodb_rate_response(db)
+
+
+@router.put("/mongodb-rates")
+def update_mongodb_rates(body: MongoRateUpdate, user: User = Depends(_eee_user), db: Session = Depends(get_db)):
+    check_edit_password(db, body.edit_password, user)
+    save_mongodb_rates(db, body.rates, user.email)
+    return mongodb_rate_response(db)
+
+
 def _parse(body: dict) -> MisTrip:
     try:
         return parse_trip(body)
@@ -116,13 +145,14 @@ def _parse(body: dict) -> MisTrip:
 
 
 @router.post("", status_code=201)
-def create(body: dict = Body(...), user: User = Depends(_eee_user), db: Session = Depends(get_db)):
+def create(body: dict = Body(...), pipeline: bool = False,
+           user: User = Depends(_eee_user), db: Session = Depends(get_db)):
     index = MasterIndex.build(db)
     trip = stamp_closer(index.fill(_parse(body)), True, _closer(user))
     conflict = find_duplicate(db, trip)
     if conflict:
         raise _already_entered(conflict)
-    row = store_trip(EeeTaxiMisTrip(source="manual", created_by=user.email), trip, user.email)
+    row = store_trip(EeeTaxiMisTrip(source="manual", created_by=user.email, in_pipeline=pipeline), trip, user.email)
     db.add(row)
     db.commit()
     return trip_response(row, index)
@@ -149,6 +179,20 @@ def delete(body: TripIds, _: User = Depends(_eee_user), db: Session = Depends(ge
     deleted = db.query(EeeTaxiMisTrip).filter(EeeTaxiMisTrip.id.in_(body.ids)).delete(synchronize_session=False)
     db.commit()
     return {"deleted": deleted}
+
+
+@router.post("/pipeline")
+def set_pipeline(body: PipelineChange, _: User = Depends(_eee_user), db: Session = Depends(get_db)):
+    """Show or stop showing trips in the Pipeline view; the trips themselves are not changed."""
+    changed = 0
+    for row in db.query(EeeTaxiMisTrip).filter(EeeTaxiMisTrip.id.in_(body.ids)):
+        # A closed trip has been run, so it has no place among the bookings still to come.
+        if body.in_pipeline and MisTrip(**row.data).status == "Closed":
+            continue
+        row.in_pipeline = body.in_pipeline
+        changed += 1
+    db.commit()
+    return {"changed": changed}
 
 
 @router.post("/copy")
@@ -196,3 +240,46 @@ def upload_mmt(file: UploadFile = File(...), dispatcher_name: str = Form("", max
     db.commit()
     return {"added": len(added), "skipped_existing": skipped, "need_fixing": need_fixing, "errors": errors,
             "first_date": min(added, default=None), "last_date": max(added, default=None)}
+
+
+@router.post("/upload-mongodb")
+def upload_mongodb(file: UploadFile = File(...), dispatcher_name: str = Form("", max_length=120),
+                   user: User = Depends(_eee_user), db: Session = Depends(get_db)):
+    """Add the trips of a MongoDB raw data report, one per Trip ID.
+
+    A trip already in the MIS is left alone, unless it is still open and the
+    report now closes it (an evening trip uploaded before it ran).
+    """
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "MongoDB file must be smaller than 5 MB.")
+    try:
+        trips, messages = parse_mongodb_report(data, dispatcher_name.strip(), get_mongodb_rates(db))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    existing = {row.route_no: row for row in db.query(EeeTaxiMisTrip)
+                .filter(EeeTaxiMisTrip.company_name == MONGODB, EeeTaxiMisTrip.route_no.isnot(None))}
+    index = MasterIndex.build(db)
+    dates, added, updated, skipped, still_open, need_fixing = [], 0, 0, 0, 0, 0
+    for trip in trips:
+        row = existing.get(trip.route_no)
+        if row is None:
+            trip = index.fill(trip)
+            row = store_trip(EeeTaxiMisTrip(source="mongodb", created_by=user.email), trip, user.email)
+            db.add(row)
+            existing[trip.route_no] = row
+            added += 1
+        elif MisTrip(**row.data).status == "Open" and trip.status == "Closed":
+            trip = index.fill(parse_trip(merge_file_values(row.data, trip)))
+            store_trip(row, trip, user.email)
+            updated += 1
+        else:
+            skipped += 1
+            continue
+        dates.append(trip.date)
+        still_open += trip.status == "Open"
+        need_fixing += bool(index.issues(trip))
+    db.commit()
+    return {"added": added, "updated": updated, "skipped_existing": skipped, "still_open": still_open,
+            "need_fixing": need_fixing, "errors": messages,
+            "first_date": min(dates, default=None), "last_date": max(dates, default=None)}

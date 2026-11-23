@@ -1174,7 +1174,9 @@
           <button class="btn" onclick="misOpenForm()">New trip <kbd>N</kbd></button>
           <button class="btn secondary" id="misUploadBtn" onclick="$('#misFile').click()" title="MMT portal export (.xlsx, sheet Trip Report). Trips already in the MIS are skipped.">Upload MMT file</button>
           <button class="btn secondary" id="misExport" onclick="misExport()" title="The trips shown, in the same columns as the month sheet">Download Excel</button>
+          <button class="btn secondary" id="misMongoBtn" onclick="$('#misMongoFile').click()" title="MongoDB raw data report (.csv). Guests sharing a Trip ID become one trip, priced from the MongoDB rate list.">Upload MongoDB file</button>
           <input type="file" id="misFile" accept=".xlsx" class="hidden" onchange="misUpload(this)">
+          <input type="file" id="misMongoFile" accept=".csv" class="hidden" onchange="misUpload(this, 'mongodb')">
         </div>
       </div>
       <div id="misMsg" class="hidden" aria-live="polite"></div>
@@ -1440,6 +1442,7 @@
       <div class="seg" role="tablist" aria-label="Masters">
         <button class="seg-btn active" role="tab" aria-selected="true" data-mst="rates" onclick="mstShow('rates')">PWC rate card</button>
         <button class="seg-btn" role="tab" aria-selected="false" data-mst="ey" onclick="mstShow('ey')">EY rate card</button>
+        <button class="seg-btn" role="tab" aria-selected="false" data-mst="mongo" onclick="mstShow('mongo')">MongoDB rate list</button>
         <button class="seg-btn" role="tab" aria-selected="false" data-mst="clients" onclick="mstShow('clients')">Client entities</button>
         <button class="seg-btn" role="tab" aria-selected="false" data-mst="cc" onclick="mstShow('cc')">Cost centres</button>
         <button class="seg-btn" role="tab" aria-selected="false" data-mst="vehicles" onclick="mstShow('vehicles')">Vehicle master</button>
@@ -1552,6 +1555,22 @@
         <div class="card"><div class="card-title">EY Tally company and ledgers</div>
           <p class="meta">Haryana GSTIN 06AANCA3858Q1ZW. GST: 5% interstate or 2.5% CGST + 2.5% SGST locally. Enter the exact Haryana company name and check ledger names against Tally before the first XML export. Motor Vehicle No. includes the make from Vehicle master.</p>
           <div class="grid-3" id="eyTallyFields"></div>
+        </div>
+      </section>
+      <section id="mstMongo" class="hidden">
+        <div class="sec-hd">
+          <div class="meta" id="mgMeta">Loading...</div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn sm" id="mgEdit" onclick="mgStartEdit()">Edit MongoDB rates</button>
+            <button class="btn secondary sm hidden" id="mgCancel" onclick="mgCancelEdit()">Cancel</button>
+            <button class="btn secondary sm hidden" id="mgAdd" onclick="mgAddRow()">Add zone</button>
+            <button class="btn sm hidden" id="mgSave" onclick="mgSave()">Save</button>
+          </div>
+        </div>
+        <div id="mgMsg" class="hidden" style="margin-bottom:16px;"></div>
+        <div class="card"><div class="card-title">MongoDB rate list</div>
+          <p class="meta">One fare for each Billing Zone of the MongoDB report. A trip whose guests are in two zones is billed at the higher fare. The MongoDB upload on the MIS page fills Package and Trip Fare from this list. To remove a zone, clear its name and save.</p>
+          <table class="data-table" style="max-width:560px;"><thead><tr><th>Billing zone</th><th>Fare (Rs)</th></tr></thead><tbody id="mgRows"></tbody></table>
         </div>
       </section>
       <section id="mstClients" class="hidden">
@@ -1845,7 +1864,7 @@
   </div>
 </div>
 <script src="/static/eee_documents.js"></script>
-<script src="/static/eee_mis.js?v=20261118-1"></script>
+<script src="/static/eee_mis.js?v=20261123-1"></script>
 <script src="/static/pallia_verification.js?v=20261013-2"></script>
 
 <script>
@@ -2237,7 +2256,7 @@ function switchTab(tabId) {
   if (tabId === "pallia-verification") pVerifyLoad();
   if (tabId === "pallia-master") pMasterLoad();
   if (tabId === "admin") refreshUsers();
-  if (tabId === "eee-rates") { rcLoad(); ccLoad(); eyLoad(); cmLoad(); vmLoad(); dmLoad(); }
+  if (tabId === "eee-rates") { rcLoad(); ccLoad(); eyLoad(); mgLoad(); cmLoad(); vmLoad(); dmLoad(); }
   if (tabId === "eee-mis") misInit();
   if (tabId === "eee-history") historyLoad();
   if (tabId === "eee-tally") txLoad();
@@ -4370,6 +4389,7 @@ function mstShow(which) {
   $("#mstRates").classList.toggle("hidden", which !== "rates");
   $("#mstCc").classList.toggle("hidden", which !== "cc");
   $("#mstEy").classList.toggle("hidden", which !== "ey");
+  $("#mstMongo").classList.toggle("hidden", which !== "mongo");
   $("#mstClients").classList.toggle("hidden", which !== "clients");
   $("#mstVehicles").classList.toggle("hidden", which !== "vehicles");
   $("#mstDrivers").classList.toggle("hidden", which !== "drivers");

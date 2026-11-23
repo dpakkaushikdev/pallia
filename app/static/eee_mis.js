@@ -12,7 +12,9 @@ const MIS_SECTIONS = [
 ];
 // Every column of the team's month sheet, in the sheet's order (Full sheet layout).
 const MIS_SHEET = [["date", "Date", "date"], ["dispatcher_name", "Dispatcher Name"], ["driver_id", "Driver ID"], ["driver_name", "Driver Name"], ["driver_contact", "Driver Cont No"], ["cab_no", "Cab No"], ["route_no", "DS no/Route No"], ["company_name", "Company Name"], ["guest_name", "Guest Name", "long"], ["pickup_address", "Pickup Address", "long"], ["pickup_zone", "Pickup Zone"], ["pickup_time", "Pick up Time"], ["drop_location", "Drop Location", "long"], ["drop_zone", "Drop Zone"], ["drop_time", "Drop Time"], ["trip_end_date", "Trip End Date", "date"], ["trip_duration", "Trip Duration"], ["hub_out", "Hub Out"], ["hub_in", "Hub In"], ["start_odometer", "Start Odometer", "num"], ["end_odometer", "End Odometer", "num"], ["total_kms", "Total kms", "num"], ["dead_run_kms", "Dead Run Kms", "num"], ["package", "Package"], ["extra_km_charges", "Km/Extra/Km Charges", "num"], ["extra_time_charges", "Time Extra/Time Charges", "num"], ["night_charge", "Night Charge 11pm to 5am", "num"], ["trip_fare", "Trip Fare", "num"], ["gst", "GST", "num"], ["mcd", "MCD", "num"], ["parking", "Parking", "num"], ["toll", "Toll", "num"], ["total_trip_fare", "Total Trip Fare", "num"], ["driver_hours", "Driver Hours", "num"], ["cash_to_receive", "Cash to be Recieved", "num"], ["remarks", "Remarks", "long"], ["mmt_base_cost", "MMT Base Cost", "num"], ["mmt_prepaid_amount", "MMT Peripaid Amt", "num"], ["duty_closed_by", "Duty closed by"], ["b2c_payment_status", "B2C payment Status"]];
-const MIS_VIEWS = [["all", "All"], ["open", "Open"], ["closed", "Closed"], ["fix", "Needs fixing"]];
+const MIS_VIEWS = [["all", "All"], ["open", "Open"], ["closed", "Closed"], ["fix", "Needs fixing"], ["pipeline", "Pipeline"]];
+// [endpoint, button, button text, client] for each client file the page can read.
+const MIS_UPLOADS = { mmt: ["/upload-mmt", "#misUploadBtn", "Upload MMT file", "MMT"], mongodb: ["/upload-mongodb", "#misMongoBtn", "Upload MongoDB file", "MongoDB"] };
 const MIS_GROUPS = [["company_name", "Client"], ["date", "Date"], ["dispatcher_name", "Dispatcher"], ["driver_name", "Driver"], ["cab_no", "Cab"], ["pickup_zone", "Pickup zone"]];
 const MIS_FARE_PARTS = ["package", "extra_km_charges", "extra_time_charges", "night_charge"];
 const MIS_TOTAL_PARTS = ["trip_fare", "gst", "mcd", "parking", "toll"];
@@ -21,7 +23,7 @@ const MIS_DISPATCH_KEYS = MIS_SECTIONS.filter(s => s[0] === "dispatch").flatMap(
 const MIS_KEEP = ["date", "company_name", "dispatcher_name", "drop_location", "drop_zone"];
 const MIS_PAGE = 250;
 
-let _mis = { trips: [], lookups: null, selected: new Set(), truncated: false, started: false,
+let _mis = { trips: [], pipeline: [], lookups: null, selected: new Set(), truncated: false, started: false,
   view: "all", layout: "desk", summary: false, groupBy: "company_name", limit: MIS_PAGE };
 
 // ── small helpers ──
@@ -88,9 +90,13 @@ async function misLoad() {
   // A slow reply to an earlier date range must not replace a newer one.
   const request = _mis.loadSeq = (_mis.loadSeq || 0) + 1;
   try {
-    const data = await api("/api/eee-taxi/mis?" + misQuery());
+    // Pipeline trips are future bookings, so they load for every date, not just the range on screen.
+    const company = $("#misCompany").value;
+    const [data, pipe] = await Promise.all([api("/api/eee-taxi/mis?" + misQuery()),
+      api("/api/eee-taxi/mis?pipeline=true" + (company ? "&company=" + encodeURIComponent(company) : ""))]);
     if (request !== _mis.loadSeq) return;
     _mis.trips = data.trips;
+    _mis.pipeline = pipe.trips.slice().sort((a, b) => (a.date + a.pickup_time).localeCompare(b.date + b.pickup_time));
     _mis.truncated = data.truncated;
     _mis.limit = MIS_PAGE;
     const t = data.trips, zones = (_mis.lookups && _mis.lookups.zones) || [];
@@ -129,10 +135,11 @@ function misRangeLabel() {
 }
 
 // ── filtering and rendering ──
-function misSearched() {
-  const query = $("#misSearch").value.trim().toLowerCase();
-  if (!query) return _mis.trips;
-  return _mis.trips.filter(t => [t.guest_name, t.driver_name, t.driver_id, t.cab_no, t.route_no, t.pickup_address, t.drop_location, t.dispatcher_name, t.pickup_zone, t.drop_zone].join(" ").toLowerCase().includes(query));
+function misSource(view = _mis.view) { return view === "pipeline" ? _mis.pipeline : _mis.trips; }
+function misSearched(view = _mis.view) {
+  const query = $("#misSearch").value.trim().toLowerCase(), source = misSource(view);
+  if (!query) return source;
+  return source.filter(t => [t.guest_name, t.driver_name, t.driver_id, t.cab_no, t.route_no, t.pickup_address, t.drop_location, t.dispatcher_name, t.pickup_zone, t.drop_zone].join(" ").toLowerCase().includes(query));
 }
 function misInView(trip, view) {
   return view === "open" ? trip.status === "Open" : view === "closed" ? trip.status === "Closed" : view === "fix" ? trip.issues.length > 0 : true;
@@ -144,15 +151,16 @@ function misRender() {
   const searched = misSearched(), trips = searched.filter(t => misInView(t, _mis.view));
   const shown = new Set(trips.map(t => t.id));
   _mis.selected = new Set([..._mis.selected].filter(id => shown.has(id)));
-  const count = view => searched.filter(t => misInView(t, view)).length;
+  const count = view => misSearched(view).filter(t => misInView(t, view)).length;
   $("#misRange").textContent = misRangeLabel();
   $("#misViews").innerHTML = MIS_VIEWS.map(([id, label]) => `<button class="seg-btn${_mis.view === id ? " active" : ""}" onclick="misSetView('${id}')">${label} <span class="mis-n${id === "open" || id === "fix" ? " warn" : ""}">${count(id)}</span></button>`).join("");
   $$("#misLayout .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.layout === _mis.layout));
   misRenderStats(searched);
   misRenderSummary(trips);
-  $("#misCount").textContent = `${misPlural(trips.length, "trip")}` + (trips.length !== _mis.trips.length ? ` of ${_mis.trips.length} loaded` : "") +
+  $("#misCount").textContent = `${misPlural(trips.length, "trip")}` + (trips.length !== misSource().length ? ` of ${misSource().length} loaded` : "") +
     (_mis.truncated ? ". Only the latest 8000 are loaded; narrow the dates." : "");
-  const desk = _mis.layout === "desk", oneDay = $("#misFrom").value && $("#misFrom").value === $("#misTo").value;
+  const piped = _mis.view === "pipeline", desk = _mis.layout === "desk" || piped;
+  const oneDay = !piped && $("#misFrom").value && $("#misFrom").value === $("#misTo").value;
   $("#misHead").innerHTML = `<th><input type="checkbox" id="misAll" aria-label="Select all shown trips" onchange="misSelectAll(this.checked)"></th><th>Status</th>` +
     (desk ? (oneDay ? "" : "<th>Date</th>") + "<th>Pick up</th><th>Client</th><th>Guest</th><th>Route</th><th>Driver and cab</th><th>Drop</th><th class='num'>Kms</th><th class='num'>Fare</th><th>Check</th><th class='mis-act'></th>"
       : MIS_SHEET.map(([, label, kind]) => `<th${kind === "num" ? ' class="num"' : ""}>${rcEsc(label)}</th>`).join("") + "<th>Check</th>");
@@ -164,6 +172,7 @@ function misRender() {
   misUpdateSelection();
 }
 function misEmptyText() {
+  if (_mis.view === "pipeline") return "Nothing in the pipeline. For a future booking, open New trip and choose Add to pipeline.";
   if (!_mis.trips.length) return "No trips booked for these dates. Add a trip, or upload the MMT file.";
   if (_mis.view === "open") return "Nothing open here. Every duty in this view is closed.";
   if (_mis.view === "fix") return "Every driver and cab here matches the masters.";
@@ -185,7 +194,7 @@ function misRenderStats(trips) {
 function misStatusCell(t) {
   if (t.status === "Closed") return '<td><span class="badge generated">Closed</span></td>';
   const short = { "Trip Fare": "fare", "Drop Time": "drop time", "Total kms": "km" };
-  return `<td><span class="badge draft">Open</span><div class="mis-miss">needs ${rcEsc(t.missing.map(m => short[m] || m).join(" · "))}</div></td>`;
+  return `<td><span class="badge draft">Open</span><div class="mis-miss">needs ${rcEsc(t.missing.map(m => short[m] || m).join(" · "))}</div>${t.in_pipeline && _mis.view !== "pipeline" ? '<div class="meta">In pipeline</div>' : ""}</td>`;
 }
 function misCheckCell(t) {
   return `<td>${t.issues.length ? t.issues.map(i => `<span class="mis-issue">${rcEsc(i)}</span>`).join("") : '<span class="mis-ok">OK</span>'}</td>`;
@@ -201,7 +210,8 @@ function misDeskRow(t, oneDay) {
     <td>${rcEsc(t.driver_name || "–")}<div class="meta">${rcEsc([t.cab_no, t.driver_id].filter(Boolean).join(" · "))}</div></td>
     <td class="mis-time">${rcEsc(t.drop_time)}<div class="meta">${rcEsc(t.trip_duration && t.drop_time ? t.trip_duration + " h" : "")}</div></td>
     <td class="num">${rcEsc(t.total_kms)}</td><td class="num">${t.trip_fare ? misMoney(misFare(t)) : ""}</td>${misCheckCell(t)}
-    <td class="mis-act">${t.status === "Open" ? `<button class="btn sm" data-close="${rcEsc(t.id)}">Close duty</button>` : ""}</td></tr>`;
+    <td class="mis-act">${_mis.view === "pipeline" ? `<button class="btn secondary sm" data-unpipe="${rcEsc(t.id)}" title="The trip stays in the MIS">Remove from pipeline</button>`
+      : t.status === "Open" ? `<button class="btn sm" data-close="${rcEsc(t.id)}">Close duty</button>` : ""}</td></tr>`;
 }
 function misSheetRow(t) {
   const cells = MIS_SHEET.map(([key, , kind]) => {
@@ -261,9 +271,11 @@ function misRowClick(event) {
     return;
   }
   if (event.target.closest("td:first-child")) return;
+  const unpipe = event.target.closest("[data-unpipe]");
+  if (unpipe) { misSetPipeline([unpipe.dataset.unpipe], false); return; }
   const row = event.target.closest("tr[data-id]");
   if (!row) return;
-  const trip = _mis.trips.find(t => t.id === row.dataset.id);
+  const trip = misSource().find(t => t.id === row.dataset.id);
   misOpenForm(trip, event.target.closest("[data-close]") ? "close" : "edit");
 }
 function misUpdateSelection() {
@@ -278,6 +290,14 @@ function misSelectAll(on) {
 }
 function misPost(path, body) {
   return api("/api/eee-taxi/mis" + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+}
+// The Pipeline view is a second place to see a future booking; the trip itself is one MIS entry.
+async function misSetPipeline(ids, on) {
+  try {
+    await misPost("/pipeline", { ids, in_pipeline: on });
+    await misLoad();
+    misMessage(on ? "Added to the pipeline. The trip is in the MIS as before." : "Removed from the pipeline. The trip is still in the MIS.", true);
+  } catch (error) { misMessage("Could not update the pipeline: " + error.message); }
 }
 function misDeleteTrips(ids, after = () => {}) {
   rcModal({ title: `Delete ${misPlural(ids.length, "trip")}?`, sub: "Deleted trips are removed from the MIS at once and cannot be brought back.", okText: "Delete",
@@ -306,8 +326,9 @@ function misCopySelected() {
     } });
 }
 
-// ── MMT upload and Excel download ──
-async function misUpload(input) {
+// ── client file uploads (MMT, MongoDB) and Excel download ──
+async function misUpload(input, kind = "mmt") {
+  const [endpoint, buttonSel, buttonText, client] = MIS_UPLOADS[kind];
   const file = input.files[0];
   input.value = "";
   if (!file) return;
@@ -317,23 +338,25 @@ async function misUpload(input) {
   const form = new FormData();
   form.append("file", file);
   form.append("dispatcher_name", dispatcher);
-  const button = $("#misUploadBtn");
+  const button = $(buttonSel);
   button.disabled = true;
   button.textContent = "Uploading…";
   try {
-    const result = await api("/api/eee-taxi/mis/upload-mmt", { method: "POST", body: form });
+    const result = await api("/api/eee-taxi/mis" + endpoint, { method: "POST", body: form });
     // Move the filters so the uploaded trips are on screen.
     if (result.first_date && (!$("#misFrom").value || result.first_date < $("#misFrom").value)) $("#misFrom").value = result.first_date;
     if (result.last_date && $("#misTo").value && result.last_date > $("#misTo").value) $("#misTo").value = result.last_date;
-    if (result.added && !["", "MMT"].includes($("#misCompany").value)) $("#misCompany").value = "";
+    if ((result.added || result.updated) && !["", client].includes($("#misCompany").value)) $("#misCompany").value = "";
     await misLoad();
     const parts = [`Added ${misPlural(result.added, "trip")} from ${file.name}.`];
+    if (result.updated) parts.push(`${misPlural(result.updated, "open trip")} already in the MIS ${result.updated === 1 ? "was" : "were"} completed from the file.`);
     if (result.skipped_existing) parts.push(`${result.skipped_existing} already in the MIS were skipped.`);
+    if (result.still_open) parts.push(`${result.still_open} came in Open with no fare because nobody had boarded; upload the report again after the shift to complete them.`);
     if (result.need_fixing) parts.push(`${result.need_fixing} need fixing: driver or cab is not in the masters.`);
-    if (result.errors.length) parts.push(`${misPlural(result.errors.length, "row")} could not be read: ${result.errors.slice(0, 5).join(" | ")}${result.errors.length > 5 ? " …" : ""}`);
+    if (result.errors.length) parts.push(`${misPlural(result.errors.length, kind === "mmt" ? "row" : "trip")} ${kind === "mmt" ? "could not be read" : "need a look"}: ${result.errors.slice(0, 5).join(" | ")}${result.errors.length > 5 ? " …" : ""}`);
     misMessage(parts.join(" "), !result.errors.length);
   } catch (error) { misMessage("Upload failed: " + error.message); }
-  finally { button.disabled = false; button.textContent = "Upload MMT file"; }
+  finally { button.disabled = false; button.textContent = buttonText; }
 }
 async function misExport() {
   const params = misQuery();
@@ -493,6 +516,7 @@ function misOpenForm(trip = null, mode = trip ? "edit" : "new", seed = null) {
         ${isNew ? '<button type="button" class="btn secondary" data-again>Save &amp; add another</button>' : ""}
         ${closing ? '<button type="button" class="btn secondary" data-next>Save &amp; next open</button>' : ""}
         <button type="submit" class="btn">Save <kbd>Ctrl+Enter</kbd></button>
+        ${closing || (base.status === "Closed" && !base.in_pipeline) ? "" : `<button type="button" class="btn secondary" data-pipe title="Saves the trip in the MIS and ${base.in_pipeline ? "stops showing it" : "also shows it"} in the Pipeline view">${base.in_pipeline ? "Save &amp; remove from pipeline" : isNew ? "Add to pipeline" : "Save &amp; add to pipeline"}</button>`}
       </div>
     </form>`;
   document.body.appendChild(wrap);
@@ -510,11 +534,13 @@ function misOpenForm(trip = null, mode = trip ? "edit" : "new", seed = null) {
     err.textContent = "";
     form.querySelectorAll("button").forEach(b => { b.disabled = true; });
     try {
-      await api("/api/eee-taxi/mis" + (isNew ? "" : "/" + encodeURIComponent(base.id)),
+      const toPipeline = after === "pipeline";
+      await api("/api/eee-taxi/mis" + (isNew ? (toPipeline ? "?pipeline=true" : "") : "/" + encodeURIComponent(base.id)),
         { method: isNew ? "POST" : "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (toPipeline && !isNew) await misPost("/pipeline", { ids: [base.id], in_pipeline: !base.in_pipeline });
       const order = misVisible().map(t => t.id), at = order.indexOf(base.id);
       await misLoad();
-      misMessage(isNew ? "Trip booked." : "Trip saved.", true);
+      misMessage(toPipeline ? (base.in_pipeline ? "Trip saved and removed from the pipeline." : "Trip saved in the MIS and added to the pipeline.") : isNew ? "Trip booked." : "Trip saved.", true);
       if (after === "again") {
         form.querySelectorAll("[data-m]").forEach(input => { if (!MIS_KEEP.includes(input.dataset.m)) input.value = ""; });
         if (fare) fare.dataset.auto = "1";
@@ -551,6 +577,8 @@ function misOpenForm(trip = null, mode = trip ? "edit" : "new", seed = null) {
     wrap.querySelector("[data-dup]").onclick = () => { close(); misOpenForm(null, "new", { ...Object.fromEntries(MIS_DISPATCH_KEYS.map(key => [key, base[key]])), date: misIstToday(), route_no: /^\d{10}$/.test(base.route_no) ? base.route_no : "" }); };
   }
   if (closing) wrap.querySelector("[data-next]").onclick = () => save("next");
+  const pipe = wrap.querySelector("[data-pipe]");
+  if (pipe) pipe.onclick = () => save("pipeline");
   wrap.addEventListener("keydown", e => {
     if (e.key === "Escape" && document.body.lastElementChild === wrap) close();
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(closing ? "next" : undefined); }
@@ -571,4 +599,51 @@ function misShortcut(event) {
   if (event.ctrlKey || event.metaKey || event.altKey || /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)) return;
   if (event.key === "n" || event.key === "N") { event.preventDefault(); misOpenForm(); }
   if (event.key === "/") { event.preventDefault(); $("#misSearch").focus(); }
+}
+
+// ── Masters page: MongoDB rate list (one fare per billing zone; shares the masters password) ──
+const MG_URL = "/api/eee-taxi/mis/mongodb-rates";
+let _mg = { saved: null, password: null };
+function mgMessage(text, ok = false) {
+  $("#mgMsg").className = "extraction-note " + (ok ? "ok" : "err");
+  $("#mgMsg").textContent = text;
+}
+function mgFill(zones) {
+  const off = _mg.password ? "" : "disabled";
+  $("#mgRows").innerHTML = zones.map(z => `<tr><td><input type="text" data-mg="zone" maxlength="60" value="${rcEsc(z.zone)}" ${off} aria-label="Billing zone"></td>
+    <td><input type="number" data-mg="fare" min="1" step="any" value="${rcEsc(z.fare)}" ${off} aria-label="Fare in rupees"></td></tr>`).join("");
+  ["#mgCancel", "#mgAdd", "#mgSave"].forEach(sel => $(sel).classList.toggle("hidden", !_mg.password));
+  $("#mgEdit").classList.toggle("hidden", !!_mg.password);
+}
+function mgRead() {
+  return [...$$("#mgRows tr")].map(tr => ({ zone: tr.querySelector('[data-mg="zone"]').value.trim(), fare: tr.querySelector('[data-mg="fare"]').value.trim() })).filter(z => z.zone);
+}
+function mgShow(data) {
+  _mg.saved = data.rates.zones;
+  $("#mgMeta").textContent = "MongoDB · " + rcMetaText(data);
+  mgFill(_mg.saved);
+}
+async function mgLoad() {
+  if (_mg.password) return;
+  try {
+    const data = await api(MG_URL);
+    _mstHasPassword = data.has_edit_password;
+    mgShow(data);
+  } catch (error) { mgMessage("Could not load the MongoDB rate list: " + error.message); }
+}
+function mgStartEdit() {
+  if (!_mg.saved) return;
+  mstUnlock(password => { _mg.password = password; mgFill(_mg.saved); mgMessage("Editing the MongoDB rate list. Save when ready.", true); });
+}
+function mgCancelEdit() { _mg.password = null; mgFill(_mg.saved); $("#mgMsg").className = "hidden"; }
+function mgAddRow() { mgFill([...mgRead(), { zone: "", fare: "" }]); }
+async function mgSave() {
+  const zones = mgRead();
+  if (!zones.length || zones.some(z => !(Number(z.fare) > 0))) { mgMessage("Every zone needs a fare above 0."); return; }
+  try {
+    const data = await api(MG_URL, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ edit_password: _mg.password, rates: { zones } }) });
+    _mg.password = null;
+    mgShow(data);
+    mgMessage("MongoDB rate list saved. The next MongoDB upload uses these fares.", true);
+  } catch (error) { mgMessage("Could not save: " + error.message); }
 }

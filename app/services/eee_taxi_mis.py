@@ -72,7 +72,7 @@ class MisTrip(BaseModel):
     cab_no: str = Field(default="", max_length=20)
     route_no: str = Field(default="", max_length=64)
     company_name: str = Field(min_length=1, max_length=32)
-    guest_name: Short
+    guest_name: Long   # a shared cab lists every guest: "A/B/C"
     pickup_address: Long
     pickup_zone: Short
     pickup_time: str = ""
@@ -332,6 +332,7 @@ def trip_response(row: EeeTaxiMisTrip, index: MasterIndex) -> dict:
     trip = MisTrip(**row.data)
     return {
         **trip.model_dump(), "id": row.id, "source": row.source, "status": trip.status, "missing": trip.missing,
+        "in_pipeline": bool(row.in_pipeline),
         "created_by": row.created_by, "updated_by": row.updated_by,
         "updated_at": row.updated_at.isoformat() + "Z", "issues": index.issues(trip),
     }
@@ -379,12 +380,16 @@ def store_trip(row: EeeTaxiMisTrip, trip: MisTrip, editor: str) -> EeeTaxiMisTri
     row.trip_date = date.fromisoformat(trip.date)
     row.updated_by = editor
     row.updated_at = datetime.utcnow()
+    if trip.status == "Closed":
+        row.in_pipeline = False   # the pipeline lists trips still to be run
     return row
 
 
 def list_trips(db: Session, date_from: date | None, date_to: date | None,
-               company: str = "") -> tuple[list[EeeTaxiMisTrip], bool]:
+               company: str = "", pipeline_only: bool = False) -> tuple[list[EeeTaxiMisTrip], bool]:
     query = db.query(EeeTaxiMisTrip)
+    if pipeline_only:
+        query = query.filter(EeeTaxiMisTrip.in_pipeline.is_(True))
     if date_from:
         query = query.filter(EeeTaxiMisTrip.trip_date >= date_from)
     if date_to:
