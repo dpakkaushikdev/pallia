@@ -9,6 +9,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from xml.sax.saxutils import escape
 
 from loguru import logger
 from reportlab.lib import colors
@@ -174,13 +175,13 @@ def generate_invoice_pdf(
                 amt_str = ""
             row = [
                 _p(str(i + 1), st["sm_c"]),
-                _p(r.get("delivery_order_no") or "", st["sm_c"]),
-                _p(r.get("gcn_no") or "",            st["sm_c"]),
-                _p(r.get("gcn_date") or "",           st["sm_c"]),
-                _p(r.get("vehicle_no") or "",         st["sm_c"]),
-                _p(r.get("destination") or "",        st["sm_c"]),
-                _p(r.get("delivery_date") or "",      st["sm_c"]),
-                _p(r.get("qty") or "",                st["sm_c"]),
+                _p(escape(r.get("delivery_order_no") or ""), st["sm_c"]),
+                _p(escape(r.get("gcn_no") or ""),            st["sm_c"]),
+                _p(escape(r.get("gcn_date") or ""),           st["sm_c"]),
+                _p(escape(r.get("vehicle_no") or ""),         st["sm_c"]),
+                _p(escape(r.get("destination") or ""),        st["sm_c"]),
+                _p(escape(r.get("delivery_date") or ""),      st["sm_c"]),
+                _p(escape(r.get("qty") or ""),                st["sm_c"]),
                 _p("Fixed", st["sm_c"]) if i == 0 else "",
                 _p(amt_str,                           st["sm_r"]),
             ]

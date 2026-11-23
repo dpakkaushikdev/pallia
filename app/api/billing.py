@@ -28,6 +28,7 @@ import json
 import time
 import uuid
 from datetime import date
+from decimal import InvalidOperation
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -52,7 +53,8 @@ from app.schemas import (
 from app.services.extraction import extract_lr_fields
 from app.services.gemini_extractor import GeminiUnavailable, extract_lr_fields_gemini
 from app.services.invoice_numbering import suggest_next_suffix
-from app.services.invoice_pdf import generate_invoice_pdf
+from app.services.excel_filler import _to_decimal, build_rows
+from app.services.invoice_pdf import MAX_ROWS, generate_invoice_pdf
 from app.services.llm_extractor import LLMExtractorUnavailable, extract_lr_fields_llm
 from app.services.ocr import run_ocr
 from app.services.pdf_processor import PDFProcessingError, extract_gcns_from_pdf
@@ -324,6 +326,23 @@ def delete_lr(invoice_id: str, lr_id: str, db: Session = Depends(get_db)) -> Non
 
 # ---------- generate ----------
 
+def _check_invoice_rows(lr_fields: list[dict]) -> None:
+    """Refuse what the invoice page cannot show correctly, before any PDF is made."""
+    rows = build_rows(lr_fields)
+    if len(rows) > MAX_ROWS:
+        raise HTTPException(
+            400, f"This invoice has {len(rows)} delivery order rows; one invoice holds at most {MAX_ROWS}. "
+                 "Move some LRs to another invoice.")
+    for row in rows:
+        raw = row.get("total_amount") or ""
+        try:
+            amount = _to_decimal(raw)
+        except (InvalidOperation, ValueError):
+            amount = None
+        if amount is None or not amount.is_finite() or amount < 0:
+            raise HTTPException(
+                400, f"Total Amount {raw!r} is not a number. Enter digits only, for example 5000 or 5000.50.")
+
 @router.post("/invoices/{invoice_id}/generate", response_model=InvoiceOut)
 def generate_invoice(invoice_id: str, db: Session = Depends(get_db)) -> InvoiceOut:
     inv = _require_invoice(db, invoice_id)
@@ -334,18 +353,31 @@ def generate_invoice(invoice_id: str, db: Session = Depends(get_db)) -> InvoiceO
     if not confirmed:
         raise HTTPException(400, "No confirmed LRs to generate from.")
 
+    lr_fields = [lr.confirmed_fields for lr in confirmed]
+    _check_invoice_rows(lr_fields)
+    duplicate = db.scalar(
+        select(Invoice.id).where(
+            Invoice.suffix == inv.suffix,
+            Invoice.status == InvoiceStatus.GENERATED,
+            Invoice.id != inv.id,
+        )
+    )
+    if duplicate:
+        raise HTTPException(
+            409, f"Invoice number {inv.invoice_no_full} has already been generated. Change the number and try again.")
+
     out_dir  = _invoice_dir(inv.id)
     pdf_path = out_dir / f"invoice_{inv.suffix}.pdf"
     try:
         generate_invoice_pdf(
             suffix=inv.suffix,
             invoice_date=inv.invoice_date,
-            lrs=[lr.confirmed_fields for lr in confirmed],
+            lrs=lr_fields,
             output_path=pdf_path,
         )
     except Exception as exc:
         logger.exception("PDF generation failed for invoice {}", inv.id)
-        inv.status = InvoiceStatus.FAILED
+        # Stays a draft so the entries can be corrected and generated again.
         inv.error_message = f"PDF generation failed: {exc}"
         db.commit()
         raise HTTPException(500, f"PDF generation failed: {exc}")
@@ -447,12 +479,12 @@ async def upload_signed_pdf(
         raise HTTPException(400, "Empty file received.")
     if len(contents) > MAX_BYTES:
         raise HTTPException(413, f"File too large (max {MAX_BYTES // (1024*1024)} MB).")
+    if not contents.startswith(b"%PDF-"):
+        raise HTTPException(400, "The signed file is not a PDF.")
 
     signed_path = _invoice_dir(invoice_id) / f"invoice_{inv.suffix}_signed.pdf"
     signed_path.write_bytes(contents)
-
-    inv.signed_pdf_path = str(signed_path)
-    db.commit()
+    # Nothing to store on the row: Invoice.signed_pdf_path finds this file.
     db.refresh(inv)
     logger.info("Signed PDF uploaded for invoice {} -> {}", inv.id, signed_path)
     return InvoiceOut.model_validate(inv)

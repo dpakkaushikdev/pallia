@@ -9,7 +9,7 @@ from sqlalchemy import Integer, func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ApiUsageEvent, ExternalApiEvent, Invoice, LR, User
+from app.models import ApiUsageEvent, ExternalApiEvent, Invoice, InvoiceStatus, LR, User
 from app.schemas import (
     DashboardApiDayStat,
     DashboardBillingStat,
@@ -48,9 +48,9 @@ def dashboard_summary(
 
     # --- Invoice stats (all-time) ---
     total_invoices = db.scalar(select(func.count()).select_from(Invoice)) or 0
-    generated_invoices = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.status == "generated")) or 0
-    draft_invoices = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.status == "draft")) or 0
-    failed_invoices = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.status == "failed")) or 0
+    generated_invoices = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.status == InvoiceStatus.GENERATED)) or 0
+    draft_invoices = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.status == InvoiceStatus.DRAFT)) or 0
+    failed_invoices = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.status == InvoiceStatus.FAILED)) or 0
 
     # --- API call stats ---
     total_api_calls = db.scalar(select(func.count()).select_from(ApiUsageEvent)) or 0
@@ -69,7 +69,7 @@ def dashboard_summary(
 
     day_count_rows = db.execute(
         select(
-            func.strftime("%Y-%m-%d", ApiUsageEvent.created_at).label("day"),
+            func.date(ApiUsageEvent.created_at).label("day"),   # works on SQLite and Postgres
             func.count().label("cnt"),
         )
         .where(ApiUsageEvent.created_at >= from_dt)
@@ -77,7 +77,7 @@ def dashboard_summary(
         .group_by("day")
         .order_by("day")
     ).all()
-    day_map = {row.day: row.cnt for row in day_count_rows}
+    day_map = {str(row.day): row.cnt for row in day_count_rows}
     api_calls_by_day = [
         DashboardApiDayStat(date=str(d), count=day_map.get(str(d), 0))
         for d in all_days_in_range
@@ -248,9 +248,9 @@ def billing_dashboard(
     _: User = Depends(require_admin),
 ) -> BillingDashboardOut:
     total_invoices = db.scalar(select(func.count()).select_from(Invoice)) or 0
-    generated = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.status == "generated")) or 0
-    draft = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.status == "draft")) or 0
-    failed = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.status == "failed")) or 0
+    generated = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.status == InvoiceStatus.GENERATED)) or 0
+    draft = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.status == InvoiceStatus.DRAFT)) or 0
+    failed = db.scalar(select(func.count()).select_from(Invoice).where(Invoice.status == InvoiceStatus.FAILED)) or 0
     total_lrs = db.scalar(select(func.count()).select_from(LR)) or 0
 
     today_start = datetime.combine(date.today(), datetime.min.time())
