@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import EeeTaxiMisTrip, User
+from app.models import EeeTaxiMisClient, EeeTaxiMisTrip, User
 from app.api.eee_taxi_rates import check_edit_password
 from app.services.auth import require_permission
 from app.services.eee_taxi_drivers import get_driver_rows
@@ -21,12 +21,21 @@ from app.services.eee_taxi_mis import (
 )
 from app.services.eee_taxi_mis_excel import build_mis_workbook, parse_mmt_export
 from app.services.eee_taxi_mis_mongodb import COMPANY as MONGODB, merge_file_values, parse_mongodb_report
-from app.services.eee_taxi_mis_zones import COMPANIES, ZONES, canonical_company
+from app.services.eee_taxi_mis_zones import (
+    OTHERS, ZONES, all_companies, canonical_company, new_company_name, set_added_companies,
+)
 from app.services.eee_taxi_vehicles import get_vehicle_rows
 from app.services.mongodb_rates import MongoRateList, get_mongodb_rates, mongodb_rate_response, save_mongodb_rates
 
-router = APIRouter(prefix="/api/eee-taxi/mis", tags=["eee-taxi"])
 _eee_user = require_permission("eee_taxi")
+
+
+def _load_clients(db: Session = Depends(get_db)) -> None:
+    """Every MIS request starts with the current client list (each server instance has its own memory)."""
+    set_added_companies([name for (name,) in db.query(EeeTaxiMisClient.name).order_by(EeeTaxiMisClient.created_at)])
+
+
+router = APIRouter(prefix="/api/eee-taxi/mis", tags=["eee-taxi"], dependencies=[Depends(_load_clients)])
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
 
@@ -47,6 +56,11 @@ class MongoRateUpdate(BaseModel):
     rates: MongoRateList
 
 
+class NewClient(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=60)
+
+
 class TripCopy(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ids: list[str] = Field(min_length=1, max_length=500)
@@ -54,7 +68,8 @@ class TripCopy(BaseModel):
 
 
 def _matches(trip: dict, query: str) -> bool:
-    keys = ("guest_name", "driver_name", "driver_id", "cab_no", "route_no", "pickup_address", "drop_location")
+    keys = ("guest_name", "driver_name", "driver_id", "cab_no", "route_no", "pickup_address", "drop_location",
+            "company_other")
     return query in " ".join(trip.get(k, "") for k in keys).lower()
 
 
@@ -108,8 +123,21 @@ def lookups(_: User = Depends(_eee_user), db: Session = Depends(get_db)):
         "drivers": [{"name": d.name, "truein_id": d.truein_id, "mobile": d.mobile, "status": d.status}
                     for d in get_driver_rows(db)],
         "cabs": sorted(row.vehicle_no for row in get_vehicle_rows(db)),
-        "companies": list(COMPANIES), "statuses": list(STATUSES), "zones": list(ZONES),
+        "companies": list(all_companies()), "statuses": list(STATUSES), "zones": list(ZONES),
     }
+
+
+@router.post("/clients", status_code=201)
+def add_client(body: NewClient, user: User = Depends(_eee_user), db: Session = Depends(get_db)):
+    """Add a client to the list every dispatcher chooses from."""
+    try:
+        name = new_company_name(body.name)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    db.add(EeeTaxiMisClient(name=name, created_by=user.email))
+    db.commit()
+    _load_clients(db)
+    return {"name": name, "companies": list(all_companies())}
 
 
 @router.get("/export")
@@ -119,7 +147,9 @@ def export(date_from: date | None = None, date_to: date | None = None,
            _: User = Depends(_eee_user), db: Session = Depends(get_db)):
     trips, _truncated = _filtered(db, date_from, date_to, company, q, status)
     trips.sort(key=lambda t: (t["date"], t["pickup_time"]))
-    label = re.sub(r"[^A-Za-z0-9]+", "", _client(company)) if _client(company) in COMPANIES else "All"
+    # The sheet has no column for a one-off client's name, so it rides in Company Name.
+    trips = [{**t, "company_name": f"{OTHERS} - {t['company_other']}"} if t["company_other"] else t for t in trips]
+    label = re.sub(r"[^A-Za-z0-9]+", "", _client(company)) if _client(company) in all_companies() else "All"
     name = f"MIS_{label}_{date_from or 'start'}_to_{date_to or 'latest'}.xlsx"
     return Response(build_mis_workbook(trips), headers={"Content-Disposition": f'attachment; filename="{name}"'},
                     media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -257,8 +287,10 @@ def upload_mongodb(file: UploadFile = File(...), dispatcher_name: str = Form("",
         trips, messages = parse_mongodb_report(data, dispatcher_name.strip(), get_mongodb_rates(db))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    # Only the trips named in the file are read back, not every MongoDB trip ever stored.
     existing = {row.route_no: row for row in db.query(EeeTaxiMisTrip)
-                .filter(EeeTaxiMisTrip.company_name == MONGODB, EeeTaxiMisTrip.route_no.isnot(None))}
+                .filter(EeeTaxiMisTrip.company_name == MONGODB,
+                        EeeTaxiMisTrip.route_no.in_([trip.route_no for trip in trips]))}
     index = MasterIndex.build(db)
     dates, added, updated, skipped, still_open, need_fixing = [], 0, 0, 0, 0, 0
     for trip in trips:

@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.models import EeeTaxiMisTrip
 from app.services.eee_taxi_cost_centres import normalize_vehicle_no
 from app.services.eee_taxi_drivers import DriverRow, get_driver_rows
-from app.services.eee_taxi_mis_zones import COMPANIES, canonical_company, canonical_zone, guess_zone  # noqa: F401
+from app.services.eee_taxi_mis_zones import OTHERS, canonical_company, canonical_zone, guess_zone
 from app.services.eee_taxi_vehicles import get_vehicle_rows
 
 # (key, Excel header) in the order of the team's "Corp Trips Mis" month sheets.
@@ -50,7 +50,8 @@ NUMBER_KEYS = (
 TOTAL_KEYS = ("trip_fare", "gst", "mcd", "parking", "toll")
 # What a dispatcher enters when a trip is booked; the rest is filled when the duty closes.
 DISPATCH_KEYS = (
-    "dispatcher_name", "driver_id", "driver_name", "driver_contact", "cab_no", "company_name", "guest_name",
+    "dispatcher_name", "driver_id", "driver_name", "driver_contact", "cab_no", "company_name", "company_other",
+    "guest_name",
     "pickup_address", "pickup_zone", "pickup_time", "drop_location", "drop_zone", "hub_out",
 )
 # A trip stays Open until these are filled in.
@@ -72,6 +73,7 @@ class MisTrip(BaseModel):
     cab_no: str = Field(default="", max_length=20)
     route_no: str = Field(default="", max_length=64)
     company_name: str = Field(min_length=1, max_length=32)
+    company_other: Short   # the client's name when Company Name is Others; not a sheet column
     guest_name: Long   # a shared cab lists every guest: "A/B/C"
     pickup_address: Long
     pickup_zone: Short
@@ -160,6 +162,8 @@ class MisTrip(BaseModel):
 
     @model_validator(mode="after")
     def derived_values(self):
+        if self.company_name != OTHERS:
+            self.company_other = ""
         duration = trip_duration(self.date, self.pickup_time, self.trip_end_date, self.drop_time)
         if duration:
             self.trip_duration = duration
@@ -167,7 +171,8 @@ class MisTrip(BaseModel):
             kms = Decimal(self.end_odometer) - Decimal(self.start_odometer)
             if kms < 0:
                 raise ValueError("End Odometer is lower than Start Odometer.")
-            self.total_kms = format_number(str(kms))
+            # A typed Total kms stays: the old sheets add hub and dead-run km on top of the odometers.
+            self.total_kms = self.total_kms or format_number(str(kms))
         if self.trip_fare:
             total = sum(Decimal(getattr(self, key) or "0") for key in TOTAL_KEYS)
             self.total_trip_fare = format_number(str(total))

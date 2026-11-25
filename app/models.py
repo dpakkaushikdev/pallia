@@ -462,6 +462,15 @@ class EeeTaxiMisTrip(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class EeeTaxiMisClient(Base):
+    """A client added to the MIS client list from the MIS page (the built-in ones live in code)."""
+    __tablename__ = "eee_taxi_mis_clients"
+
+    name: Mapped[str] = mapped_column(String(32), primary_key=True)
+    created_by: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class PalliaVehicleMaster(Base):
     """Pallia fleet registrations for verification and other Pallia workflows."""
     __tablename__ = "pallia_vehicle_master"
