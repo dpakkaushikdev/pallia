@@ -124,6 +124,21 @@ def sheet_row_to_trip(raw: dict[str, str], month: tuple[int, int] | None = None)
     return trip.model_copy(update={"remarks": remarks})
 
 
+def split_driver_cab(driver: str, cab: str) -> tuple[str, str]:
+    """The Pipeline tab sometimes types the cab's last four digits after the driver ('Ravi 5215')."""
+    tail = re.fullmatch(r"(.*?\D)\s*(\d{4})", driver.strip())
+    return (tail[1].strip(), tail[2]) if tail and not cab.strip() else (driver.strip(), cab.strip())
+
+
+def full_plate(cab: str, plates: set[str]) -> str:
+    """A cab typed as its last four digits, as the full number when only one cab in the master ends so."""
+    short = re.sub(r"[^A-Z0-9]", "", cab.upper())
+    if not re.fullmatch(r"\d{4}", short):
+        return cab
+    matches = [plate for plate in plates if plate.endswith(short)]
+    return matches[0] if len(matches) == 1 else cab
+
+
 def is_trip_row(raw: dict[str, str]) -> bool:
     """Month tabs carry formula-only rows below the data; a trip has at least one of these."""
     return any((raw.get(key) or "").strip() for key in ("date", "company_name", "guest_name", "cab_no", "driver_name"))

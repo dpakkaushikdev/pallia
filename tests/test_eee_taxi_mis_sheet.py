@@ -1,7 +1,7 @@
 """MIS: reading the old month sheets, the Others client and adding a client to the list."""
 from app.database import SessionLocal
 from app.models import EeeTaxiMisClient
-from app.services.eee_taxi_mis_sheet import header_keys, is_trip_row, sheet_row_to_trip
+from app.services.eee_taxi_mis_sheet import full_plate, header_keys, is_trip_row, sheet_row_to_trip, split_driver_cab
 from app.services.eee_taxi_mis_zones import set_added_companies
 from tests.test_eee_taxi_mis import ENDPOINT, client, headers  # noqa: F401  (fixtures)
 
@@ -82,3 +82,21 @@ def test_client_added_on_the_page_can_be_used_and_is_not_added_twice(client, hea
             db.query(EeeTaxiMisClient).delete()
             db.commit()
         set_added_companies([])
+
+
+def test_pipeline_tab_short_cab_numbers_become_full_plates():
+    plates = {"HR55ZZ0001", "HR55ZZ5215", "DL1ZZ5215"}
+    assert full_plate("0001", plates) == "HR55ZZ0001"
+    assert full_plate("5215", plates) == "5215" and full_plate("9999", plates) == "9999"   # two cabs, or none
+    assert full_plate("HR55ZZ0001", plates) == "HR55ZZ0001"
+    assert split_driver_cab("Test Driver 0001", "") == ("Test Driver", "0001")
+    assert split_driver_cab("Test Driver 0001", "5215") == ("Test Driver 0001", "5215")
+    assert split_driver_cab("Test Driver", "") == ("Test Driver", "")
+
+
+def test_pipeline_lists_trips_from_a_given_day_onward(client, headers):
+    for day in ("2026-12-03", "2026-12-01", "2026-12-02"):
+        client.post(ENDPOINT, json={"date": day, "company_name": "B2C", "pickup_time": "09:00"},
+                    params={"pipeline": "true"}, headers=headers)
+    listed = client.get(ENDPOINT, headers=headers, params={"pipeline": "true", "date_from": "2026-12-02"}).json()["trips"]
+    assert sorted(t["date"] for t in listed) == ["2026-12-02", "2026-12-03"]

@@ -90,10 +90,11 @@ async function misLoad() {
   // A slow reply to an earlier date range must not replace a newer one.
   const request = _mis.loadSeq = (_mis.loadSeq || 0) + 1;
   try {
-    // Pipeline trips are future bookings, so they load for every date, not just the range on screen.
+    // The pipeline is what is still to be picked up: today's trips first, then later days, whatever
+    // dates are on screen and whenever the trip was booked.
     const company = $("#misCompany").value;
     const [data, pipe] = await Promise.all([api("/api/eee-taxi/mis?" + misQuery()),
-      api("/api/eee-taxi/mis?pipeline=true" + (company ? "&company=" + encodeURIComponent(company) : ""))]);
+      api("/api/eee-taxi/mis?pipeline=true&date_from=" + misIstToday() + (company ? "&company=" + encodeURIComponent(company) : ""))]);
     if (request !== _mis.loadSeq) return;
     _mis.trips = data.trips;
     _mis.pipeline = pipe.trips.slice().sort((a, b) => (a.date + a.pickup_time).localeCompare(b.date + b.pickup_time));
@@ -172,7 +173,7 @@ function misRender() {
   misUpdateSelection();
 }
 function misEmptyText() {
-  if (_mis.view === "pipeline") return "Nothing in the pipeline. For a future booking, open New trip and choose Add to pipeline.";
+  if (_mis.view === "pipeline") return "Nothing in the pipeline from today onward. For a future booking, open New trip and choose Add to pipeline.";
   if (!_mis.trips.length) return "No trips booked for these dates. Add a trip, or upload the MMT file.";
   if (_mis.view === "open") return "Nothing open here. Every duty in this view is closed.";
   if (_mis.view === "fix") return "Every driver and cab here matches the masters.";
@@ -203,7 +204,7 @@ function misPick(t) { return `<td><input type="checkbox" data-pick="${rcEsc(t.id
 function misDeskRow(t, oneDay) {
   const place = (address, zone) => `<span class="mis-place" title="${rcEsc(address)}">${rcEsc(address || "–")}</span>${zone ? `<span class="mis-zone">${rcEsc(zone)}</span>` : ""}`;
   return `<tr data-id="${rcEsc(t.id)}" class="${t.issues.length ? "mis-flag" : ""}">${misPick(t)}${misStatusCell(t)}
-    ${oneDay ? "" : `<td>${rcEsc(misDay(t.date))}</td>`}<td class="mis-time">${rcEsc(t.pickup_time || "–")}</td>
+    ${oneDay ? "" : `<td>${rcEsc((_mis.view === "pipeline" && t.date === misIstToday() ? "Today, " : "") + misDay(t.date))}</td>`}<td class="mis-time">${rcEsc(t.pickup_time || "–")}</td>
     <td><b>${rcEsc(t.company_name)}</b>${t.company_other ? `<div class="meta">${rcEsc(t.company_other)}</div>` : ""}</td>
     <td><div class="cut" title="${rcEsc(t.guest_name)}">${rcEsc(t.guest_name || "–")}</div><div class="meta">${rcEsc(t.route_no)}</div></td>
     <td><div class="mis-leg">${place(t.pickup_address, t.pickup_zone)}</div><div class="mis-leg to">${place(t.drop_location, t.drop_zone)}</div></td>
