@@ -519,7 +519,11 @@ function misFindDriver(values) {
   const drivers = (_mis.lookups && _mis.lookups.drivers) || [];
   const id = misIdKey(values.driver_id), phone = misDigits(values.driver_contact);
   if (id) return drivers.find(d => misIdKey(d.truein_id) === id) || null;
-  return (phone.length === 10 && drivers.find(d => misDigits(d.mobile) === phone)) || misFindByName(drivers, values.driver_name);
+  // A phone only one driver has names that driver; a shared phone needs the name to say which.
+  const owners = phone.length === 10 ? drivers.filter(d => misDigits(d.mobile) === phone) : [];
+  if (owners.length === 1) return owners[0];
+  const sameName = owners.filter(d => misNameKey(d.name) && misNameKey(d.name) === misNameKey(values.driver_name));
+  return sameName.length === 1 ? sameName[0] : misFindByName(drivers, values.driver_name);
 }
 
 // ── trip form: new booking, full edit, or close duty ──

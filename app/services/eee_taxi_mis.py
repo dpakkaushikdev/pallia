@@ -290,7 +290,7 @@ def trip_duration(start_date: str, start_time: str, end_date: str, end_time: str
 class MasterIndex:
     """Driver and cab lookups used to fill and check trips."""
     by_truein: dict[str, DriverRow] = field(default_factory=dict)
-    by_phone: dict[str, DriverRow] = field(default_factory=dict)
+    by_phone: dict[str, list[DriverRow]] = field(default_factory=dict)   # two drivers can share a number
     by_name: dict[str, DriverRow] = field(default_factory=dict)
     all_names: list[tuple[str, DriverRow]] = field(default_factory=list)
     plates: set[str] = field(default_factory=set)
@@ -303,8 +303,9 @@ class MasterIndex:
             if id_key(driver.truein_id):
                 index.by_truein[id_key(driver.truein_id)] = driver
             for phone in (driver.mobile, driver.alternate_mobile):
-                if normalize_phone(phone):
-                    index.by_phone.setdefault(normalize_phone(phone), driver)
+                owners = index.by_phone.setdefault(normalize_phone(phone), []) if normalize_phone(phone) else None
+                if owners is not None and driver not in owners:
+                    owners.append(driver)
             names.setdefault(name_key(driver.name), []).append(driver)
         # A name shared by two drivers cannot identify either of them.
         index.by_name = {name: rows[0] for name, rows in names.items() if len(rows) == 1}
@@ -329,7 +330,13 @@ class MasterIndex:
         return self.by_truein.get(key) if key else self._by_phone_or_name(trip)
 
     def _by_phone_or_name(self, trip: MisTrip | Crew) -> DriverRow | None:
-        return self.by_phone.get(trip.driver_contact) or self.find_by_name(trip.driver_name)
+        """A phone only one driver has names that driver; a shared phone needs the name to say which."""
+        owners = self.by_phone.get(trip.driver_contact, [])
+        if len(owners) == 1:
+            return owners[0]
+        key = name_key(trip.driver_name)
+        same_name = [driver for driver in owners if key and name_key(driver.name) == key]
+        return same_name[0] if len(same_name) == 1 else self.find_by_name(trip.driver_name)
 
     def fill(self, trip: MisTrip) -> MisTrip:
         """Copy the matched driver's Truein ID, master name and mobile onto the trip."""

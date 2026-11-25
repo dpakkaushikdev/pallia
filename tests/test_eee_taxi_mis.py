@@ -372,7 +372,7 @@ def _index(*drivers):
     for driver in drivers:
         row = DriverRow(**driver)
         index.by_truein[row.truein_id.replace("/", "")] = row
-        index.by_phone[row.mobile] = row
+        index.by_phone.setdefault(row.mobile, []).append(row)
         index.by_name[row.name.lower().replace(" ", "")] = row
         index.all_names.append((row.name.lower().replace(" ", ""), row))
     return index
@@ -426,3 +426,14 @@ def test_excel_download_has_exactly_the_google_sheets_columns(client, headers):
     _book(client, headers, "2026-11-10")
     sheet = load_workbook(io.BytesIO(client.get(f"{ENDPOINT}/export", headers=headers).content)).active
     assert [cell.value for cell in sheet[1]] == sheet_headings
+
+
+def test_phone_shared_by_two_drivers_does_not_pick_the_wrong_one():
+    shares = {"driver_id": "d2", "name": "SHARES PHONE", "truein_id": "EEED/VK/9002", "mobile": "9000000001"}
+    index = _index(DRIVER, shares)
+    trip = lambda **values: MisTrip(date="2026-11-02", company_name="MongoDB", cab_no="HR55ZZ0001", **values)   # noqa: E731
+    assert index.fill(trip(driver_name="Shares Phone", driver_contact="9000000001")).driver_id == "EEED/VK/9002"
+    assert index.fill(trip(driver_name="Test Driver", driver_contact="9000000001")).driver_id == "EEED/VK/9001"
+    assert index.issues(trip(driver_name="Third Person", driver_contact="9000000001")) == ["Driver not in driver master"]
+    alone = _index(DRIVER)
+    assert alone.fill(trip(driver_name="Nickname", driver_contact="9000000001")).driver_name == "TEST DRIVER"   # the only owner
