@@ -211,7 +211,7 @@ function misDashCards(d) {
     ["fare", "Fare", misMoney(d.trip_fare), "Trip Fare, before GST, MCD, parking and toll"],
     ["rate", "Fare per km", perKm, "Fare divided by total kms"],
     ["avg", "Average fare per trip", d.closed ? misMoney(d.trip_fare / d.closed) : "–", "Fare divided by closed trips"],
-    ["billed", "Total billed", misMoney(d.total_trip_fare), "Fare with GST, MCD, parking and toll"],
+    ["billed", "Revenue", misMoney(d.total_trip_fare), "Fare with GST, MCD, parking and toll"],
   ].map(([tone, label, value, note]) => `<div class="mis-card ${tone}"><span>${label}</span><b>${value}</b><small>${note}</small></div>`).join("");
 }
 async function misLoadDash() {
@@ -267,11 +267,14 @@ function misRender() {
   $("#misRange").textContent = misRangeLabel();
   misSyncDates($("#pane-eee-mis"));
   $("#misViews").innerHTML = MIS_VIEWS.map(([id, label]) => `<button class="mis-tab${_mis.view === id ? " active" : ""}${(id === "open" || id === "fix") && counts[id] ? " warn" : ""}" role="tab" aria-selected="${_mis.view === id}" onclick="misSetView('${id}')"><span>${label}</span><b>${misCount(counts[id])}</b></button>`).join("");
+  // Money of every trip in the dates, client and search chosen, whichever tab is open.
+  $("#misMoney").innerHTML = `<div class="mis-sum fare" title="Trip Fare of every trip in these dates, before GST, MCD, parking and toll"><span>Fare</span><b>${misMoney(sum.trip_fare)}</b></div>
+    <div class="mis-sum revenue" title="Total Trip Fare of every trip in these dates: fare with GST, MCD, parking and toll"><span>Revenue</span><b>${misMoney(sum.total_trip_fare)}</b></div>`;
   $$("#misLayout .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.layout === _mis.layout));
   misRenderSummary();
   const first = (_mis.page - 1) * _mis.pageSize + 1;
   $("#misCount").textContent = (_mis.total ? `Showing ${misCount(first)} to ${misCount(first + trips.length - 1)} of ${misCount(_mis.total)} ${_mis.total === 1 ? "trip" : "trips"}` : "No trips to show") +
-    (_mis.view === "pipeline" || !sum.trips ? "" : ` · all ${misCount(sum.trips)} in these dates: ${misCount(sum.total_kms)} km, ${misMoney(sum.total_trip_fare)} total fare`);
+    (_mis.view === "pipeline" || !sum.trips ? "" : ` · all ${misCount(sum.trips)} in these dates ran ${misCount(sum.total_kms)} km`);
   const piped = _mis.view === "pipeline", desk = _mis.layout === "desk" || piped;
   const oneDay = !piped && $("#misFrom").value && $("#misFrom").value === $("#misTo").value;
   $("#misHead").innerHTML = `<th><input type="checkbox" id="misAll" aria-label="Select all trips on this page" onchange="misSelectAll(this.checked)"></th><th>Status</th>` +

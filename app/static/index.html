@@ -609,7 +609,15 @@
     .mis-filters .mis-bar {margin:10px 0 0;align-items:flex-end;}
     .mis-filters .mis-range {padding-bottom:9px;}
     .mis-filters .mis-chip {margin-bottom:3px;}
-    .mis-tabs {display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;}
+    .mis-tabrow {display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;}
+    .mis-tabs {display:flex;gap:10px;flex-wrap:wrap;flex:1 1 640px;}
+    .mis-money {display:flex;gap:10px;flex-wrap:wrap;margin-left:auto;}
+    .mis-sum {display:flex;flex-direction:column;gap:2px;min-width:200px;padding:12px 18px 13px;border:1.5px solid transparent;border-radius:12px;}
+    .mis-sum span {font-size:13.5px;font-weight:600;}
+    .mis-sum b {font-size:24px;line-height:1.1;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums;white-space:nowrap;}
+    .mis-sum.fare {background:var(--ok-bg);border-color:#86efac;color:#14532d;}
+    .mis-sum.revenue {background:#0f172a;border-color:#0f172a;color:#fff;}
+    .mis-sum.revenue span {color:rgba(255,255,255,.8);}
     .mis-tab {display:flex;flex-direction:column;align-items:flex-start;gap:2px;flex:1 1 150px;max-width:240px;padding:12px 18px 13px;border:1.5px solid var(--border-2);border-radius:12px;background:var(--panel);font:inherit;color:var(--text);text-align:left;cursor:pointer;transition:border-color .12s,background .12s,box-shadow .12s;}
     .mis-tab span {font-size:13.5px;font-weight:600;color:var(--muted);}
     .mis-tab b {font-size:24px;line-height:1.1;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums;}
@@ -1234,7 +1242,10 @@
           <button class="mis-chip" onclick="misPreset('month')">This month</button>
           <button class="mis-chip" onclick="misPreset('lastMonth')">Last month</button>
         </div>
-        <div class="mis-tabs" id="misViews" role="tablist" aria-label="Trips to show"></div>
+        <div class="mis-tabrow">
+          <div class="mis-tabs" id="misViews" role="tablist" aria-label="Trips to show"></div>
+          <div class="mis-money" id="misMoney" role="status" aria-label="Fare and revenue of these dates"></div>
+        </div>
       </section>
       <div class="mis-bar mis-do">
         <button class="btn" onclick="misOpenForm()">New trip <kbd>N</kbd></button>
@@ -1911,7 +1922,7 @@
   </div>
 </div>
 <script src="/static/eee_documents.js"></script>
-<script src="/static/eee_mis.js?v=20261126-1"></script>
+<script src="/static/eee_mis.js?v=20261126-2"></script>
 <script src="/static/pallia_verification.js?v=20261013-2"></script>
 
 <script>
