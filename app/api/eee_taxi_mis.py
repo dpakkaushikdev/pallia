@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, timedelta
+from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
@@ -21,9 +21,7 @@ from app.services.eee_taxi_mis import (
 )
 from app.services.eee_taxi_mis_excel import build_mis_workbook, parse_mmt_export
 from app.services.eee_taxi_mis_mongodb import COMPANY as MONGODB, merge_file_values, parse_mongodb_report
-from app.services.eee_taxi_mis_query import (
-    TripFilter, dashboard, grouped, ist_today, last_route_of_guest, list_page, view_total,
-)
+from app.services.eee_taxi_mis_query import TripFilter, dashboard, grouped, list_page, view_total
 from app.services.eee_taxi_mis_zones import (
     OTHERS, ZONES, all_companies, canonical_company, new_company_name, set_added_companies,
 )
@@ -42,7 +40,6 @@ router = APIRouter(prefix="/api/eee-taxi/mis", tags=["eee-taxi"], dependencies=[
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
-GUEST_LOOKBACK_DAYS = 90
 View = Literal["all", "open", "closed", "fix", "pipeline"]
 
 
@@ -137,14 +134,6 @@ def read_summary(group: Literal["company_name", "date", "dispatcher_name", "driv
                  _: User = Depends(_eee_user), db: Session = Depends(get_db)):
     """The chosen tab's trips added up by client, date, dispatcher, driver, cab or pickup zone."""
     return {"groups": grouped(db, MasterIndex.build(db), chosen, group)}
-
-
-@router.get("/guest-route")
-def guest_route(guest: str = Query(min_length=1, max_length=500), company: str = Query("", max_length=32),
-                _: User = Depends(_eee_user), db: Session = Depends(get_db)):
-    """The route of this guest's latest trip in the last three months (``route`` is null for a new guest)."""
-    since = ist_today() - timedelta(days=GUEST_LOOKBACK_DAYS)
-    return {"route": last_route_of_guest(db, guest, _client(company), since)}
 
 
 @router.get("/lookups")

@@ -3,9 +3,9 @@
 
 // [key, label, kind]; kind is date, time, num, wide, company, auto, or list:<datalist id>.
 const MIS_SECTIONS = [
-  ["dispatch", "Booking", [["date", "Date *", "date"], ["company_name", "Company Name *", "company"], ["company_other", "Client name (for Others)"], ["route_no", "DS no/Route No"], ["dispatcher_name", "Dispatcher Name", "list:misDispatchers"], ["guest_name", "Guest Name", "wide list:misGuests"]]],
-  ["dispatch", "Driver and cab", [["hired", "Cab and driver from", "hired"], ["driver_id", "Driver ID (Truein)", "list:misDriverIds"], ["driver_name", "Driver Name", "list:misDriverNames"], ["driver_contact", "Driver Cont No"], ["cab_no", "Cab No", "list:misCabs"]]],
-  ["dispatch", "Route", [["pickup_address", "Pickup Address", "wide list:misPickups"], ["pickup_zone", "Pickup Zone", "list:misZones"], ["pickup_time", "Pick up Time", "time"], ["drop_location", "Drop Location", "wide list:misDrops"], ["drop_zone", "Drop Zone", "list:misZones"], ["hub_out", "Hub Out", "list:misHubs"]]],
+  ["dispatch", "Booking", [["date", "Date (pick-up date) *", "date"], ["company_name", "Company Name *", "company"], ["company_other", "Client name (for Others)"], ["route_no", "DS no/Route No"], ["dispatcher_name", "Dispatcher Name", "list:misDispatchers"], ["guest_name", "Guest Name", "wide"]]],
+  ["dispatch", "Driver and cab", [["hired", "Cab and driver from", "hired"], ["driver_name", "Driver Name", "list:misDriverNames"], ["driver_id", "Driver ID (Truein)", "list:misDriverIds"], ["driver_contact", "Driver Cont No"], ["cab_no", "Cab No", "list:misCabs"]]],
+  ["dispatch", "Route", [["pickup_address", "Pickup Address", "wide"], ["pickup_zone", "Pickup Zone", "list:misZones"], ["pickup_time", "Pick up Time", "time"], ["drop_location", "Drop Location", "wide"], ["drop_zone", "Drop Zone", "list:misZones"], ["hub_out", "Hub Out", "list:misHubs"]]],
   ["closing", "Timing and distance", [["drop_time", "Drop Time", "time"], ["trip_end_date", "Trip End Date", "date"], ["trip_duration", "Trip Duration", "auto"], ["driver_hours", "Driver Hours", "num"], ["start_odometer", "Start Odometer", "num"], ["end_odometer", "End Odometer", "num"], ["total_kms", "Total kms", "num"], ["dead_run_kms", "Dead Run Kms", "num"], ["hub_in", "Hub In", "list:misHubIns"]]],
   ["closing", "Charges", [["package", "Package (name or base price)", "list:misPackages"], ["extra_km_charges", "Km/Extra/Km Charges", "num"], ["extra_time_charges", "Time Extra/Time Charges", "num"], ["night_charge", "Night Charge 11pm to 5am", "num"], ["trip_fare", "Trip Fare", "num"], ["gst", "GST", "num"], ["mcd", "MCD", "num"], ["parking", "Parking", "num"], ["toll", "Toll", "num"], ["total_trip_fare", "Total Trip Fare", "auto"], ["cash_to_receive", "Cash to be Received", "num"], ["mmt_base_cost", "MMT Base Cost", "num"], ["mmt_prepaid_amount", "MMT Prepaid Amt", "num"]]],
   ["closing", "Wrap-up", [["remarks", "Remarks", "wide list:misRemarks"], ["duty_closed_by", "Duty closed by"], ["b2c_payment_status", "B2C payment Status", "list:misPayments"]]],
@@ -135,7 +135,10 @@ async function misLoadLookups() {
   try {
     _mis.lookups = await api("/api/eee-taxi/mis/lookups");
     $("#misDriverIds").innerHTML = _mis.lookups.drivers.filter(d => d.truein_id).map(d => `<option value="${rcEsc(d.truein_id)}">${rcEsc(d.name)}</option>`).join("");
-    misOptions("#misDriverNames", _mis.lookups.drivers.map(d => d.name));
+    // The name list shows each driver with their ID; picking one fills the Driver ID.
+    misOptions("#misDriverNames", _mis.lookups.drivers.map(misDriverLabel));
+    // Zones come from the fixed list only: the old sheets hold mistyped zones such as "8/80".
+    misOptions("#misZones", _mis.lookups.zones);
     misOptions("#misCabs", _mis.lookups.cabs);
     const chosen = $("#misCompany").value;
     $("#misCompany").innerHTML = '<option value="">All clients</option>' + _mis.lookups.companies.map(c => `<option>${rcEsc(c)}</option>`).join("");
@@ -165,12 +168,8 @@ async function misLoad() {
     // The last trip of the last page was deleted or closed: show the page that is left.
     if (_mis.page > pages) { _mis.page = pages; await misLoad(); return; }
     Object.assign(_mis, { trips: data.trips, total: data.total, sum: data.summary });
-    const t = data.trips, zones = (_mis.lookups && _mis.lookups.zones) || [];
-    misRemember("#misZones", [...zones, ...t.flatMap(x => [x.pickup_zone, x.drop_zone])]);
+    const t = data.trips;
     misRemember("#misPackages", ["City to Airport", "Airport to City", ...t.map(x => x.package)]);
-    misRemember("#misGuests", t.map(x => x.guest_name));
-    misRemember("#misPickups", t.map(x => x.pickup_address));
-    misRemember("#misDrops", t.map(x => x.drop_location));
     misRemember("#misDispatchers", [misMe(), ...t.map(x => x.dispatcher_name)]);
     misRemember("#misHubs", ["Vasant Kunj", "Mall Of India", "Select City", "Decathlon", "Huda City Center", ...t.map(x => x.hub_out)]);
     misRemember("#misHubIns", ["20km hub to hub", ...t.map(x => x.hub_in)]);
@@ -616,30 +615,24 @@ function misRecalc(form, base, changed = "") {
   state.className = "mis-state " + (missing.length ? "open" : "closed");
   state.textContent = missing.length ? `Will stay Open: needs ${missing.join(", ")}` : "Will be saved as Closed";
 }
+// How a driver reads in the Driver Name list: "NAME (EEED/VK/0044)", or just the name when there is no ID.
+function misDriverLabel(driver) { return driver.truein_id ? `${driver.name} (${driver.truein_id})` : driver.name; }
 function misFillDriver(form, changedKey) {
   const values = misFormValues(form);
   if (values.hired === "Yes") return;
-  const driver = values[changedKey] && misFindDriver({ driver_id: "", driver_name: "", driver_contact: "", [changedKey]: values[changedKey] });
+  const drivers = (_mis.lookups && _mis.lookups.drivers) || [];
+  const picked = changedKey === "driver_name" && drivers.find(d => misDriverLabel(d) === values.driver_name);
+  const driver = picked || (values[changedKey] && misFindDriver({ driver_id: "", driver_name: "", driver_contact: "", [changedKey]: values[changedKey] }));
+  const contact = form.querySelector('[data-m="driver_contact"]');
+  // A name the master does not know cannot keep the ID and phone of whoever was chosen before it.
+  if (!driver && changedKey === "driver_name") {
+    form.querySelector('[data-m="driver_id"]').value = "";
+    if (contact.value && contact.value === contact.dataset.filled) contact.value = "";
+  }
   if (!driver) return;
   form.querySelector('[data-m="driver_id"]').value = driver.truein_id;
   form.querySelector('[data-m="driver_name"]').value = driver.name;
-  form.querySelector('[data-m="driver_contact"]').value = misDigits(driver.mobile);
-}
-// A returning guest usually takes the same run: fill the empty route fields from their last trip.
-async function misFillGuest(form) {
-  const typed = misFormValues(form), name = typed.guest_name.toLowerCase();
-  if (!name) return;
-  const params = new URLSearchParams({ guest: typed.guest_name });
-  if (typed.company_name && typed.company_name !== "__new__") params.set("company", typed.company_name);
-  let last;
-  try { last = (await api("/api/eee-taxi/mis/guest-route?" + params)).route; }
-  catch (_) { return; }   // only a suggestion; the booking does not depend on it
-  if (!last || !form.isConnected) return;
-  ["company_name", "pickup_address", "pickup_zone", "drop_location", "drop_zone"].forEach(key => {
-    const input = form.querySelector(`[data-m="${key}"]`);
-    if (input && !input.value) input.value = last[key];
-  });
-  misRecalc(form, {});
+  contact.value = contact.dataset.filled = misDigits(driver.mobile);
 }
 function misContext(t) {
   return `<div class="mis-context"><div><b>${rcEsc(t.company_name)}</b> · ${rcEsc(t.guest_name || "No guest name")}${t.route_no ? ` · ${rcEsc(t.route_no)}` : ""}</div>
@@ -732,7 +725,6 @@ function misOpenForm(trip = null, mode = trip ? "edit" : "new", seed = null) {
     if (key === "company_name" && e.target.value === "__new__") { misAddClient(e.target); return; }
     if (["driver_id", "driver_name", "driver_contact"].includes(key)) misFillDriver(form, key);
     if (key === "cab_no") e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (key === "guest_name" && isNew) misFillGuest(form);
     misRecalc(form, isNew ? {} : base);
   });
   wrap.querySelector("[data-cancel]").onclick = close;

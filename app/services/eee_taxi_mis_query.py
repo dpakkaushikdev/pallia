@@ -25,7 +25,6 @@ SEARCH_KEYS = ("guest_name", "driver_name", "driver_id", "cab_no", "route_no", "
 # What decides a driver problem and a cab problem; "hired" is in both because a hired cab or driver is never one.
 DRIVER_KEYS = ("driver_id", "driver_name", "driver_contact", "hired")
 CAB_KEYS = ("cab_no", "hired")
-ROUTE_KEYS = ("company_name", "pickup_address", "pickup_zone", "drop_location", "drop_zone")
 MAX_GROUPS = 500
 IST_OFFSET = timedelta(minutes=330)
 
@@ -163,16 +162,6 @@ def grouped(db: Session, index: MasterIndex, chosen: TripFilter, group: str) -> 
              "open": count - int(closed), "total_kms": float(kms), "total_trip_fare": float(fare)}
             for value, count, closed, kms, fare in query.limit(MAX_GROUPS)]
     return rows[::-1] if group == "date" else rows
-
-
-def last_route_of_guest(db: Session, guest: str, company: str, since: date) -> dict | None:
-    """Where this guest was last picked up and dropped, to prefill a new booking."""
-    conditions = [func.lower(field("guest_name")) == guest.strip().lower(), Trip.trip_date >= since]
-    if company:
-        conditions.append(Trip.company_name == company)
-    row = (db.query(Trip).filter(*conditions)
-           .order_by(Trip.trip_date.desc(), field("pickup_time").desc(), Trip.created_at.desc()).first())
-    return {key: (row.data or {}).get(key, "") for key in ROUTE_KEYS} if row else None
 
 
 def dashboard(db: Session, year: int | None, month: int | None) -> dict:

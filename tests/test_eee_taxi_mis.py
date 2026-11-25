@@ -360,19 +360,6 @@ def test_dashboard_totals_follow_the_year_and_month_chosen(client, headers):
     assert client.get(f"{ENDPOINT}/dashboard", params={"month": 13}, headers=headers).status_code == 422
 
 
-def test_returning_guests_last_route_is_offered_for_the_next_booking(client, headers):
-    from app.services.eee_taxi_mis_query import ist_today
-    today = ist_today().isoformat()
-    _book(client, headers, today, guest_name="Guest One", pickup_address="Old Office", drop_location="Terminal 1", pickup_time="08:00")
-    _book(client, headers, today, guest_name="Guest One", pickup_address="New Office", drop_location="Terminal 3", pickup_time="18:00")
-    _book(client, headers, "2025-01-05", guest_name="Long Ago Guest", pickup_address="Somewhere")
-    read = lambda **params: client.get(f"{ENDPOINT}/guest-route", params=params, headers=headers).json()["route"]   # noqa: E731
-    assert read(guest=" guest one ") == {"company_name": "B2C", "pickup_address": "New Office", "pickup_zone": "",
-                                         "drop_location": "Terminal 3", "drop_zone": "Airport"}
-    assert read(guest="Guest", company="B2C") is None and read(guest="Guest One", company="EY") is None
-    assert read(guest="Long Ago Guest") is None      # older than three months
-
-
 def test_dashboard_says_how_many_of_its_trips_are_pipeline_bookings(client, headers):
     _book(client, headers, "2026-11-10")
     client.post(ENDPOINT, json={"date": "2026-11-28", "company_name": "B2C"}, params={"pipeline": "true"}, headers=headers)
@@ -424,3 +411,18 @@ def test_outside_cab_and_driver_are_not_checked_against_the_masters(client, head
     assert blank_id.json()["issues"] == []
     sheet = load_workbook(io.BytesIO(client.get(f"{ENDPOINT}/export", params={"q": "hired man"}, headers=headers).content)).active
     assert sheet["C2"].value == "Hired"
+
+
+def test_excel_download_has_exactly_the_google_sheets_columns(client, headers):
+    """The headings below are copied from row 1 of the team's Nov-2026 Google Sheet tab, line breaks and all."""
+    sheet_headings = [
+        "Date", "Dispatcher Name", "Driver ID", "Driver Name", "Driver Cont No", "Cab No", "DS no/Route No",
+        "Company Name", "Guest Name", "Pickup Address", "Pickup Zone", "Pick up Time", "Drop Location", "Drop Zone",
+        "Drop Time", "Trip End Date", "Trip Duration", "Hub Out", "Hub In", "Start Odometer", "End Odometer",
+        "Total \nkms", "Dead  \nRun Kms", "Package", "Km/Extra/\nKm Charges", "Time Extra/\nTime Charges",
+        "Night Charge \n11pm to 5am", "Trip Fare", "GST", "MCD", "Parking", "Toll", "Total Trip Fare", "Driver Hours",
+        "Cash to \nbe Recieved", "Remarks", "MMT Base Cost", "MMT Peripaid Amt", "Duty closed by", "B2C payment Status ",
+    ]
+    _book(client, headers, "2026-11-10")
+    sheet = load_workbook(io.BytesIO(client.get(f"{ENDPOINT}/export", headers=headers).content)).active
+    assert [cell.value for cell in sheet[1]] == sheet_headings
