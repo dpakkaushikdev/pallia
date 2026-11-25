@@ -50,7 +50,7 @@ NUMBER_KEYS = (
 TOTAL_KEYS = ("trip_fare", "gst", "mcd", "parking", "toll")
 # What a dispatcher enters when a trip is booked; the rest is filled when the duty closes.
 DISPATCH_KEYS = (
-    "dispatcher_name", "driver_id", "driver_name", "driver_contact", "cab_no", "company_name", "company_other",
+    "dispatcher_name", "hired", "driver_id", "driver_name", "driver_contact", "cab_no", "company_name", "company_other",
     "guest_name",
     "pickup_address", "pickup_zone", "pickup_time", "drop_location", "drop_zone", "hub_out",
 )
@@ -71,6 +71,8 @@ class MisTrip(BaseModel):
     driver_name: Short
     driver_contact: str = Field(default="", max_length=20)
     cab_no: str = Field(default="", max_length=20)
+    # "Yes" when the cab and driver were hired from outside for this trip, so neither is in the masters.
+    hired: str = Field(default="", max_length=20)   # not a sheet column
     route_no: str = Field(default="", max_length=64)
     company_name: str = Field(min_length=1, max_length=32)
     company_other: Short   # the client's name when Company Name is Others; not a sheet column
@@ -131,6 +133,11 @@ class MisTrip(BaseModel):
     @classmethod
     def phone(cls, value: str) -> str:
         return normalize_phone(value)
+
+    @field_validator("hired")
+    @classmethod
+    def yes_or_blank(cls, value: str) -> str:
+        return "Yes" if value.lower() in ("yes", "y", "true", "hired") else ""
 
     @field_validator("company_name")
     @classmethod
@@ -251,6 +258,7 @@ class Crew(NamedTuple):
     driver_name: str
     driver_contact: str
     cab_no: str
+    hired: str = ""
 
 
 def name_key(name: str) -> str:
@@ -325,7 +333,8 @@ class MasterIndex:
 
     def fill(self, trip: MisTrip) -> MisTrip:
         """Copy the matched driver's Truein ID, master name and mobile onto the trip."""
-        driver = self.find_driver(trip)
+        # A hired driver keeps what the dispatcher typed, even when a fleet driver has the same name.
+        driver = None if trip.hired else self.find_driver(trip)
         if driver is None:
             return trip
         return trip.model_copy(update={
@@ -335,6 +344,9 @@ class MasterIndex:
         })
 
     def driver_issue(self, trip: MisTrip | Crew) -> str:
+        if trip.hired:
+            # Hired with the cab: not in the master by design, so only an empty driver is worth a flag.
+            return "" if trip.driver_name or trip.driver_contact else "Driver missing"
         typed_id = id_key(trip.driver_id)
         if not (typed_id or trip.driver_name or trip.driver_contact):
             return "Driver missing"
@@ -351,7 +363,7 @@ class MasterIndex:
     def cab_issue(self, trip: MisTrip | Crew) -> str:
         if not trip.cab_no:
             return "Cab No missing"
-        return "" if trip.cab_no in self.plates else f"Cab {trip.cab_no} not in vehicle master"
+        return "" if trip.hired or trip.cab_no in self.plates else f"Cab {trip.cab_no} not in vehicle master"
 
     def issues(self, trip: MisTrip | Crew) -> list[str]:
         return [problem for problem in (self.driver_issue(trip), self.cab_issue(trip)) if problem]

@@ -22,7 +22,9 @@ VIEWS = ("all", "open", "closed", "fix", "pipeline")
 GROUP_KEYS = ("company_name", "date", "dispatcher_name", "driver_name", "cab_no", "pickup_zone")
 SEARCH_KEYS = ("guest_name", "driver_name", "driver_id", "cab_no", "route_no", "pickup_address", "drop_location",
                "dispatcher_name", "pickup_zone", "drop_zone", "company_other")
-DRIVER_KEYS = Crew._fields[:3]
+# What decides a driver problem and a cab problem; "hired" is in both because a hired cab or driver is never one.
+DRIVER_KEYS = ("driver_id", "driver_name", "driver_contact", "hired")
+CAB_KEYS = ("cab_no", "hired")
 ROUTE_KEYS = ("company_name", "pickup_address", "pickup_zone", "drop_location", "drop_zone")
 MAX_GROUPS = 500
 IST_OFFSET = timedelta(minutes=330)
@@ -103,12 +105,12 @@ def _crew_check(db: Session, conditions: list[ColumnElement], index: MasterIndex
         crew = Crew(*values)
         driver_bad, cab_bad = index.driver_issue(crew), index.cab_issue(crew)
         if driver_bad:
-            bad_drivers.add(tuple(crew[:3]))
+            bad_drivers.add(tuple(getattr(crew, key) for key in DRIVER_KEYS))
         if cab_bad:
-            bad_cabs.add(crew.cab_no)
+            bad_cabs.add(tuple(getattr(crew, key) for key in CAB_KEYS))
         flagged += count if driver_bad or cab_bad else 0
     by_driver = tuple_(*(field(key) for key in DRIVER_KEYS)).in_(bad_drivers) if bad_drivers else false()
-    by_cab = field("cab_no").in_(bad_cabs) if bad_cabs else false()
+    by_cab = tuple_(*(field(key) for key in CAB_KEYS)).in_(bad_cabs) if bad_cabs else false()
     return flagged, or_(by_driver, by_cab)
 
 

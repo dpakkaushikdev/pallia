@@ -4,7 +4,7 @@
 // [key, label, kind]; kind is date, time, num, wide, company, auto, or list:<datalist id>.
 const MIS_SECTIONS = [
   ["dispatch", "Booking", [["date", "Date *", "date"], ["company_name", "Company Name *", "company"], ["company_other", "Client name (for Others)"], ["route_no", "DS no/Route No"], ["dispatcher_name", "Dispatcher Name", "list:misDispatchers"], ["guest_name", "Guest Name", "wide list:misGuests"]]],
-  ["dispatch", "Driver and cab", [["driver_id", "Driver ID (Truein)", "list:misDriverIds"], ["driver_name", "Driver Name", "list:misDriverNames"], ["driver_contact", "Driver Cont No"], ["cab_no", "Cab No", "list:misCabs"]]],
+  ["dispatch", "Driver and cab", [["hired", "Cab and driver from", "hired"], ["driver_id", "Driver ID (Truein)", "list:misDriverIds"], ["driver_name", "Driver Name", "list:misDriverNames"], ["driver_contact", "Driver Cont No"], ["cab_no", "Cab No", "list:misCabs"]]],
   ["dispatch", "Route", [["pickup_address", "Pickup Address", "wide list:misPickups"], ["pickup_zone", "Pickup Zone", "list:misZones"], ["pickup_time", "Pick up Time", "time"], ["drop_location", "Drop Location", "wide list:misDrops"], ["drop_zone", "Drop Zone", "list:misZones"], ["hub_out", "Hub Out", "list:misHubs"]]],
   ["closing", "Timing and distance", [["drop_time", "Drop Time", "time"], ["trip_end_date", "Trip End Date", "date"], ["trip_duration", "Trip Duration", "auto"], ["driver_hours", "Driver Hours", "num"], ["start_odometer", "Start Odometer", "num"], ["end_odometer", "End Odometer", "num"], ["total_kms", "Total kms", "num"], ["dead_run_kms", "Dead Run Kms", "num"], ["hub_in", "Hub In", "list:misHubIns"]]],
   ["closing", "Charges", [["package", "Package (name or base price)", "list:misPackages"], ["extra_km_charges", "Km/Extra/Km Charges", "num"], ["extra_time_charges", "Time Extra/Time Charges", "num"], ["night_charge", "Night Charge 11pm to 5am", "num"], ["trip_fare", "Trip Fare", "num"], ["gst", "GST", "num"], ["mcd", "MCD", "num"], ["parking", "Parking", "num"], ["toll", "Toll", "num"], ["total_trip_fare", "Total Trip Fare", "auto"], ["cash_to_receive", "Cash to be Received", "num"], ["mmt_base_cost", "MMT Base Cost", "num"], ["mmt_prepaid_amount", "MMT Prepaid Amt", "num"]]],
@@ -314,7 +314,8 @@ function misStatusCell(t) {
   return `<td><span class="badge draft">Open</span><div class="mis-miss">needs ${rcEsc(t.missing.map(m => short[m] || m).join(" · "))}</div>${t.in_pipeline && _mis.view !== "pipeline" ? '<div class="meta">In pipeline</div>' : ""}</td>`;
 }
 function misCheckCell(t) {
-  return `<td>${t.issues.length ? t.issues.map(i => `<span class="mis-issue">${rcEsc(i)}</span>`).join("") : '<span class="mis-ok">OK</span>'}</td>`;
+  const hired = t.hired ? '<span class="mis-zone" title="Cab and driver hired from outside; not checked against the masters">Hired</span> ' : "";
+  return `<td>${hired}${t.issues.length ? t.issues.map(i => `<span class="mis-issue">${rcEsc(i)}</span>`).join("") : t.hired ? "" : '<span class="mis-ok">OK</span>'}</td>`;
 }
 function misPick(t) { return `<td><input type="checkbox" data-pick="${rcEsc(t.id)}" ${_mis.selected.has(t.id) ? "checked" : ""} aria-label="Select trip of ${rcEsc(t.guest_name || t.route_no)}"></td>`; }
 function misDeskRow(t, oneDay) {
@@ -530,6 +531,7 @@ function misField([key, label, kind = ""], value) {
     const choices = value && !companies.includes(value) ? [value, ...companies] : companies;
     return `<label>${rcEsc(label)}<select data-m="${key}"><option value="">Choose client</option>${choices.map(c => `<option${c === value ? " selected" : ""}>${rcEsc(c)}</option>`).join("")}<option value="__new__">+ Add new client…</option></select></label>`;
   }
+  if (kind === "hired") return `<label>${rcEsc(label)}<select data-m="${key}"><option value="">Own fleet</option><option value="Yes"${value === "Yes" ? " selected" : ""}>Hired</option></select></label>`;
   const type = kind === "date" || kind === "time" ? kind : "text";
   const list = (kind.match(/list:(\w+)/) || [])[1];
   const attrs = (list ? ` list="${list}"` : "") + (kind === "num" ? ' inputmode="decimal"' : "") + (kind === "auto" ? ' readonly tabindex="-1" placeholder="Worked out for you"' : "");
@@ -576,6 +578,9 @@ function misRecalc(form, base, changed = "") {
   let v = { ...base, ...misFormValues(form) };
   const other = input("company_other");
   if (other) other.closest("label").style.display = v.company_name === "Others" ? "" : "none";
+  // A hired cab and driver have no Truein ID and are not in the masters, so nothing is checked.
+  const hired = v.hired === "Yes";
+  if (input("driver_id")) input("driver_id").closest("label").style.display = hired ? "none" : "";
   if (input("start_odometer") && v.start_odometer && v.end_odometer) {
     const kms = misNum(v.end_odometer) - misNum(v.start_odometer);
     // A Total kms already typed (old sheets add hub km) changes only when an odometer is edited.
@@ -595,7 +600,10 @@ function misRecalc(form, base, changed = "") {
   v = { ...base, ...misFormValues(form) };
   set("trip_duration", misDuration(v));
   set("total_trip_fare", v.trip_fare ? misTrim(MIS_TOTAL_PARTS.reduce((s, key) => s + misNum(v[key]), 0)) : "");
-  if (_mis.lookups && input("driver_name")) {
+  if (hired && input("driver_name")) {
+    misHint(form, "driver_name", v.driver_name || v.driver_contact ? "Hired driver: not checked against the master" : "");
+    misHint(form, "cab_no", v.cab_no ? "Hired cab: not checked against the master" : "");
+  } else if (_mis.lookups && input("driver_name")) {
     const driver = misFindDriver(v);
     if (!v.driver_id && !v.driver_name && !v.driver_contact) misHint(form, "driver_name", "");
     else if (!driver) misHint(form, "driver_name", misIdKey(v.driver_id) ? "This Driver ID is not in the driver master" : "Not in the driver master", false);
@@ -610,6 +618,7 @@ function misRecalc(form, base, changed = "") {
 }
 function misFillDriver(form, changedKey) {
   const values = misFormValues(form);
+  if (values.hired === "Yes") return;
   const driver = values[changedKey] && misFindDriver({ driver_id: "", driver_name: "", driver_contact: "", [changedKey]: values[changedKey] });
   if (!driver) return;
   form.querySelector('[data-m="driver_id"]').value = driver.truein_id;
@@ -680,7 +689,7 @@ function misOpenForm(trip = null, mode = trip ? "edit" : "new", seed = null) {
     // Ctrl+Enter reaches here even while a save is running; one save at a time.
     if (form.querySelector('button[type="submit"]').disabled) return;
     // Close mode shows only the closing fields; the booking details ride along unchanged.
-    const kept = Object.fromEntries([...MIS_SHEET.map(([key]) => key), "company_other"].map(key => [key, base[key] || ""]));
+    const kept = Object.fromEntries([...MIS_SHEET.map(([key]) => key), "company_other", "hired"].map(key => [key, base[key] || ""]));
     const body = { ...(isNew ? {} : kept), ...misFormValues(form) };
     if (form.querySelector(".mis-date-text.bad")) { err.textContent = "Type the date as DD/MM/YYYY, for example 05/11/2026."; return; }
     if (!body.date || !body.company_name) { err.textContent = "Date and Company Name are required."; return; }

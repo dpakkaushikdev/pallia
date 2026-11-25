@@ -403,3 +403,24 @@ def test_driver_id_decides_the_match_and_name_only_stands_in_when_there_is_no_id
     assert index.issues(trip(driver_id="N/A", driver_name="Test Driver")) == []                     # no ID: the name stands in
     assert index.issues(trip(driver_id="#N/A")) == ["Driver missing"]
     assert index.fill(trip(driver_contact="9000000002")).driver_id == "EEED/TP/9002"                # uploads get their ID filled
+
+
+def test_outside_cab_and_driver_are_not_checked_against_the_masters(client, headers):
+    hired = _book(client, headers, "2026-11-10", hired="Yes", driver_id="Innova", driver_name="Test Driver",
+                  driver_contact="9111111111", cab_no="DL01AA0001", guest_name="Hired Guest")
+    assert hired["hired"] == "Yes" and hired["issues"] == []
+    assert (hired["driver_id"], hired["driver_name"]) == ("Innova", "Test Driver")       # not replaced by the fleet driver
+    own = _book(client, headers, "2026-11-10", driver_name="Nobody Known", cab_no="DL01AA0001", guest_name="Own Guest")
+    assert own["hired"] == "" and len(own["issues"]) == 2                               # the same cab on an own trip is flagged
+    body = client.get(ENDPOINT, params={"view": "fix"}, headers=headers).json()
+    assert [t["guest_name"] for t in body["trips"]] == ["Own Guest"] and body["summary"]["need_fixing"] == 1
+    empty = _book(client, headers, "2026-11-11", hired="yes", guest_name="Empty Hired")
+    assert empty["issues"] == ["Driver missing", "Cab No missing"]
+    again = client.post(f"{ENDPOINT}/copy", json={"ids": [hired["id"]], "date": "2026-11-12"}, headers=headers).json()
+    copied = client.get(ENDPOINT, params={"date_from": "2026-11-12"}, headers=headers).json()["trips"][0]
+    assert again["added"] == 1 and copied["hired"] == "Yes"
+    blank_id = client.put(f"{ENDPOINT}/{hired['id']}", headers=headers,
+                          json={"date": "2026-11-10", "company_name": "B2C", "hired": "Yes", "driver_name": "Hired Man", "cab_no": "DL01AA0001"})
+    assert blank_id.json()["issues"] == []
+    sheet = load_workbook(io.BytesIO(client.get(f"{ENDPOINT}/export", params={"q": "hired man"}, headers=headers).content)).active
+    assert sheet["C2"].value == "Hired"

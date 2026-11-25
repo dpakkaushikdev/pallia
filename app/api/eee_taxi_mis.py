@@ -180,6 +180,8 @@ def export(date_from: date | None = None, date_to: date | None = None,
     trips.sort(key=lambda t: (t["date"], t["pickup_time"]))
     # The sheet has no column for a one-off client's name, so it rides in Company Name.
     trips = [{**t, "company_name": f"{OTHERS} - {t['company_other']}"} if t["company_other"] else t for t in trips]
+    # Nor one for a hired cab; the old sheets wrote such trips with a word in the Driver ID column.
+    trips = [{**t, "driver_id": "Hired"} if t["hired"] and not t["driver_id"] else t for t in trips]
     label = re.sub(r"[^A-Za-z0-9]+", "", _client(company)) if _client(company) in all_companies() else "All"
     name = f"MIS_{label}_{date_from or 'start'}_to_{date_to or 'latest'}.xlsx"
     return Response(build_mis_workbook(trips), headers={"Content-Disposition": f'attachment; filename="{name}"'},
