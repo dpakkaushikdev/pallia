@@ -24,6 +24,7 @@ const MIS_KEEP = ["date", "company_name", "dispatcher_name", "drop_location", "d
 const MIS_PAGE_SIZES = [50, 100, 200];
 const MIS_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const MIS_SEARCH_DELAY = 350;
+const MIS_CALENDAR_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
 
 // trips is one page of the chosen tab; sum is the counts and totals of the dates on screen.
 let _mis = { trips: [], total: 0, sum: {}, groups: [], lookups: null, selected: new Set(), started: false,
@@ -52,6 +53,53 @@ function misStore(key, value) {
   } catch (_) { /* private window: preferences just do not persist */ }
   return "";
 }
+// "5/11/26", "05-11-2026" and "05112026" as "2026-11-05"; "" stays "" (no date); anything else is null.
+function misParseDmy(value) {
+  const raw = value.trim();
+  if (!raw) return "";
+  const parts = raw.match(/^(\d{1,2})[\/.\- ](\d{1,2})[\/.\- ](\d{2}|\d{4})$/) || raw.match(/^(\d{2})(\d{2})(\d{4})$/);
+  if (!parts) return null;
+  const day = Number(parts[1]), month = Number(parts[2]), year = Number(parts[3].length === 2 ? "20" + parts[3] : parts[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const real = date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  return real ? date.toISOString().slice(0, 10) : null;
+}
+// A browser's own date box shows MM/DD/YYYY when the browser is set to US English. So each date
+// gets a typed DD/MM/YYYY box in front; the browser's box stays behind it, holding the value
+// (YYYY-MM-DD) and supplying the calendar.
+function misWrapDate(input) {
+  const box = document.createElement("span"), text = document.createElement("input"), button = document.createElement("button");
+  box.className = "mis-date";
+  input.replaceWith(box);
+  Object.assign(text, { type: "text", className: "mis-date-text", maxLength: 10, placeholder: "DD/MM/YYYY", autocomplete: "off", inputMode: "numeric", value: misDmy(input.value) });
+  text.setAttribute("aria-label", (input.getAttribute("aria-label") || "Date") + ", day/month/year");
+  Object.assign(button, { type: "button", className: "mis-date-btn", tabIndex: -1, innerHTML: MIS_CALENDAR_ICON });
+  button.setAttribute("aria-label", "Open calendar");
+  input.tabIndex = -1;
+  input.setAttribute("aria-hidden", "true");
+  box.append(text, button, input);
+  button.addEventListener("click", () => { try { input.showPicker(); } catch (_) { text.focus(); } });
+  input.addEventListener("change", () => { text.value = misDmy(input.value); text.classList.remove("bad"); });
+  text.addEventListener("change", () => {
+    const iso = misParseDmy(text.value);
+    text.classList.toggle("bad", iso === null);
+    if (iso === null) return;
+    text.value = misDmy(iso);
+    if (iso === input.value) return;
+    input.value = iso;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+// After the page itself changes a date (Today, the arrows, an upload), show it in the typed box.
+function misSyncDates(root) {
+  root.querySelectorAll(".mis-date").forEach(box => {
+    const text = box.querySelector(".mis-date-text");
+    if (document.activeElement === text) return;
+    text.value = misDmy(box.querySelector('input[type="date"]').value);
+    text.classList.remove("bad");
+  });
+}
 function misMe() { return $("#misDispatcher").value.trim() || (currentUser && currentUser.full_name) || ""; }
 
 // ── loading ──
@@ -66,6 +114,7 @@ async function misInit() {
     _mis.dashMonth = String(Number(today.slice(5, 7)));
     $("#misDashMonth").innerHTML = '<option value="">All months</option>' + MIS_MONTHS.map((month, i) => `<option value="${i + 1}">${month}</option>`).join("");
     $("#misFrom").value = $("#misTo").value = today;
+    [$("#misFrom"), $("#misTo")].forEach(misWrapDate);
     $("#misDispatcher").value = misStore("misDispatcher") || (currentUser && currentUser.full_name) || "";
     $("#misDispatcher").addEventListener("change", e => misStore("misDispatcher", e.target.value.trim()));
     $("#misRows").addEventListener("click", misRowClick);
@@ -157,7 +206,7 @@ function misDashLabel() {
 function misDashCards(d) {
   const perKm = d.total_kms ? "₹" + (d.trip_fare / d.total_kms).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "–";
   return [
-    ["lead", "Total trips", misCount(d.trips), `${misCount(d.closed)} closed · ${misCount(d.open)} open`],
+    ["lead", "Total trips", misCount(d.trips), `${misCount(d.closed)} closed · ${misCount(d.open)} open` + (d.pipeline ? ` (${misCount(d.pipeline)} in pipeline)` : "")],
     ["km", "Total kms", misCount(d.total_kms), d.closed ? `${misCount(d.total_kms / d.closed)} km per closed trip` : "No closed trips yet"],
     ["fare", "Fare", misMoney(d.trip_fare), "Trip Fare, before GST, MCD, parking and toll"],
     ["rate", "Fare per km", perKm, "Fare divided by total kms"],
@@ -216,6 +265,7 @@ function misRender() {
   _mis.selected = new Set([..._mis.selected].filter(id => shown.has(id)));
   const counts = { all: sum.trips, open: sum.open, closed: sum.closed, fix: sum.need_fixing, pipeline: sum.pipeline };
   $("#misRange").textContent = misRangeLabel();
+  misSyncDates($("#pane-eee-mis"));
   $("#misViews").innerHTML = MIS_VIEWS.map(([id, label]) => `<button class="mis-tab${_mis.view === id ? " active" : ""}${(id === "open" || id === "fix") && counts[id] ? " warn" : ""}" role="tab" aria-selected="${_mis.view === id}" onclick="misSetView('${id}')"><span>${label}</span><b>${misCount(counts[id])}</b></button>`).join("");
   $$("#misLayout .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.layout === _mis.layout));
   misRenderSummary();
@@ -517,6 +567,7 @@ function misDuration(v) {
 function misRecalc(form, base, changed = "") {
   const set = (key, value) => { const input = form.querySelector(`[data-m="${key}"]`); if (input) input.value = value; };
   const input = key => form.querySelector(`[data-m="${key}"]`);
+  misSyncDates(form);
   let v = { ...base, ...misFormValues(form) };
   const other = input("company_other");
   if (other) other.closest("label").style.display = v.company_name === "Others" ? "" : "none";
@@ -616,6 +667,7 @@ function misOpenForm(trip = null, mode = trip ? "edit" : "new", seed = null) {
     </form>`;
   document.body.appendChild(wrap);
   const form = wrap.querySelector("form"), err = wrap.querySelector("[data-err]");
+  form.querySelectorAll('input[type="date"]').forEach(misWrapDate);
   const close = () => wrap.remove();
   const fare = form.querySelector('[data-m="trip_fare"]');
   if (fare && !fare.value) fare.dataset.auto = "1";
@@ -625,6 +677,7 @@ function misOpenForm(trip = null, mode = trip ? "edit" : "new", seed = null) {
     // Close mode shows only the closing fields; the booking details ride along unchanged.
     const kept = Object.fromEntries([...MIS_SHEET.map(([key]) => key), "company_other"].map(key => [key, base[key] || ""]));
     const body = { ...(isNew ? {} : kept), ...misFormValues(form) };
+    if (form.querySelector(".mis-date-text.bad")) { err.textContent = "Type the date as DD/MM/YYYY, for example 05/11/2026."; return; }
     if (!body.date || !body.company_name) { err.textContent = "Date and Company Name are required."; return; }
     if (body.company_name === "Others" && !body.company_other) { err.textContent = "Type the client's name for Others."; return; }
     err.textContent = "";

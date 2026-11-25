@@ -371,3 +371,10 @@ def test_returning_guests_last_route_is_offered_for_the_next_booking(client, hea
                                          "drop_location": "Terminal 3", "drop_zone": "Airport"}
     assert read(guest="Guest", company="B2C") is None and read(guest="Guest One", company="EY") is None
     assert read(guest="Long Ago Guest") is None      # older than three months
+
+
+def test_dashboard_says_how_many_of_its_trips_are_pipeline_bookings(client, headers):
+    _book(client, headers, "2026-11-10")
+    client.post(ENDPOINT, json={"date": "2026-11-28", "company_name": "B2C"}, params={"pipeline": "true"}, headers=headers)
+    totals = client.get(f"{ENDPOINT}/dashboard", params={"year": 2026, "month": 11}, headers=headers).json()
+    assert (totals["trips"], totals["open"], totals["pipeline"]) == (2, 2, 1)

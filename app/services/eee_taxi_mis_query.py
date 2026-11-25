@@ -174,7 +174,10 @@ def last_route_of_guest(db: Session, guest: str, company: str, since: date) -> d
 
 
 def dashboard(db: Session, year: int | None, month: int | None) -> dict:
-    """Totals of one month, one year, one month across the years, or everything."""
+    """Totals of one month, one year, one month across the years, or everything.
+
+    Bookings still in the pipeline are open trips and are counted; ``pipeline`` says how many.
+    """
     conditions = []
     if year and month:
         conditions += [Trip.trip_date >= date(year, month, 1),
@@ -185,4 +188,5 @@ def dashboard(db: Session, year: int | None, month: int | None) -> dict:
         conditions.append(extract("month", Trip.trip_date) == month)
     first, last = db.query(func.min(Trip.trip_date), func.max(Trip.trip_date)).one()
     years = list(range(last.year, first.year - 1, -1)) if first else []
-    return {**_totals(db, conditions), "years": years}
+    in_pipeline = db.query(func.count(Trip.id)).filter(*conditions, Trip.in_pipeline.is_(True)).scalar()
+    return {**_totals(db, conditions), "pipeline": in_pipeline, "years": years}
