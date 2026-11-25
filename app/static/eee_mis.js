@@ -277,12 +277,15 @@ function misRender() {
   $("#misCount").textContent = (_mis.total ? `Showing ${misCount(first)} to ${misCount(first + trips.length - 1)} of ${misCount(_mis.total)} ${_mis.total === 1 ? "trip" : "trips"}` : "No trips to show") +
     (_mis.view === "pipeline" || !sum.trips ? "" : ` · all ${misCount(sum.trips)} in these dates ran ${misCount(sum.total_kms)} km`);
   const piped = _mis.view === "pipeline", desk = _mis.layout === "desk" || piped;
-  const oneDay = !piped && $("#misFrom").value && $("#misFrom").value === $("#misTo").value;
-  $("#misHead").innerHTML = `<th><input type="checkbox" id="misAll" aria-label="Select all trips on this page" onchange="misSelectAll(this.checked)"></th><th>Status</th>` +
-    (desk ? (oneDay ? "" : "<th>Date</th>") + "<th>Pick up</th><th>Client</th><th>Guest</th><th>Route</th><th>Driver and cab</th><th>Drop</th><th class='num'>Kms</th><th class='num'>Fare</th><th>Check</th><th class='mis-act'></th>"
-      : MIS_SHEET.map(([, label, kind]) => `<th${kind === "num" ? ' class="num"' : ""}>${rcEsc(label)}</th>`).join("") + "<th>Check</th>");
-  $("#misRows").innerHTML = trips.map(t => desk ? misDeskRow(t, oneDay) : misSheetRow(t)).join("") ||
-    `<tr><td colspan="${desk ? 13 : MIS_SHEET.length + 3}" class="mis-empty">${misEmptyText()}</td></tr>`;
+  const pick = `<th><input type="checkbox" id="misAll" aria-label="Select all trips on this page" onchange="misSelectAll(this.checked)"></th>`;
+  // Desk order asked for by the team: Sr no, date, time, driver, company, guest, pick-up, then the rest.
+  $("#misHead").innerHTML = `<th class="num">Sr</th>${pick}` +
+    (desk ? "<th>Date</th><th>Time</th><th>Driver name / ID</th><th>Company</th><th>Client name / contact</th><th>Pickup location</th><th>Drop location</th><th>Cab No</th><th>Status</th><th>Drop</th><th class='num'>Kms</th><th class='num'>Fare</th><th>Check</th><th class='mis-act'></th>"
+      : "<th>Status</th>" + MIS_SHEET.map(([, label, kind]) => `<th${kind === "num" ? ' class="num"' : ""}>${rcEsc(label)}</th>`).join("") + "<th>Check</th>");
+  // The serial number runs on across the pages: page 2 of 50-a-page starts at 51.
+  const firstSr = (_mis.page - 1) * _mis.pageSize + 1;
+  $("#misRows").innerHTML = trips.map((t, i) => desk ? misDeskRow(t, firstSr + i) : misSheetRow(t, firstSr + i)).join("") ||
+    `<tr><td colspan="${desk ? 16 : MIS_SHEET.length + 4}" class="mis-empty">${misEmptyText()}</td></tr>`;
   misRenderPager();
   misUpdateSelection();
 }
@@ -318,27 +321,29 @@ function misCheckCell(t) {
   const hired = t.hired ? '<span class="mis-zone" title="Cab and driver hired from outside; not checked against the masters">Hired</span> ' : "";
   return `<td>${hired}${t.issues.length ? t.issues.map(i => `<span class="mis-issue">${rcEsc(i)}</span>`).join("") : t.hired ? "" : '<span class="mis-ok">OK</span>'}</td>`;
 }
-function misPick(t) { return `<td><input type="checkbox" data-pick="${rcEsc(t.id)}" ${_mis.selected.has(t.id) ? "checked" : ""} aria-label="Select trip of ${rcEsc(t.guest_name || t.route_no)}"></td>`; }
-function misDeskRow(t, oneDay) {
-  const place = (address, zone) => `<span class="mis-place" title="${rcEsc(address)}">${rcEsc(address || "–")}</span>${zone ? `<span class="mis-zone">${rcEsc(zone)}</span>` : ""}`;
-  return `<tr data-id="${rcEsc(t.id)}" class="${t.issues.length ? "mis-flag" : ""}">${misPick(t)}${misStatusCell(t)}
-    ${oneDay ? "" : `<td>${rcEsc((_mis.view === "pipeline" && t.date === misIstToday() ? "Today, " : "") + misDay(t.date))}</td>`}<td class="mis-time">${rcEsc(t.pickup_time || "–")}</td>
+function misPick(t) { return `<td class="mis-pickcell"><input type="checkbox" data-pick="${rcEsc(t.id)}" ${_mis.selected.has(t.id) ? "checked" : ""} aria-label="Select trip of ${rcEsc(t.guest_name || t.route_no)}"></td>`; }
+function misDeskRow(t, sr) {
+  const place = (address, zone) => `<div class="mis-leg"><span class="mis-place" title="${rcEsc(address)}">${rcEsc(address || "–")}</span>${zone ? `<span class="mis-zone">${rcEsc(zone)}</span>` : ""}</div>`;
+  const today = _mis.view === "pipeline" && t.date === misIstToday() ? "Today, " : "";
+  return `<tr data-id="${rcEsc(t.id)}" class="${t.issues.length ? "mis-flag" : ""}"><td class="num mis-sr">${sr}</td>${misPick(t)}
+    <td>${rcEsc(today + misDay(t.date))}</td><td class="mis-time">${rcEsc(t.pickup_time || "–")}</td>
+    <td>${rcEsc(t.driver_name || "–")}<div class="meta">${rcEsc(t.driver_id || (t.hired ? "Hired" : ""))}</div></td>
     <td><b>${rcEsc(t.company_name)}</b>${t.company_other ? `<div class="meta">${rcEsc(t.company_other)}</div>` : ""}</td>
     <td><div class="cut" title="${rcEsc(t.guest_name)}">${rcEsc(t.guest_name || "–")}</div><div class="meta">${rcEsc(t.route_no)}</div></td>
-    <td><div class="mis-leg">${place(t.pickup_address, t.pickup_zone)}</div><div class="mis-leg to">${place(t.drop_location, t.drop_zone)}</div></td>
-    <td>${rcEsc(t.driver_name || "–")}<div class="meta">${rcEsc([t.cab_no, t.driver_id].filter(Boolean).join(" · "))}</div></td>
+    <td>${place(t.pickup_address, t.pickup_zone)}</td><td>${place(t.drop_location, t.drop_zone)}</td>
+    <td>${rcEsc(t.cab_no || "–")}</td>${misStatusCell(t)}
     <td class="mis-time">${rcEsc(t.drop_time)}<div class="meta">${rcEsc(t.trip_duration && t.drop_time ? t.trip_duration + " h" : "")}</div></td>
     <td class="num">${rcEsc(t.total_kms)}</td><td class="num">${t.trip_fare ? misMoney(misFare(t)) : ""}</td>${misCheckCell(t)}
     <td class="mis-act">${_mis.view === "pipeline" ? `<button class="btn secondary sm" data-unpipe="${rcEsc(t.id)}" title="The trip stays in the MIS">Remove from pipeline</button>`
       : t.status === "Open" ? `<button class="btn sm" data-close="${rcEsc(t.id)}">Close duty</button>` : ""}</td></tr>`;
 }
-function misSheetRow(t) {
+function misSheetRow(t, sr) {
   const cells = MIS_SHEET.map(([key, , kind]) => {
     const value = kind === "date" ? misDmy(t[key]) : t[key] || "";
     const cls = kind === "num" ? "num" : kind === "long" ? "cut" : "";
     return `<td class="${cls}"${kind === "long" ? ` title="${rcEsc(value)}"` : ""}>${rcEsc(value)}</td>`;
   }).join("");
-  return `<tr data-id="${rcEsc(t.id)}" class="${t.issues.length ? "mis-flag" : ""}">${misPick(t)}${misStatusCell(t)}${cells}${misCheckCell(t)}</tr>`;
+  return `<tr data-id="${rcEsc(t.id)}" class="${t.issues.length ? "mis-flag" : ""}"><td class="num mis-sr">${sr}</td>${misPick(t)}${misStatusCell(t)}${cells}${misCheckCell(t)}</tr>`;
 }
 function misSetView(view) { _mis.view = view; misRefilter(); }
 function misSetLayout(layout) { _mis.layout = layout; misSavePrefs(); misRender(); }
@@ -395,7 +400,7 @@ function misRowClick(event) {
     misUpdateSelection();
     return;
   }
-  if (event.target.closest("td:first-child")) return;
+  if (event.target.closest("td.mis-pickcell")) return;
   const unpipe = event.target.closest("[data-unpipe]");
   if (unpipe) { misSetPipeline([unpipe.dataset.unpipe], false); return; }
   const row = event.target.closest("tr[data-id]");
