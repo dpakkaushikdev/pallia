@@ -155,7 +155,7 @@ def test_pipeline_shows_the_same_trip_and_removing_it_keeps_the_trip(client, hea
     assert len(_trips(client, headers, date_from="2026-12-20", date_to="2026-12-20")) == 2   # both are in the MIS
     assert [t["guest_name"] for t in _trips(client, headers, view="pipeline", pipeline_from="2026-12-01")] == ["Guest One"]
 
-    client.put(f"{ENDPOINT}/{booked['id']}", json={**body, "driver_name": "TEST DRIVER"}, headers=headers)
+    client.put(f"{ENDPOINT}/{booked['id']}", json={**body, "driver_name": "TEST DRIVER", "driver_contact": "9000000001"}, headers=headers)
     assert _trips(client, headers, view="pipeline", pipeline_from="2026-12-01")[0]["driver_id"] == "EEED/VK/9001"   # one entry, two places
 
     removed = client.post(f"{ENDPOINT}/pipeline", json={"ids": [booked["id"]], "in_pipeline": False}, headers=headers)

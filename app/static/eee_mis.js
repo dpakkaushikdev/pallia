@@ -451,6 +451,37 @@ function misCopySelected() {
 }
 
 // ── client file uploads (MMT, MongoDB) and Excel download ──
+// Shown before an upload is taken: what the file would add, and which drivers and cabs would need fixing.
+function misConfirmUpload(fileName, check, kind) {
+  const changes = check.added + (check.updated || 0);
+  const table = (title, head, rows) => rows.length ? `<h4>${title}</h4><div class="mis-check"><table class="data-table"><thead><tr>${head.map(h => `<th>${h}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map(cells => `<tr>${cells.map((c, i) => `<td${i === cells.length - 1 ? ' class="num"' : ""}>${rcEsc(String(c))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : "";
+  const lines = [`<b>${misPlural(check.added, "new trip")}</b> will be added.`];
+  if (check.updated) lines.push(`${misPlural(check.updated, "open trip")} already in the MIS will be completed from the file.`);
+  if (check.skipped_existing) lines.push(`${check.skipped_existing} already in the MIS (same DS no/Route No) will be skipped, not added again.`);
+  if (check.errors.length) lines.push(`${misPlural(check.errors.length, kind === "mmt" ? "row" : "trip")} ${kind === "mmt" ? "cannot be read and will be left out" : "need a look"}: ${rcEsc(check.errors.slice(0, 3).join(" | "))}${check.errors.length > 3 ? " …" : ""}`);
+  const verdict = !changes ? "" : check.need_fixing
+    ? `<p class="mis-check-warn"><b>${check.need_fixing} of these ${changes === 1 ? "trip" : "trips"}</b> will go under Needs fixing: the driver or the cab does not match the masters.</p>`
+    : `<p class="mis-check-ok">Every driver and cab in these trips matches the masters.</p>`;
+  return new Promise(resolve => {
+    const wrap = document.createElement("div");
+    wrap.className = "modal-backdrop";
+    wrap.innerHTML = `<div class="modal mis-form" role="dialog" aria-modal="true" aria-labelledby="misCheckTitle">
+        <h3 id="misCheckTitle">Check before uploading</h3><p class="modal-sub">${rcEsc(fileName)}. Nothing has been added yet.</p>
+        <ul class="mis-check-list">${lines.map(line => `<li>${line}</li>`).join("")}</ul>${verdict}
+        ${table("Drivers to fix", ["Driver name in file", "Mobile in file", "Problem", "Trips"], check.fix_drivers.map(d => [d.name || "(blank)", d.mobile || "(blank)", d.problem, d.trips]))}
+        ${table("Cabs to fix", ["Cab No in file", "Problem", "Trips"], check.fix_cabs.map(c => [c.cab_no || "(blank)", c.problem, c.trips]))}
+        <div class="modal-actions"><button type="button" class="btn secondary" data-cancel>${changes ? "Cancel, add nothing" : "Close"}</button>
+          ${changes ? `<button type="button" class="btn" data-ok>Upload ${misPlural(changes, "trip")}</button>` : ""}</div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const done = answer => { wrap.remove(); resolve(answer); };
+    wrap.querySelector("[data-cancel]").onclick = () => done(false);
+    if (changes) wrap.querySelector("[data-ok]").onclick = () => done(true);
+    wrap.addEventListener("keydown", event => { if (event.key === "Escape") done(false); });
+    (wrap.querySelector("[data-ok]") || wrap.querySelector("[data-cancel]")).focus();
+  });
+}
 async function misUpload(input, kind = "mmt") {
   const [endpoint, buttonSel, buttonText, client] = MIS_UPLOADS[kind];
   const file = input.files[0];
@@ -459,14 +490,21 @@ async function misUpload(input, kind = "mmt") {
   const dispatcher = $("#misDispatcher").value.trim();
   if (!dispatcher) { misMessage("Enter your name in the Dispatcher box, then upload the file again."); $("#misDispatcher").focus(); return; }
   misStore("misDispatcher", dispatcher);
-  const form = new FormData();
-  form.append("file", file);
-  form.append("dispatcher_name", dispatcher);
+  const send = dryRun => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("dispatcher_name", dispatcher);
+    form.append("dry_run", dryRun ? "true" : "false");
+    return api("/api/eee-taxi/mis" + endpoint, { method: "POST", body: form });
+  };
   const button = $(buttonSel);
   button.disabled = true;
-  button.textContent = "Uploading…";
+  button.textContent = "Checking…";
   try {
-    const result = await api("/api/eee-taxi/mis" + endpoint, { method: "POST", body: form });
+    // First a check that saves nothing; the trips go in only after the user has seen what needs fixing.
+    if (!await misConfirmUpload(file.name, await send(true), kind)) { misMessage("Upload cancelled. Nothing was added.", true); return; }
+    button.textContent = "Uploading…";
+    const result = await send(false);
     // Move the filters so the uploaded trips are on screen.
     if (result.first_date && (!$("#misFrom").value || result.first_date < $("#misFrom").value)) $("#misFrom").value = result.first_date;
     if (result.last_date && $("#misTo").value && result.last_date > $("#misTo").value) $("#misTo").value = result.last_date;
@@ -477,7 +515,7 @@ async function misUpload(input, kind = "mmt") {
     if (result.updated) parts.push(`${misPlural(result.updated, "open trip")} already in the MIS ${result.updated === 1 ? "was" : "were"} completed from the file.`);
     if (result.skipped_existing) parts.push(`${result.skipped_existing} already in the MIS were skipped.`);
     if (result.still_open) parts.push(`${result.still_open} came in Open with no fare because nobody had boarded; upload the report again after the shift to complete them.`);
-    if (result.need_fixing) parts.push(`${result.need_fixing} need fixing: driver or cab is not in the masters.`);
+    if (result.need_fixing) parts.push(`${result.need_fixing} are under Needs fixing: driver or cab does not match the masters.`);
     if (result.errors.length) parts.push(`${misPlural(result.errors.length, kind === "mmt" ? "row" : "trip")} ${kind === "mmt" ? "could not be read" : "need a look"}: ${result.errors.slice(0, 5).join(" | ")}${result.errors.length > 5 ? " …" : ""}`);
     misMessage(parts.join(" "), !result.errors.length);
   } catch (error) { misMessage("Upload failed: " + error.message); }
@@ -514,16 +552,28 @@ function misFindByName(drivers, name) {
 }
 // A Driver ID without case or punctuation; "N/A" counts as no ID.
 function misIdKey(id) { const key = (id || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); return key === "NA" ? "" : key; }
-// The Driver ID (Truein ID) decides when there is one; phone and name stand in only when there is none.
+function misHasPhone(driver, phone) { return phone.length === 10 && [driver.mobile, driver.alternate_mobile].some(m => misDigits(m) === phone); }
+// "Faisal" fits "FAISAL KHAN"; a different name, or one too short to tell, does not.
+function misNameFits(typed, driver) {
+  const key = misNameKey(typed), full = misNameKey(driver.name);
+  return !!key && (key === full || (key.length >= 4 && full.startsWith(key)));
+}
+// Same rule as the server: the Driver ID (Truein ID) decides when there is one; without one,
+// the mobile and the name must both be the same master driver's.
 function misFindDriver(values) {
   const drivers = (_mis.lookups && _mis.lookups.drivers) || [];
   const id = misIdKey(values.driver_id), phone = misDigits(values.driver_contact);
   if (id) return drivers.find(d => misIdKey(d.truein_id) === id) || null;
-  // A phone only one driver has names that driver; a shared phone needs the name to say which.
-  const owners = phone.length === 10 ? drivers.filter(d => misDigits(d.mobile) === phone) : [];
-  if (owners.length === 1) return owners[0];
-  const sameName = owners.filter(d => misNameKey(d.name) && misNameKey(d.name) === misNameKey(values.driver_name));
-  return sameName.length === 1 ? sameName[0] : misFindByName(drivers, values.driver_name);
+  const fits = drivers.filter(d => misHasPhone(d, phone) && misNameFits(values.driver_name, d));
+  return fits.length === 1 ? fits[0] : null;
+}
+// While typing in the form one field is enough to look a driver up; the ID it fills in then decides.
+function misGuessDriver(key, typed) {
+  const drivers = (_mis.lookups && _mis.lookups.drivers) || [];
+  if (!typed) return null;
+  if (key === "driver_id") return drivers.find(d => misIdKey(d.truein_id) && misIdKey(d.truein_id) === misIdKey(typed)) || null;
+  if (key === "driver_contact") { const owners = drivers.filter(d => misHasPhone(d, misDigits(typed))); return owners.length === 1 ? owners[0] : null; }
+  return misFindByName(drivers, typed);
 }
 
 // ── trip form: new booking, full edit, or close duty ──
@@ -609,7 +659,7 @@ function misRecalc(form, base, changed = "") {
   } else if (_mis.lookups && input("driver_name")) {
     const driver = misFindDriver(v);
     if (!v.driver_id && !v.driver_name && !v.driver_contact) misHint(form, "driver_name", "");
-    else if (!driver) misHint(form, "driver_name", misIdKey(v.driver_id) ? "This Driver ID is not in the driver master" : "Not in the driver master", false);
+    else if (!driver) misHint(form, "driver_name", misIdKey(v.driver_id) ? "This Driver ID is not in the driver master" : "Name and mobile must both match one driver in the master", false);
     else misHint(form, "driver_name", driver.status === "Deactive" ? "Deactive in the driver master" : "In the driver master", driver.status !== "Deactive");
     const plate = v.cab_no.toUpperCase().replace(/[^A-Z0-9]/g, "");
     misHint(form, "cab_no", !plate ? "" : _mis.lookups.cabs.includes(plate) ? "In the vehicle master" : "Not in the vehicle master", _mis.lookups.cabs.includes(plate));
@@ -626,7 +676,7 @@ function misFillDriver(form, changedKey) {
   if (values.hired === "Yes") return;
   const drivers = (_mis.lookups && _mis.lookups.drivers) || [];
   const picked = changedKey === "driver_name" && drivers.find(d => misDriverLabel(d) === values.driver_name);
-  const driver = picked || (values[changedKey] && misFindDriver({ driver_id: "", driver_name: "", driver_contact: "", [changedKey]: values[changedKey] }));
+  const driver = picked || misGuessDriver(changedKey, values[changedKey]);
   const contact = form.querySelector('[data-m="driver_contact"]');
   // A name the master does not know cannot keep the ID and phone of whoever was chosen before it.
   if (!driver && changedKey === "driver_name") {

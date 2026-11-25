@@ -16,7 +16,7 @@ from app.api.eee_taxi_rates import check_edit_password
 from app.services.auth import require_permission
 from app.services.eee_taxi_drivers import get_driver_rows
 from app.services.eee_taxi_mis import (
-    STATUSES, MasterIndex, MisTrip, copy_for_date, find_duplicate, list_trips, parse_trip, stamp_closer,
+    STATUSES, FixList, MasterIndex, MisTrip, copy_for_date, find_duplicate, list_trips, parse_trip, stamp_closer,
     store_trip, trip_response,
 )
 from app.services.eee_taxi_mis_excel import build_mis_workbook, parse_mmt_export
@@ -140,7 +140,8 @@ def read_summary(group: Literal["company_name", "date", "dispatcher_name", "driv
 def lookups(_: User = Depends(_eee_user), db: Session = Depends(get_db)):
     """Choices for the trip form: drivers, cabs and companies."""
     return {
-        "drivers": [{"name": d.name, "truein_id": d.truein_id, "mobile": d.mobile, "status": d.status}
+        "drivers": [{"name": d.name, "truein_id": d.truein_id, "mobile": d.mobile,
+                     "alternate_mobile": d.alternate_mobile, "status": d.status}
                     for d in get_driver_rows(db)],
         "cabs": sorted(row.vehicle_no for row in get_vehicle_rows(db)),
         "companies": list(all_companies()), "statuses": list(STATUSES), "zones": list(ZONES),
@@ -267,8 +268,12 @@ def copy(body: TripCopy, user: User = Depends(_eee_user), db: Session = Depends(
 
 @router.post("/upload-mmt")
 def upload_mmt(file: UploadFile = File(...), dispatcher_name: str = Form("", max_length=120),
-               user: User = Depends(_eee_user), db: Session = Depends(get_db)):
-    """Add every trip in an MMT Trip Report; trips already in the MIS are left as they are."""
+               dry_run: bool = Form(False), user: User = Depends(_eee_user), db: Session = Depends(get_db)):
+    """Add every trip in an MMT Trip Report; trips already in the MIS are left as they are.
+
+    ``dry_run`` reads the file and reports what would happen, with the drivers and
+    cabs that would need fixing, and adds nothing.
+    """
     data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "MMT file must be smaller than 5 MB.")
@@ -279,7 +284,7 @@ def upload_mmt(file: UploadFile = File(...), dispatcher_name: str = Form("", max
     existing = {route for (route,) in db.query(EeeTaxiMisTrip.route_no)
                 .filter(EeeTaxiMisTrip.company_name == "MMT", EeeTaxiMisTrip.route_no.isnot(None))}
     index = MasterIndex.build(db)
-    added, skipped, need_fixing = [], 0, 0
+    added, skipped, fixes = [], 0, FixList(index)
     for trip in trips:
         if trip.route_no and trip.route_no in existing:
             skipped += 1
@@ -288,19 +293,21 @@ def upload_mmt(file: UploadFile = File(...), dispatcher_name: str = Form("", max
         db.add(store_trip(EeeTaxiMisTrip(source="mmt_upload", created_by=user.email), trip, user.email))
         existing.add(trip.route_no)
         added.append(trip.date)
-        need_fixing += bool(index.issues(trip))
-    db.commit()
-    return {"added": len(added), "skipped_existing": skipped, "need_fixing": need_fixing, "errors": errors,
+        fixes.note(trip)
+    db.rollback() if dry_run else db.commit()
+    return {"added": len(added), "skipped_existing": skipped, "errors": errors, "dry_run": dry_run, **fixes.report(),
             "first_date": min(added, default=None), "last_date": max(added, default=None)}
 
 
 @router.post("/upload-mongodb")
 def upload_mongodb(file: UploadFile = File(...), dispatcher_name: str = Form("", max_length=120),
-                   user: User = Depends(_eee_user), db: Session = Depends(get_db)):
+                   dry_run: bool = Form(False), user: User = Depends(_eee_user), db: Session = Depends(get_db)):
     """Add the trips of a MongoDB raw data report, one per Trip ID.
 
     A trip already in the MIS is left alone, unless it is still open and the
-    report now closes it (an evening trip uploaded before it ran).
+    report now closes it (an evening trip uploaded before it ran). ``dry_run``
+    reports what would happen, with the drivers and cabs that would need fixing,
+    and changes nothing.
     """
     data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
@@ -314,7 +321,7 @@ def upload_mongodb(file: UploadFile = File(...), dispatcher_name: str = Form("",
                 .filter(EeeTaxiMisTrip.company_name == MONGODB,
                         EeeTaxiMisTrip.route_no.in_([trip.route_no for trip in trips]))}
     index = MasterIndex.build(db)
-    dates, added, updated, skipped, still_open, need_fixing = [], 0, 0, 0, 0, 0
+    dates, added, updated, skipped, still_open, fixes = [], 0, 0, 0, 0, FixList(index)
     for trip in trips:
         row = existing.get(trip.route_no)
         if row is None:
@@ -332,8 +339,8 @@ def upload_mongodb(file: UploadFile = File(...), dispatcher_name: str = Form("",
             continue
         dates.append(trip.date)
         still_open += trip.status == "Open"
-        need_fixing += bool(index.issues(trip))
-    db.commit()
+        fixes.note(trip)
+    db.rollback() if dry_run else db.commit()
     return {"added": added, "updated": updated, "skipped_existing": skipped, "still_open": still_open,
-            "need_fixing": need_fixing, "errors": messages,
+            "errors": messages, "dry_run": dry_run, **fixes.report(),
             "first_date": min(dates, default=None), "last_date": max(dates, default=None)}

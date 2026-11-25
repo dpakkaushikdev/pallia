@@ -87,8 +87,8 @@ def test_mis_requires_login(client):
 def test_upload_maps_mmt_columns_and_fills_driver_from_master(client, headers):
     result = _upload(client, headers, [_mmt_row("NC1")])
     assert result.status_code == 200, result.text
-    assert result.json() == {"added": 1, "skipped_existing": 0, "need_fixing": 0, "errors": [],
-                             "first_date": "2026-11-02", "last_date": "2026-11-02"}
+    assert result.json() == {"added": 1, "skipped_existing": 0, "need_fixing": 0, "errors": [], "dry_run": False,
+                             "fix_drivers": [], "fix_cabs": [], "first_date": "2026-11-02", "last_date": "2026-11-02"}
     trip = client.get(ENDPOINT, headers=headers).json()["trips"][0]
     assert trip["date"] == "2026-11-02" and trip["route_no"] == "NC1" and trip["company_name"] == "MMT"
     assert trip["pickup_time"] == "06:15"          # scheduled, not actual start
@@ -116,22 +116,22 @@ def test_unknown_driver_and_cab_are_flagged_not_blocked(client, headers):
     assert body["summary"]["need_fixing"] == 1
 
 
-def test_driver_with_changed_phone_is_matched_by_unique_name(client, headers):
+def test_driver_whose_phone_is_not_the_masters_goes_under_needs_fixing(client, headers):
     _upload(client, headers, [_mmt_row("NC1", phone="+918000000000")])
     trip = client.get(ENDPOINT, headers=headers).json()["trips"][0]
-    assert trip["driver_id"] == "EEED/VK/9001" and trip["driver_contact"] == "9000000001" and trip["issues"] == []
+    assert trip["driver_id"] == "" and trip["driver_contact"] == "8000000000"       # the name alone is not enough
+    assert trip["issues"] == ["Driver TEST DRIVER is in the master with a different mobile"]
 
 
 @pytest.mark.parametrize("mmt_name, found", [
     ("test  driver.", True),   # spacing, case and dots ignored
-    ("Test", True),            # the only master name starting with it
+    ("Test", True),            # the master name starts with it
     ("Tes", False),            # too short to trust
     ("Other Person", False),
 ])
-def test_driver_id_from_name_when_phone_unknown(mmt_name, found):
-    index = MasterIndex(by_name={"testdriver": DriverRow(**DRIVER)},
-                        all_names=[("testdriver", DriverRow(**DRIVER))])
-    trip = index.fill(MisTrip(date="2026-11-02", company_name="MMT", driver_name=mmt_name, driver_contact="8000000000"))
+def test_uploaded_driver_needs_the_masters_mobile_and_a_fitting_name(mmt_name, found):
+    index = _index(DRIVER)
+    trip = index.fill(MisTrip(date="2026-11-02", company_name="MMT", driver_name=mmt_name, driver_contact="9000000001"))
     assert (trip.driver_id == "EEED/VK/9001") is found
 
 
@@ -313,10 +313,10 @@ def test_trips_come_one_page_at_a_time_latest_first(client, headers):
 
 
 def test_tab_counts_cover_the_dates_and_each_tab_lists_only_its_trips(client, headers):
-    done = {"drop_time": "10:00", "total_kms": "20", "trip_fare": "500", "driver_name": "TEST DRIVER", "cab_no": "HR55ZZ0001"}
+    done = {"drop_time": "10:00", "total_kms": "20", "trip_fare": "500", "driver_id": "EEED/VK/9001", "cab_no": "HR55ZZ0001"}
     _book(client, headers, "2026-11-10", guest_name="Closed Guest", **done)
-    _book(client, headers, "2026-11-10", guest_name="Open Guest", driver_name="TEST DRIVER", cab_no="HR55ZZ0001")
-    _book(client, headers, "2026-11-10", guest_name="Stranger Guest", **{**done, "driver_name": "Nobody Known", "cab_no": "DL01AA0001"})
+    _book(client, headers, "2026-11-10", guest_name="Open Guest", driver_id="EEED/VK/9001", cab_no="HR55ZZ0001")
+    _book(client, headers, "2026-11-10", guest_name="Stranger Guest", **{**done, "driver_id": "", "driver_name": "Nobody Known", "cab_no": "DL01AA0001"})
     _book(client, headers, "2026-11-12", guest_name="Other Day", **done)
     day = {"date_from": "2026-11-10", "date_to": "2026-11-10"}
     body = client.get(ENDPOINT, params={**day, "view": "fix"}, headers=headers).json()
@@ -387,9 +387,12 @@ def test_driver_id_decides_the_match_and_name_only_stands_in_when_there_is_no_id
     assert index.issues(trip(driver_id="EEED/VK/9002", driver_name="Other Driver")) == [
         "Driver ID EEED/VK/9002 not in driver master (OTHER DRIVER is EEED/TP/9002 there)"]
     assert index.issues(trip(driver_id="EEED/VK/7777", driver_name="Nobody")) == ["Driver ID EEED/VK/7777 not in driver master"]
-    assert index.issues(trip(driver_id="N/A", driver_name="Test Driver")) == []                     # no ID: the name stands in
+    no_id = {"driver_id": "N/A", "driver_name": "Test Driver"}                                      # "N/A" is no ID
+    assert index.issues(trip(**no_id, driver_contact="9000000001")) == []                           # name and mobile both his
+    assert index.issues(trip(**no_id)) == ["Driver TEST DRIVER is in the master, but the trip has no mobile to confirm it"]
     assert index.issues(trip(driver_id="#N/A")) == ["Driver missing"]
-    assert index.fill(trip(driver_contact="9000000002")).driver_id == "EEED/TP/9002"                # uploads get their ID filled
+    assert index.fill(trip(driver_name="Other", driver_contact="9000000002")).driver_id == "EEED/TP/9002"   # uploads get their ID
+    assert index.fill(trip(driver_contact="9000000002")).driver_id == ""                            # a mobile with no name is not enough
 
 
 def test_outside_cab_and_driver_are_not_checked_against_the_masters(client, headers):
@@ -434,6 +437,22 @@ def test_phone_shared_by_two_drivers_does_not_pick_the_wrong_one():
     trip = lambda **values: MisTrip(date="2026-11-02", company_name="MongoDB", cab_no="HR55ZZ0001", **values)   # noqa: E731
     assert index.fill(trip(driver_name="Shares Phone", driver_contact="9000000001")).driver_id == "EEED/VK/9002"
     assert index.fill(trip(driver_name="Test Driver", driver_contact="9000000001")).driver_id == "EEED/VK/9001"
-    assert index.issues(trip(driver_name="Third Person", driver_contact="9000000001")) == ["Driver not in driver master"]
-    alone = _index(DRIVER)
-    assert alone.fill(trip(driver_name="Nickname", driver_contact="9000000001")).driver_name == "TEST DRIVER"   # the only owner
+    assert index.issues(trip(driver_name="Third Person", driver_contact="9000000001")) == [
+        "Driver mobile is TEST DRIVER's in the master, but the name is Third Person"]
+    assert index.issues(trip(driver_name="Nobody At All", driver_contact="9555555555")) == ["Driver not in driver master"]
+
+
+def test_upload_check_lists_drivers_and_cabs_to_fix_and_adds_nothing(client, headers):
+    rows = [_mmt_row("NC1"), _mmt_row("NC2", phone="+918000000000"), _mmt_row("NC3", phone="+918000000000"),
+            dict(_mmt_row("NC4", plate="DL01AA0001"), **{"Driver Name": "New Person", "Driver Phone": "+917000000000"})]
+    files = {"file": ("mmt.xlsx", _mmt_file(rows), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    check = client.post(f"{ENDPOINT}/upload-mmt", files=files, data={"dispatcher_name": "Desk One", "dry_run": "true"}, headers=headers).json()
+    assert (check["dry_run"], check["added"], check["need_fixing"]) == (True, 4, 3)
+    assert check["fix_drivers"] == [
+        {"name": "Test Driver", "mobile": "8000000000", "problem": "Driver TEST DRIVER is in the master with a different mobile", "trips": 2},
+        {"name": "New Person", "mobile": "7000000000", "problem": "Driver not in driver master", "trips": 1}]
+    assert check["fix_cabs"] == [{"cab_no": "DL01AA0001", "problem": "Cab DL01AA0001 not in vehicle master", "trips": 1}]
+    assert client.get(ENDPOINT, headers=headers).json()["summary"]["trips"] == 0          # the check saved nothing
+    assert _upload(client, headers, rows).json()["added"] == 4
+    again = client.post(f"{ENDPOINT}/upload-mmt", files=files, data={"dispatcher_name": "Desk One", "dry_run": "true"}, headers=headers).json()
+    assert (again["added"], again["skipped_existing"], again["need_fixing"]) == (0, 4, 0)   # a DS no is never added twice

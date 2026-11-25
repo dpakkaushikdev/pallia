@@ -8,6 +8,7 @@ mismatch is reported with the trip instead of blocking the save.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -250,6 +251,7 @@ def normalize_phone(value: str) -> str:
 
 
 MIN_NAME_PREFIX = 4
+MAX_FIX_ROWS = 200
 
 
 class Crew(NamedTuple):
@@ -264,6 +266,12 @@ class Crew(NamedTuple):
 def name_key(name: str) -> str:
     """'Umakant  Dwivedi.' and 'UMAKANTDWIVEDI' compare equal."""
     return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
+def name_fits(typed: str, driver: DriverRow) -> bool:
+    """'Faisal' fits 'FAISAL KHAN'; a different name, or one too short to tell, does not."""
+    key, full = name_key(typed), name_key(driver.name)
+    return bool(key) and (key == full or (len(key) >= MIN_NAME_PREFIX and full.startswith(key)))
 
 
 def id_key(value: str) -> str:
@@ -325,18 +333,33 @@ class MasterIndex:
         return starts[0] if len(starts) == 1 else None
 
     def find_driver(self, trip: MisTrip | Crew) -> DriverRow | None:
-        """The Driver ID (Truein ID) decides when the trip has one; phone and name stand in only when it has none."""
-        key = id_key(trip.driver_id)
-        return self.by_truein.get(key) if key else self._by_phone_or_name(trip)
+        """The Driver ID (Truein ID) decides when the trip has one.
 
-    def _by_phone_or_name(self, trip: MisTrip | Crew) -> DriverRow | None:
-        """A phone only one driver has names that driver; a shared phone needs the name to say which."""
+        Without one (an uploaded file has none), the mobile and the name must both
+        be the same master driver's; either alone is not enough.
+        """
+        key = id_key(trip.driver_id)
+        if key:
+            return self.by_truein.get(key)
+        fits = [driver for driver in self.by_phone.get(trip.driver_contact, []) if name_fits(trip.driver_name, driver)]
+        return fits[0] if len(fits) == 1 else None
+
+    def _likely(self, trip: MisTrip | Crew) -> DriverRow | None:
+        """Who the master probably means, named in the message on a trip that did not match."""
         owners = self.by_phone.get(trip.driver_contact, [])
-        if len(owners) == 1:
-            return owners[0]
-        key = name_key(trip.driver_name)
-        same_name = [driver for driver in owners if key and name_key(driver.name) == key]
-        return same_name[0] if len(same_name) == 1 else self.find_by_name(trip.driver_name)
+        return owners[0] if len(owners) == 1 else self.find_by_name(trip.driver_name)
+
+    def _half_match(self, trip: MisTrip | Crew) -> str:
+        """Why a driver with no ID did not match, so the name or the mobile can be put right."""
+        owners = self.by_phone.get(trip.driver_contact, [])
+        named = self.find_by_name(trip.driver_name)
+        if owners:
+            return f"Driver mobile is {owners[0].name}'s in the master, but the name is {trip.driver_name or 'missing'}"
+        if named and trip.driver_contact:
+            return f"Driver {named.name} is in the master with a different mobile"
+        if named:
+            return f"Driver {named.name} is in the master, but the trip has no mobile to confirm it"
+        return "Driver not in driver master"
 
     def fill(self, trip: MisTrip) -> MisTrip:
         """Copy the matched driver's Truein ID, master name and mobile onto the trip."""
@@ -360,11 +383,11 @@ class MasterIndex:
         driver = self.find_driver(trip)
         if driver is None and typed_id:
             # Say who the master thinks this is, so the wrong side (trip or master) can be corrected.
-            known = self._by_phone_or_name(trip)
+            known = self._likely(trip)
             hint = f" ({known.name} is {known.truein_id or 'without a Truein ID'} there)" if known else ""
             return f"Driver ID {trip.driver_id} not in driver master{hint}"
         if driver is None:
-            return "Driver not in driver master"
+            return self._half_match(trip)
         return "Driver is Deactive in the master" if driver.status == "Deactive" else ""
 
     def cab_issue(self, trip: MisTrip | Crew) -> str:
@@ -374,6 +397,32 @@ class MasterIndex:
 
     def issues(self, trip: MisTrip | Crew) -> list[str]:
         return [problem for problem in (self.driver_issue(trip), self.cab_issue(trip)) if problem]
+
+
+@dataclass
+class FixList:
+    """What an upload would leave under Needs fixing: each driver and cab the masters do not know, with its trips."""
+    index: MasterIndex
+    trips: int = 0
+    drivers: Counter = field(default_factory=Counter)
+    cabs: Counter = field(default_factory=Counter)
+
+    def note(self, trip: MisTrip) -> None:
+        driver, cab = self.index.driver_issue(trip), self.index.cab_issue(trip)
+        if driver:
+            self.drivers[(trip.driver_name, trip.driver_contact, driver)] += 1
+        if cab:
+            self.cabs[(trip.cab_no, cab)] += 1
+        self.trips += bool(driver or cab)
+
+    def report(self) -> dict:
+        return {
+            "need_fixing": self.trips,
+            "fix_drivers": [{"name": name, "mobile": mobile, "problem": problem, "trips": count}
+                            for (name, mobile, problem), count in self.drivers.most_common(MAX_FIX_ROWS)],
+            "fix_cabs": [{"cab_no": cab, "problem": problem, "trips": count}
+                         for (cab, problem), count in self.cabs.most_common(MAX_FIX_ROWS)],
+        }
 
 
 def trip_response(row: EeeTaxiMisTrip, index: MasterIndex) -> dict:
