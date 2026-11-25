@@ -258,6 +258,12 @@ def name_key(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (name or "").lower())
 
 
+def id_key(value: str) -> str:
+    """A Driver ID / Truein ID without case or punctuation ('eeed/vk-0044' = 'EEED/VK/0044'); 'N/A' is no ID."""
+    key = re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+    return "" if key == "NA" else key
+
+
 def trip_duration(start_date: str, start_time: str, end_date: str, end_time: str) -> str:
     """'HH:MM' from pick-up to drop; a drop before pick-up with no end date means next day."""
     if not (start_date and start_time and end_time):
@@ -286,8 +292,8 @@ class MasterIndex:
         index = cls(plates={row.vehicle_no for row in get_vehicle_rows(db)})
         names: dict[str, list[DriverRow]] = {}
         for driver in get_driver_rows(db):
-            if driver.truein_id:
-                index.by_truein[driver.truein_id.upper()] = driver
+            if id_key(driver.truein_id):
+                index.by_truein[id_key(driver.truein_id)] = driver
             for phone in (driver.mobile, driver.alternate_mobile):
                 if normalize_phone(phone):
                     index.by_phone.setdefault(normalize_phone(phone), driver)
@@ -310,9 +316,12 @@ class MasterIndex:
         return starts[0] if len(starts) == 1 else None
 
     def find_driver(self, trip: MisTrip | Crew) -> DriverRow | None:
-        return (self.by_truein.get(trip.driver_id.upper())
-                or self.by_phone.get(trip.driver_contact)
-                or self.find_by_name(trip.driver_name))
+        """The Driver ID (Truein ID) decides when the trip has one; phone and name stand in only when it has none."""
+        key = id_key(trip.driver_id)
+        return self.by_truein.get(key) if key else self._by_phone_or_name(trip)
+
+    def _by_phone_or_name(self, trip: MisTrip | Crew) -> DriverRow | None:
+        return self.by_phone.get(trip.driver_contact) or self.find_by_name(trip.driver_name)
 
     def fill(self, trip: MisTrip) -> MisTrip:
         """Copy the matched driver's Truein ID, master name and mobile onto the trip."""
@@ -326,9 +335,15 @@ class MasterIndex:
         })
 
     def driver_issue(self, trip: MisTrip | Crew) -> str:
-        if not (trip.driver_id or trip.driver_name or trip.driver_contact):
+        typed_id = id_key(trip.driver_id)
+        if not (typed_id or trip.driver_name or trip.driver_contact):
             return "Driver missing"
         driver = self.find_driver(trip)
+        if driver is None and typed_id:
+            # Say who the master thinks this is, so the wrong side (trip or master) can be corrected.
+            known = self._by_phone_or_name(trip)
+            hint = f" ({known.name} is {known.truein_id or 'without a Truein ID'} there)" if known else ""
+            return f"Driver ID {trip.driver_id} not in driver master{hint}"
         if driver is None:
             return "Driver not in driver master"
         return "Driver is Deactive in the master" if driver.status == "Deactive" else ""

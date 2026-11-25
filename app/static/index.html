@@ -595,6 +595,8 @@
     .mis-pick select {height:42px;min-width:160px;width:auto;font-size:14.5px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--text);}
     .mis-cards {display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;}
     .mis-cards.loading b {opacity:.35;}
+    .mis-cards.mst-cards {grid-template-columns:repeat(auto-fit,minmax(190px,1fr));margin:0 0 16px;}
+    .mst-cards .mis-card b {font-size:30px;}
     .mis-card {position:relative;padding:18px 16px 16px 21px;border:1px solid var(--border);border-radius:12px;background:var(--panel);overflow:hidden;}
     .mis-card::before {content:"";position:absolute;inset:0 auto 0 0;width:5px;background:var(--tone);}
     .mis-card span {display:block;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
@@ -1679,6 +1681,7 @@
         </div>
         <p class="meta">Motor Vehicle No. uses Vehicle Number Plate followed by Make in brackets in both the PDF and Tally export. Replacing the master applies to newly generated PDFs and new XML exports. Existing PDF downloads keep their saved content.</p>
         <div id="vmMsg" class="hidden" style="margin-bottom:12px;" aria-live="polite"></div>
+        <div class="mis-cards mst-cards" id="vmCards" role="status" aria-label="Vehicle master totals"></div>
         <div class="card" style="overflow:auto;">
           <div class="ed-filters" style="margin:0 0 12px;">
             <label>Search<input type="search" id="vmSearch" placeholder="Search registration or make" oninput="vmRender()"></label>
@@ -1702,6 +1705,7 @@
         </div>
         <p class="meta">EEE-Taxi drivers with their Truein ID and contact details. Unlock with the masters password to add, edit or delete a driver, then save.</p>
         <div id="dmMsg" class="hidden" style="margin-bottom:12px;" aria-live="polite"></div>
+        <div class="mis-cards mst-cards" id="dmCards" role="status" aria-label="Driver master totals"></div>
         <div class="card" style="overflow:auto;">
           <div class="ed-filters" style="margin:0 0 12px;">
             <label>Search<input type="search" id="dmSearch" placeholder="Search name, Truein ID or mobile" oninput="dmRender()"></label>
@@ -1922,7 +1926,7 @@
   </div>
 </div>
 <script src="/static/eee_documents.js"></script>
-<script src="/static/eee_mis.js?v=20261126-2"></script>
+<script src="/static/eee_mis.js?v=20261126-3"></script>
 <script src="/static/pallia_verification.js?v=20261013-2"></script>
 
 <script>
@@ -5455,6 +5459,15 @@ function vmRender() {
     const actions = _vm.editing ? mstRowActions("vm", index) : "";
     return `<tr>${Object.keys(VM_FIELDS).map(key => `<td>${rcEsc(row[key] || "")}</td>`).join("")}${actions}</tr>`;
   }).join("") || `<tr><td colspan="${Object.keys(VM_FIELDS).length + 1}" class="meta">No matching vehicles.</td></tr>`;
+  const count = test => _vm.rows.filter(test).length, free = count(v => v.availability === "Available");
+  const pollution = mstExpiry(_vm.rows, "pollution_expiry");
+  mstCards("#vmCards", [
+    ["lead", "Total vehicles", _vm.rows.length, `${free} available · ${_vm.rows.length - free} not available`],
+    ["fare", "Available", free, "Marked Available in the master"],
+    ["billed", "Not available", _vm.rows.length - free, "Any other availability"],
+    ["rate", "Makes", new Set(_vm.rows.map(v => v.make)).size, mstBreakdown(_vm.rows, "make")],
+    ["avg", "Pollution certificate expired", pollution.expired, `${pollution.due} more expire within 30 days · ${pollution.none} with no date`],
+  ]);
   $("#vmActionsTh").classList.toggle("hidden", !_vm.editing);
   $("#vmAdd").classList.toggle("hidden", !_vm.editing);
   $("#vmEdit").classList.toggle("hidden", _vm.editing);
@@ -5498,19 +5511,20 @@ async function vmImport() {
   finally { button.disabled = false; $("#vmCsv").value = ""; }
 }
 const VM_FIELDS = { vehicle_no: "Vehicle registration", make: "Make", pollution_expiry: "Pollution expiry (DD/MM/YYYY)", registration_date: "Registration date (DD/MM/YYYY)", chassis_no: "Chassis number", engine_no: "Engine number" };
+const VM_SECTIONS = [["Vehicle", ["vehicle_no", "make", "registration_date", "pollution_expiry"]], ["Identification", ["chassis_no", "engine_no"]]];
 function vmEditRow(index) {
   mstRowForm("Edit vehicle", VM_FIELDS, _vm.rows[index], values => {
     if (!values.vehicle_no || !values.make) throw new Error("Vehicle registration and make are required.");
     _vm.rows[index] = { ..._vm.rows[index], ...values };
     vmRender(); vmMessage("Vehicle updated. Click Save vehicle master to keep the change.", true);
-  });
+  }, {}, VM_SECTIONS);
 }
 function vmAddRow() {
   mstRowForm("Add vehicle", VM_FIELDS, {}, values => {
     if (!values.vehicle_no || !values.make) throw new Error("Vehicle registration and make are required.");
     _vm.rows.unshift(values);
     vmRender(); vmMessage("Vehicle added. Click Save vehicle master to keep the change.", true);
-  });
+  }, {}, VM_SECTIONS);
 }
 function vmDeleteRow(index) {
   mstConfirmDelete(`Delete vehicle ${_vm.rows[index].vehicle_no}?`, () => {
@@ -5542,10 +5556,48 @@ function mstFillFilter(selector, rows, key) {
 function mstRowActions(prefix, index) {
   return `<td style="white-space:nowrap;"><button class="btn secondary sm" onclick="${prefix}EditRow(${index})">Edit</button> <button class="btn secondary sm" onclick="${prefix}DeleteRow(${index})">Delete</button></td>`;
 }
-function mstRowForm(title, fields, row, onSave, choices = {}) {
-  rcModal({ title, okText: "Done",
-    fields: Object.entries(fields).map(([id, label]) => ({ id, label, type: "text", value: row[id] || "", options: choices[id] })),
-    onOk: values => { Object.keys(values).forEach(k => { values[k] = values[k].trim(); }); onSave(values); } });
+// One row's form: a wide dialog with the fields side by side under headings, so nothing needs scrolling.
+function mstRowForm(title, fields, row, onSave, choices = {}, sections = [["Details", Object.keys(fields)]]) {
+  const control = id => choices[id]
+    ? `<select data-f="${id}">${choices[id].map(o => `<option${o === row[id] ? " selected" : ""}>${rcEsc(o)}</option>`).join("")}</select>`
+    : `<input type="text" data-f="${id}" value="${rcEsc(row[id] || "")}" autocomplete="off">`;
+  const wrap = document.createElement("div");
+  wrap.className = "modal-backdrop";
+  wrap.innerHTML = `<form class="modal mis-form" role="dialog" aria-modal="true" aria-labelledby="mstFormTitle" novalidate>
+      <h3 id="mstFormTitle">${rcEsc(title)}</h3>
+      ${sections.map(([heading, ids]) => `<fieldset><legend>${rcEsc(heading)}</legend><div class="mis-grid">${ids.map(id => `<label>${rcEsc(fields[id])}${control(id)}</label>`).join("")}</div></fieldset>`).join("")}
+      <div class="text-err" data-err style="min-height:18px;margin-top:10px;" aria-live="assertive"></div>
+      <div class="modal-actions"><button type="button" class="btn secondary" data-cancel>Cancel</button><button type="submit" class="btn">Done</button></div>
+    </form>`;
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.querySelector("[data-cancel]").onclick = close;
+  wrap.querySelector("form").addEventListener("submit", event => {
+    event.preventDefault();
+    const values = Object.fromEntries([...wrap.querySelectorAll("[data-f]")].map(input => [input.dataset.f, input.value.trim()]));
+    try { onSave(values); close(); } catch (error) { wrap.querySelector("[data-err]").textContent = error.message; }
+  });
+  wrap.addEventListener("keydown", event => { if (event.key === "Escape") close(); });
+  wrap.querySelector("[data-f]").focus();
+}
+// Totals shown above a master's table: [tone, label, value, note] per card.
+function mstCards(selector, cards) {
+  $(selector).innerHTML = cards.map(([tone, label, value, note]) => `<div class="mis-card ${tone}"><span>${rcEsc(label)}</span><b>${rcEsc(String(value))}</b><small>${rcEsc(note)}</small></div>`).join("");
+}
+// "Ad-hoc 164 · ETS 65 · not set 79": how the rows split on one column, largest first.
+function mstBreakdown(rows, key) {
+  const counts = new Map();
+  rows.forEach(row => { const name = (row[key] || "").trim() || "not set"; counts.set(name, (counts.get(name) || 0) + 1); });
+  return [...counts].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, n]) => `${name} ${n}`).join(" · ");
+}
+// A DD/MM/YYYY column counted against today: already expired, due within 30 days, or no date.
+function mstExpiry(rows, key) {
+  const today = misIstToday(), soon = misShift(today, 30), found = { expired: 0, due: 0, none: 0 };
+  rows.forEach(row => {
+    const iso = misParseDmy(row[key] || "");
+    if (!iso) found.none += 1; else if (iso < today) found.expired += 1; else if (iso <= soon) found.due += 1;
+  });
+  return found;
 }
 function mstConfirmDelete(title, onDelete) {
   rcModal({ title, sub: "The row is removed when you save the master.", okText: "Delete", onOk: () => onDelete() });
@@ -5569,6 +5621,16 @@ function dmRender() {
     if (Object.entries(filters).some(([key, value]) => value && (row[key] || "").trim() !== value)) return "";
     return `<tr>${DM_COLUMNS.map(key => `<td>${rcEsc(row[key] || "")}</td>`).join("")}${_dm.editing ? mstRowActions("dm", index) : ""}</tr>`;
   }).join("") || `<tr><td colspan="${DM_COLUMNS.length + 1}" class="meta">${_dm.rows.length ? "No matching drivers." : "No drivers."}</td></tr>`;
+  const active = _dm.rows.filter(d => d.status !== "Deactive"), licence = mstExpiry(active, "dl_expiry");
+  const free = active.filter(d => d.availability === "Available").length;
+  mstCards("#dmCards", [
+    ["lead", "Total drivers", _dm.rows.length, `${active.length} active · ${_dm.rows.length - active.length} deactive`],
+    ["fare", "Active drivers", active.length, `${free} available · ${active.length - free} not available`],
+    ["billed", "Deactive drivers", _dm.rows.length - active.length, "Kept in the master, flagged if used on a trip"],
+    ["rate", "Active without Truein ID", active.filter(d => !d.truein_id).length, "The MIS cannot match these by Driver ID"],
+    ["avg", "Licence expired", licence.expired, `Active drivers · ${licence.due} more expire within 30 days`],
+    ["km", "Departments", new Set(active.map(d => d.department || "")).size, mstBreakdown(active, "department")],
+  ]);
   $("#dmEdit").classList.toggle("hidden", _dm.editing);
   ["#dmAdd", "#dmCancel", "#dmSave"].forEach(id => $(id).classList.toggle("hidden", !_dm.editing));
 }
@@ -5592,19 +5654,25 @@ function dmCancel() {
   dmRender();
   dmMessage("Changes discarded.", true);
 }
+const DM_SECTIONS = [
+  ["Personal details", ["name", "father_name", "mobile", "alternate_mobile", "email"]],
+  ["Work details", ["truein_id", "status", "availability", "branch", "department", "date_of_joining"]],
+  ["Licence", ["dl_expiry"]],
+  ["Emergency contact", ["emergency_contact_name", "emergency_contact_number", "emergency_contact_relationship"]],
+];
 function dmEditRow(index) {
   mstRowForm("Edit driver", DM_FIELDS, _dm.rows[index], values => {
     if (!values.name) throw new Error("Name is required.");
     _dm.rows[index] = { ..._dm.rows[index], ...values };
     dmRender(); dmMessage("Driver updated. Click Save driver master to keep the change.", true);
-  }, DM_CHOICES);
+  }, DM_CHOICES, DM_SECTIONS);
 }
 function dmAddRow() {
   mstRowForm("Add driver", DM_FIELDS, {}, values => {
     if (!values.name) throw new Error("Name is required.");
     _dm.rows.unshift({ driver_id: "", ...values });
     dmRender(); dmMessage("Driver added. Click Save driver master to keep the change.", true);
-  }, DM_CHOICES);
+  }, DM_CHOICES, DM_SECTIONS);
 }
 function dmDeleteRow(index) {
   mstConfirmDelete(`Delete driver ${_dm.rows[index].name}?`, () => {

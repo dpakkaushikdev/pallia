@@ -378,3 +378,28 @@ def test_dashboard_says_how_many_of_its_trips_are_pipeline_bookings(client, head
     client.post(ENDPOINT, json={"date": "2026-11-28", "company_name": "B2C"}, params={"pipeline": "true"}, headers=headers)
     totals = client.get(f"{ENDPOINT}/dashboard", params={"year": 2026, "month": 11}, headers=headers).json()
     assert (totals["trips"], totals["open"], totals["pipeline"]) == (2, 2, 1)
+
+
+def _index(*drivers):
+    index = MasterIndex(plates={"HR55ZZ0001"})
+    for driver in drivers:
+        row = DriverRow(**driver)
+        index.by_truein[row.truein_id.replace("/", "")] = row
+        index.by_phone[row.mobile] = row
+        index.by_name[row.name.lower().replace(" ", "")] = row
+        index.all_names.append((row.name.lower().replace(" ", ""), row))
+    return index
+
+
+def test_driver_id_decides_the_match_and_name_only_stands_in_when_there_is_no_id():
+    other = {"driver_id": "d2", "name": "OTHER DRIVER", "truein_id": "EEED/TP/9002", "mobile": "9000000002"}
+    index = _index(DRIVER, other)
+    trip = lambda **values: MisTrip(date="2026-11-02", company_name="EY", cab_no="HR55ZZ0001", **values)   # noqa: E731
+    assert index.issues(trip(driver_id="eeed-vk 9001", driver_name="Somebody Else")) == []          # ID wins, punctuation ignored
+    assert index.find_driver(trip(driver_id="EEED/TP/9002", driver_name="Test Driver")).name == "OTHER DRIVER"
+    assert index.issues(trip(driver_id="EEED/VK/9002", driver_name="Other Driver")) == [
+        "Driver ID EEED/VK/9002 not in driver master (OTHER DRIVER is EEED/TP/9002 there)"]
+    assert index.issues(trip(driver_id="EEED/VK/7777", driver_name="Nobody")) == ["Driver ID EEED/VK/7777 not in driver master"]
+    assert index.issues(trip(driver_id="N/A", driver_name="Test Driver")) == []                     # no ID: the name stands in
+    assert index.issues(trip(driver_id="#N/A")) == ["Driver missing"]
+    assert index.fill(trip(driver_contact="9000000002")).driver_id == "EEED/TP/9002"                # uploads get their ID filled

@@ -502,7 +502,7 @@ async function misExport() {
   finally { button.disabled = false; }
 }
 
-// ── master matching (same order as the server: Truein ID, phone, then name) ──
+// ── master matching (same rule as the server) ──
 function misNameKey(name) { return (name || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
 function misFindByName(drivers, name) {
   const key = misNameKey(name);
@@ -512,12 +512,14 @@ function misFindByName(drivers, name) {
   const starts = key.length >= 4 ? drivers.filter(d => misNameKey(d.name).startsWith(key)) : [];
   return starts.length === 1 ? starts[0] : null;
 }
+// A Driver ID without case or punctuation; "N/A" counts as no ID.
+function misIdKey(id) { const key = (id || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); return key === "NA" ? "" : key; }
+// The Driver ID (Truein ID) decides when there is one; phone and name stand in only when there is none.
 function misFindDriver(values) {
   const drivers = (_mis.lookups && _mis.lookups.drivers) || [];
-  const id = (values.driver_id || "").toUpperCase(), phone = misDigits(values.driver_contact);
-  return (id && drivers.find(d => d.truein_id && d.truein_id.toUpperCase() === id))
-    || (phone.length === 10 && drivers.find(d => misDigits(d.mobile) === phone))
-    || misFindByName(drivers, values.driver_name);
+  const id = misIdKey(values.driver_id), phone = misDigits(values.driver_contact);
+  if (id) return drivers.find(d => misIdKey(d.truein_id) === id) || null;
+  return (phone.length === 10 && drivers.find(d => misDigits(d.mobile) === phone)) || misFindByName(drivers, values.driver_name);
 }
 
 // ── trip form: new booking, full edit, or close duty ──
@@ -596,7 +598,7 @@ function misRecalc(form, base, changed = "") {
   if (_mis.lookups && input("driver_name")) {
     const driver = misFindDriver(v);
     if (!v.driver_id && !v.driver_name && !v.driver_contact) misHint(form, "driver_name", "");
-    else if (!driver) misHint(form, "driver_name", "Not in the driver master", false);
+    else if (!driver) misHint(form, "driver_name", misIdKey(v.driver_id) ? "This Driver ID is not in the driver master" : "Not in the driver master", false);
     else misHint(form, "driver_name", driver.status === "Deactive" ? "Deactive in the driver master" : "In the driver master", driver.status !== "Deactive");
     const plate = v.cab_no.toUpperCase().replace(/[^A-Z0-9]/g, "");
     misHint(form, "cab_no", !plate ? "" : _mis.lookups.cabs.includes(plate) ? "In the vehicle master" : "Not in the vehicle master", _mis.lookups.cabs.includes(plate));
