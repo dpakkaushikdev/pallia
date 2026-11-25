@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
@@ -21,6 +21,9 @@ from app.services.eee_taxi_mis import (
 )
 from app.services.eee_taxi_mis_excel import build_mis_workbook, parse_mmt_export
 from app.services.eee_taxi_mis_mongodb import COMPANY as MONGODB, merge_file_values, parse_mongodb_report
+from app.services.eee_taxi_mis_query import (
+    TripFilter, dashboard, grouped, ist_today, last_route_of_guest, list_page, view_total,
+)
 from app.services.eee_taxi_mis_zones import (
     OTHERS, ZONES, all_companies, canonical_company, new_company_name, set_added_companies,
 )
@@ -37,6 +40,10 @@ def _load_clients(db: Session = Depends(get_db)) -> None:
 
 router = APIRouter(prefix="/api/eee-taxi/mis", tags=["eee-taxi"], dependencies=[Depends(_load_clients)])
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+PAGE_SIZE = 50
+MAX_PAGE_SIZE = 200
+GUEST_LOOKBACK_DAYS = 90
+View = Literal["all", "open", "closed", "fix", "pipeline"]
 
 
 class TripIds(BaseModel):
@@ -78,9 +85,8 @@ def _client(company: str) -> str:
     return canonical_company(company) or company.strip()
 
 
-def _filtered(db: Session, date_from: date | None, date_to: date | None, company: str, q: str, status: str = "",
-              pipeline: bool = False):
-    rows, truncated = list_trips(db, date_from, date_to, _client(company), pipeline)
+def _filtered(db: Session, date_from: date | None, date_to: date | None, company: str, q: str, status: str = ""):
+    rows, truncated = list_trips(db, date_from, date_to, _client(company))
     index = MasterIndex.build(db)
     trips = [trip_response(row, index) for row in rows]
     query = q.strip().lower()
@@ -91,29 +97,54 @@ def _closer(user: User) -> str:
     return user.full_name or user.email
 
 
-def _amount(trips: list[dict], key: str) -> float:
-    return round(sum(float(t[key]) for t in trips if t.get(key)), 2)
-
-
 def _already_entered(conflict: EeeTaxiMisTrip) -> HTTPException:
     return HTTPException(409, f"This trip is already in the MIS: {conflict.company_name} route "
                               f"{conflict.route_no} on {conflict.trip_date:%d/%m/%Y}.")
 
 
+def _chosen(date_from: date | None = None, date_to: date | None = None,
+            company: str = Query("", max_length=32), q: str = Query("", max_length=120),
+            view: View = "all", pipeline_from: date | None = None) -> TripFilter:
+    return TripFilter(date_from, date_to, _client(company), q, view, pipeline_from)
+
+
 @router.get("")
-def read(date_from: date | None = None, date_to: date | None = None,
-         company: str = Query("", max_length=32), q: str = Query("", max_length=120),
-         status: Literal["", "Open", "Closed"] = "", pipeline: bool = False,
+def read(chosen: TripFilter = Depends(_chosen), page: int = Query(1, ge=1, le=100000),
+         page_size: int = Query(PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
          _: User = Depends(_eee_user), db: Session = Depends(get_db)):
-    """Trips of a date range; ``pipeline`` lists only the trips marked for the Pipeline view."""
-    trips, truncated = _filtered(db, date_from, date_to, company, q, status, pipeline)
-    return {
-        "trips": trips, "truncated": truncated,
-        "summary": {"trips": len(trips), "open": sum(1 for t in trips if t["status"] == "Open"),
-                    "trip_fare": _amount(trips, "trip_fare"),
-                    "total_kms": _amount(trips, "total_kms"),
-                    "need_fixing": sum(1 for t in trips if t["issues"])},
-    }
+    """One page of a tab (All, Open, Closed, Needs fixing, Pipeline).
+
+    ``summary`` counts every tab for the dates, client and search chosen, so the
+    page can show them without reading the trips. The Pipeline tab ignores the
+    dates: it lists marked trips from today (``pipeline_from``) onward, soonest first.
+    """
+    index = MasterIndex.build(db)
+    rows, summary = list_page(db, index, chosen, page, page_size)
+    return {"trips": [trip_response(row, index) for row in rows], "page": page, "page_size": page_size,
+            "total": view_total(summary, chosen.view), "summary": summary}
+
+
+@router.get("/dashboard")
+def read_dashboard(year: int | None = Query(None, ge=2000, le=2100), month: int | None = Query(None, ge=1, le=12),
+                   _: User = Depends(_eee_user), db: Session = Depends(get_db)):
+    """Trips, kms and fare of a month, a year or everything; ``years`` lists the years that have trips."""
+    return dashboard(db, year, month)
+
+
+@router.get("/summary")
+def read_summary(group: Literal["company_name", "date", "dispatcher_name", "driver_name", "cab_no", "pickup_zone"],
+                 chosen: TripFilter = Depends(_chosen),
+                 _: User = Depends(_eee_user), db: Session = Depends(get_db)):
+    """The chosen tab's trips added up by client, date, dispatcher, driver, cab or pickup zone."""
+    return {"groups": grouped(db, MasterIndex.build(db), chosen, group)}
+
+
+@router.get("/guest-route")
+def guest_route(guest: str = Query(min_length=1, max_length=500), company: str = Query("", max_length=32),
+                _: User = Depends(_eee_user), db: Session = Depends(get_db)):
+    """The route of this guest's latest trip in the last three months (``route`` is null for a new guest)."""
+    since = ist_today() - timedelta(days=GUEST_LOOKBACK_DAYS)
+    return {"route": last_route_of_guest(db, guest, _client(company), since)}
 
 
 @router.get("/lookups")

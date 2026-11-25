@@ -179,15 +179,15 @@ def test_dispatcher_opens_and_closer_closes_a_manual_trip(client, headers):
     opened = client.post(ENDPOINT, json={"date": "2026-11-03", "company_name": "amazon", "guest_name": "Guest A",
                                          "dispatcher_name": "Desk One"}, headers=headers).json()
     assert opened["company_name"] == "Amazon" and opened["status"] == "Open" and opened["duty_closed_by"] == ""
-    assert [t["id"] for t in client.get(ENDPOINT, params={"status": "Open"}, headers=headers).json()["trips"]] == [opened["id"]]
-    assert client.get(ENDPOINT, params={"status": "Closed"}, headers=headers).json()["trips"] == []
+    assert [t["id"] for t in client.get(ENDPOINT, params={"view": "open"}, headers=headers).json()["trips"]] == [opened["id"]]
+    assert client.get(ENDPOINT, params={"view": "closed"}, headers=headers).json()["trips"] == []
     fields = {k: v for k, v in opened.items() if k in MisTrip.model_fields}
     half = client.put(f"{ENDPOINT}/{opened['id']}", json=dict(fields, trip_fare="900"), headers=headers).json()
     assert half["status"] == "Open" and half["duty_closed_by"] == ""
     closed = client.put(f"{ENDPOINT}/{opened['id']}", json=dict(fields, trip_fare="900", drop_time="10:30",
                                                                 total_kms="18"), headers=headers).json()
     assert closed["status"] == "Closed" and closed["duty_closed_by"] == "mis@test.com"
-    body = client.get(ENDPOINT, params={"company": "AMAZON", "status": "Closed"}, headers=headers).json()
+    body = client.get(ENDPOINT, params={"company": "AMAZON", "view": "closed"}, headers=headers).json()
     assert len(body["trips"]) == 1 and body["summary"]["open"] == 0
 
 
@@ -293,3 +293,81 @@ def test_trip_duration(args, expected):
 def test_invalid_values_are_rejected(field, value):
     with pytest.raises(ValueError):
         MisTrip(**{"date": "2026-11-02", "company_name": "MMT", field: value})
+
+
+def _book(client, headers, day, **values):
+    body = {"date": day, "company_name": "B2C", "pickup_time": "09:00", **values}
+    return client.post(ENDPOINT, json=body, headers=headers).json()
+
+
+def test_trips_come_one_page_at_a_time_latest_first(client, headers):
+    for hour in range(5):
+        _book(client, headers, "2026-11-10", pickup_time=f"0{hour}:00", guest_name=f"Guest {hour}")
+    first = client.get(ENDPOINT, params={"page_size": 2}, headers=headers).json()
+    assert (first["total"], first["page"], first["summary"]["trips"]) == (5, 1, 5)
+    assert [t["pickup_time"] for t in first["trips"]] == ["04:00", "03:00"]
+    last = client.get(ENDPOINT, params={"page_size": 2, "page": 3}, headers=headers).json()
+    assert [t["pickup_time"] for t in last["trips"]] == ["00:00"]
+    assert client.get(ENDPOINT, params={"page_size": 2, "page": 9}, headers=headers).json()["trips"] == []
+    assert client.get(ENDPOINT, params={"page_size": 500}, headers=headers).status_code == 422
+
+
+def test_tab_counts_cover_the_dates_and_each_tab_lists_only_its_trips(client, headers):
+    done = {"drop_time": "10:00", "total_kms": "20", "trip_fare": "500", "driver_name": "TEST DRIVER", "cab_no": "HR55ZZ0001"}
+    _book(client, headers, "2026-11-10", guest_name="Closed Guest", **done)
+    _book(client, headers, "2026-11-10", guest_name="Open Guest", driver_name="TEST DRIVER", cab_no="HR55ZZ0001")
+    _book(client, headers, "2026-11-10", guest_name="Stranger Guest", **{**done, "driver_name": "Nobody Known", "cab_no": "DL01AA0001"})
+    _book(client, headers, "2026-11-12", guest_name="Other Day", **done)
+    day = {"date_from": "2026-11-10", "date_to": "2026-11-10"}
+    body = client.get(ENDPOINT, params={**day, "view": "fix"}, headers=headers).json()
+    assert [t["guest_name"] for t in body["trips"]] == ["Stranger Guest"] and body["total"] == 1
+    summary = body["summary"]
+    assert (summary["trips"], summary["open"], summary["closed"], summary["need_fixing"]) == (3, 1, 2, 1)
+    assert (summary["total_kms"], summary["trip_fare"], summary["total_trip_fare"]) == (40, 1000, 1000)
+    opened = client.get(ENDPOINT, params={**day, "view": "open"}, headers=headers).json()
+    assert [t["guest_name"] for t in opened["trips"]] == ["Open Guest"] and opened["total"] == 1
+    assert client.get(ENDPOINT, params={**day, "view": "closed"}, headers=headers).json()["total"] == 2
+    found = client.get(ENDPOINT, params={"q": "stranger"}, headers=headers).json()
+    assert found["total"] == 1 and found["summary"]["need_fixing"] == 1
+    assert client.get(ENDPOINT, params={"q": "100%"}, headers=headers).json()["total"] == 0
+
+
+def test_summary_adds_up_the_chosen_tab_by_client_or_date(client, headers):
+    done = {"drop_time": "10:00", "total_kms": "20", "trip_fare": "500", "toll": "50"}
+    _book(client, headers, "2026-11-10", **done)
+    _book(client, headers, "2026-11-10", company_name="EY")
+    _book(client, headers, "2026-11-11", **done)
+    groups = client.get(f"{ENDPOINT}/summary", params={"group": "company_name"}, headers=headers).json()["groups"]
+    assert groups == [{"name": "B2C", "trips": 2, "open": 0, "total_kms": 40, "total_trip_fare": 1100},
+                      {"name": "EY", "trips": 1, "open": 1, "total_kms": 0, "total_trip_fare": 0}]
+    days = client.get(f"{ENDPOINT}/summary", params={"group": "date", "view": "closed"}, headers=headers).json()["groups"]
+    assert [(g["name"], g["trips"]) for g in days] == [("2026-11-10", 1), ("2026-11-11", 1)]
+    assert client.get(f"{ENDPOINT}/summary", params={"group": "remarks"}, headers=headers).status_code == 422
+
+
+def test_dashboard_totals_follow_the_year_and_month_chosen(client, headers):
+    done = {"drop_time": "10:00", "total_kms": "25", "trip_fare": "1000", "gst": "50"}
+    _book(client, headers, "2026-01-05", **done)
+    _book(client, headers, "2026-01-20")
+    _book(client, headers, "2026-12-31", **done)
+    _book(client, headers, "2025-01-09", **done)
+    read = lambda **params: client.get(f"{ENDPOINT}/dashboard", params=params, headers=headers).json()   # noqa: E731
+    everything = read()
+    assert (everything["trips"], everything["closed"], everything["open"], everything["years"]) == (4, 3, 1, [2026, 2025])
+    assert (everything["total_kms"], everything["trip_fare"], everything["total_trip_fare"]) == (75, 3000, 3150)
+    assert (read(year=2026)["trips"], read(year=2026, month=1)["trips"], read(year=2026, month=12)["trips"]) == (3, 2, 1)
+    assert read(month=1)["trips"] == 3 and read(year=2024)["trips"] == 0      # every January; a year with no trips
+    assert client.get(f"{ENDPOINT}/dashboard", params={"month": 13}, headers=headers).status_code == 422
+
+
+def test_returning_guests_last_route_is_offered_for_the_next_booking(client, headers):
+    from app.services.eee_taxi_mis_query import ist_today
+    today = ist_today().isoformat()
+    _book(client, headers, today, guest_name="Guest One", pickup_address="Old Office", drop_location="Terminal 1", pickup_time="08:00")
+    _book(client, headers, today, guest_name="Guest One", pickup_address="New Office", drop_location="Terminal 3", pickup_time="18:00")
+    _book(client, headers, "2025-01-05", guest_name="Long Ago Guest", pickup_address="Somewhere")
+    read = lambda **params: client.get(f"{ENDPOINT}/guest-route", params=params, headers=headers).json()["route"]   # noqa: E731
+    assert read(guest=" guest one ") == {"company_name": "B2C", "pickup_address": "New Office", "pickup_zone": "",
+                                         "drop_location": "Terminal 3", "drop_zone": "Airport"}
+    assert read(guest="Guest", company="B2C") is None and read(guest="Guest One", company="EY") is None
+    assert read(guest="Long Ago Guest") is None      # older than three months

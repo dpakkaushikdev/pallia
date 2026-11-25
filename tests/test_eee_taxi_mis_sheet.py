@@ -98,5 +98,5 @@ def test_pipeline_lists_trips_from_a_given_day_onward(client, headers):
     for day in ("2026-12-03", "2026-12-01", "2026-12-02"):
         client.post(ENDPOINT, json={"date": day, "company_name": "B2C", "pickup_time": "09:00"},
                     params={"pipeline": "true"}, headers=headers)
-    listed = client.get(ENDPOINT, headers=headers, params={"pipeline": "true", "date_from": "2026-12-02"}).json()["trips"]
-    assert sorted(t["date"] for t in listed) == ["2026-12-02", "2026-12-03"]
+    listed = client.get(ENDPOINT, headers=headers, params={"view": "pipeline", "pipeline_from": "2026-12-02"}).json()["trips"]
+    assert [t["date"] for t in listed] == ["2026-12-02", "2026-12-03"]      # soonest first

@@ -153,14 +153,14 @@ def test_pipeline_shows_the_same_trip_and_removing_it_keeps_the_trip(client, hea
     client.post(ENDPOINT, json={**body, "guest_name": "Guest Two"}, headers=headers)
     assert booked["in_pipeline"] is True and booked["status"] == "Open"
     assert len(_trips(client, headers, date_from="2026-12-20", date_to="2026-12-20")) == 2   # both are in the MIS
-    assert [t["guest_name"] for t in _trips(client, headers, pipeline="true")] == ["Guest One"]
+    assert [t["guest_name"] for t in _trips(client, headers, view="pipeline", pipeline_from="2026-12-01")] == ["Guest One"]
 
     client.put(f"{ENDPOINT}/{booked['id']}", json={**body, "driver_name": "TEST DRIVER"}, headers=headers)
-    assert _trips(client, headers, pipeline="true")[0]["driver_id"] == "EEED/VK/9001"   # one entry, two places
+    assert _trips(client, headers, view="pipeline", pipeline_from="2026-12-01")[0]["driver_id"] == "EEED/VK/9001"   # one entry, two places
 
     removed = client.post(f"{ENDPOINT}/pipeline", json={"ids": [booked["id"]], "in_pipeline": False}, headers=headers)
     assert removed.json() == {"changed": 1}
-    assert _trips(client, headers, pipeline="true") == []
+    assert _trips(client, headers, view="pipeline", pipeline_from="2026-12-01") == []
     assert len(_trips(client, headers, date_from="2026-12-20", date_to="2026-12-20")) == 2
 
 
@@ -171,7 +171,7 @@ def test_closing_a_trip_takes_it_out_of_the_pipeline(client, headers):
                         json={**body, "drop_time": "11:00", "total_kms": "12", "trip_fare": "500"}).json()
     assert closed["status"] == "Closed" and closed["in_pipeline"] is False
     again = client.post(f"{ENDPOINT}/pipeline", json={"ids": [booked["id"]], "in_pipeline": True}, headers=headers)
-    assert again.json() == {"changed": 0} and _trips(client, headers, pipeline="true") == []
+    assert again.json() == {"changed": 0} and _trips(client, headers, view="pipeline", pipeline_from="2026-12-01") == []
 
 
 def test_boarded_trip_without_a_billing_zone_is_reported(client, headers):

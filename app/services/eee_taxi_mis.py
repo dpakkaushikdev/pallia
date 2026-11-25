@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Annotated
+from typing import Annotated, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from sqlalchemy.orm import Session
@@ -245,6 +245,14 @@ def normalize_phone(value: str) -> str:
 MIN_NAME_PREFIX = 4
 
 
+class Crew(NamedTuple):
+    """The driver and cab of a trip: all that the check against the masters reads."""
+    driver_id: str
+    driver_name: str
+    driver_contact: str
+    cab_no: str
+
+
 def name_key(name: str) -> str:
     """'Umakant  Dwivedi.' and 'UMAKANTDWIVEDI' compare equal."""
     return re.sub(r"[^a-z0-9]", "", (name or "").lower())
@@ -301,7 +309,7 @@ class MasterIndex:
         starts = [driver for other, driver in self.all_names if other.startswith(key)]
         return starts[0] if len(starts) == 1 else None
 
-    def find_driver(self, trip: MisTrip) -> DriverRow | None:
+    def find_driver(self, trip: MisTrip | Crew) -> DriverRow | None:
         return (self.by_truein.get(trip.driver_id.upper())
                 or self.by_phone.get(trip.driver_contact)
                 or self.find_by_name(trip.driver_name))
@@ -317,20 +325,21 @@ class MasterIndex:
             "driver_contact": normalize_phone(driver.mobile) or trip.driver_contact,
         })
 
-    def issues(self, trip: MisTrip) -> list[str]:
-        problems = []
-        driver = self.find_driver(trip)
+    def driver_issue(self, trip: MisTrip | Crew) -> str:
         if not (trip.driver_id or trip.driver_name or trip.driver_contact):
-            problems.append("Driver missing")
-        elif driver is None:
-            problems.append("Driver not in driver master")
-        elif driver.status == "Deactive":
-            problems.append("Driver is Deactive in the master")
+            return "Driver missing"
+        driver = self.find_driver(trip)
+        if driver is None:
+            return "Driver not in driver master"
+        return "Driver is Deactive in the master" if driver.status == "Deactive" else ""
+
+    def cab_issue(self, trip: MisTrip | Crew) -> str:
         if not trip.cab_no:
-            problems.append("Cab No missing")
-        elif trip.cab_no not in self.plates:
-            problems.append(f"Cab {trip.cab_no} not in vehicle master")
-        return problems
+            return "Cab No missing"
+        return "" if trip.cab_no in self.plates else f"Cab {trip.cab_no} not in vehicle master"
+
+    def issues(self, trip: MisTrip | Crew) -> list[str]:
+        return [problem for problem in (self.driver_issue(trip), self.cab_issue(trip)) if problem]
 
 
 def trip_response(row: EeeTaxiMisTrip, index: MasterIndex) -> dict:
@@ -391,10 +400,9 @@ def store_trip(row: EeeTaxiMisTrip, trip: MisTrip, editor: str) -> EeeTaxiMisTri
 
 
 def list_trips(db: Session, date_from: date | None, date_to: date | None,
-               company: str = "", pipeline_only: bool = False) -> tuple[list[EeeTaxiMisTrip], bool]:
+               company: str = "") -> tuple[list[EeeTaxiMisTrip], bool]:
+    """Every trip of a date range, for the Excel download. The page itself reads ``eee_taxi_mis_query``."""
     query = db.query(EeeTaxiMisTrip)
-    if pipeline_only:
-        query = query.filter(EeeTaxiMisTrip.in_pipeline.is_(True))
     if date_from:
         query = query.filter(EeeTaxiMisTrip.trip_date >= date_from)
     if date_to:

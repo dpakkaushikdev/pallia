@@ -21,10 +21,13 @@ const MIS_TOTAL_PARTS = ["trip_fare", "gst", "mcd", "parking", "toll"];
 const MIS_DISPATCH_KEYS = MIS_SECTIONS.filter(s => s[0] === "dispatch").flatMap(s => s[2].map(f => f[0]));
 // Kept for "Save & add another": the next booking is usually the same day and client.
 const MIS_KEEP = ["date", "company_name", "dispatcher_name", "drop_location", "drop_zone"];
-const MIS_PAGE = 250;
+const MIS_PAGE_SIZES = [50, 100, 200];
+const MIS_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const MIS_SEARCH_DELAY = 350;
 
-let _mis = { trips: [], pipeline: [], lookups: null, selected: new Set(), truncated: false, started: false,
-  view: "all", layout: "desk", summary: false, groupBy: "company_name", limit: MIS_PAGE };
+// trips is one page of the chosen tab; sum is the counts and totals of the dates on screen.
+let _mis = { trips: [], total: 0, sum: {}, groups: [], lookups: null, selected: new Set(), started: false,
+  view: "all", layout: "desk", summary: false, groupBy: "company_name", page: 1, pageSize: MIS_PAGE_SIZES[0], dashYear: "", dashMonth: "" };
 
 // ── small helpers ──
 function misMessage(text, ok = false) {
@@ -37,6 +40,7 @@ function misShift(iso, days) { const d = new Date(iso + "T00:00:00Z"); d.setUTCD
 function misDmy(iso) { return iso ? iso.split("-").reverse().join("/") : ""; }
 function misDay(iso) { return iso ? new Date(iso + "T00:00:00Z").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" }) : ""; }
 function misNum(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
+function misCount(n) { return Math.round(misNum(n)).toLocaleString("en-IN"); }
 function misMoney(n) { return "₹" + misNum(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }); }
 function misPlural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
 function misDigits(s) { return (s || "").replace(/\D/g, "").slice(-10); }
@@ -55,21 +59,29 @@ async function misInit() {
   if (!_mis.started) {
     _mis.started = true;
     try { Object.assign(_mis, JSON.parse(misStore("misPrefs") || "{}")); } catch (_) { /* ignore bad prefs */ }
-    $("#misFrom").value = $("#misTo").value = misIstToday();
+    if (!MIS_PAGE_SIZES.includes(_mis.pageSize)) _mis.pageSize = MIS_PAGE_SIZES[0];
+    // The dashboard opens on the month we are in.
+    const today = misIstToday();
+    _mis.dashYear = today.slice(0, 4);
+    _mis.dashMonth = String(Number(today.slice(5, 7)));
+    $("#misDashMonth").innerHTML = '<option value="">All months</option>' + MIS_MONTHS.map((month, i) => `<option value="${i + 1}">${month}</option>`).join("");
+    $("#misFrom").value = $("#misTo").value = today;
     $("#misDispatcher").value = misStore("misDispatcher") || (currentUser && currentUser.full_name) || "";
     $("#misDispatcher").addEventListener("change", e => misStore("misDispatcher", e.target.value.trim()));
     $("#misRows").addEventListener("click", misRowClick);
     $("#misSummaryBody").addEventListener("click", misSummaryClick);
     document.addEventListener("keydown", misShortcut);
   }
-  await Promise.all([misLoadLookups(), misLoad()]);
+  await Promise.all([misLoadLookups(), misLoad(), misLoadDash()]);
 }
 function misSavePrefs() {
-  misStore("misPrefs", JSON.stringify({ layout: _mis.layout, summary: _mis.summary, groupBy: _mis.groupBy }));
+  misStore("misPrefs", JSON.stringify({ layout: _mis.layout, summary: _mis.summary, groupBy: _mis.groupBy, pageSize: _mis.pageSize }));
 }
 function misOptions(sel, values) {
   $(sel).innerHTML = [...new Set(values.map(v => (v || "").trim()).filter(Boolean))].slice(0, 400).map(v => `<option value="${rcEsc(v)}">`).join("");
 }
+// A page is 50 trips, so the suggestions in the form build up from every page viewed.
+function misRemember(sel, values) { misOptions(sel, [...values, ...[...$(sel).options].map(o => o.value)]); }
 async function misLoadLookups() {
   try {
     _mis.lookups = await api("/api/eee-taxi/mis/lookups");
@@ -81,40 +93,100 @@ async function misLoadLookups() {
     $("#misCompany").value = chosen;
   } catch (error) { misMessage("Could not load the driver and vehicle masters: " + error.message); }
 }
+// Dates, client and search text: what every tab, the summary and the Excel download share.
 function misQuery() {
   const params = new URLSearchParams();
   [["date_from", "#misFrom"], ["date_to", "#misTo"], ["company", "#misCompany"]].forEach(([key, sel]) => { if ($(sel).value) params.set(key, $(sel).value); });
+  const search = $("#misSearch").value.trim();
+  if (search) params.set("q", search);
   return params;
 }
+// Reads one page of the chosen tab. The server does the filtering, so a month is never loaded whole.
 async function misLoad() {
-  // A slow reply to an earlier date range must not replace a newer one.
+  // A slow reply to an earlier request must not replace a newer one.
   const request = _mis.loadSeq = (_mis.loadSeq || 0) + 1;
   try {
-    // The pipeline is what is still to be picked up: today's trips first, then later days, whatever
-    // dates are on screen and whenever the trip was booked.
-    const company = $("#misCompany").value;
-    const [data, pipe] = await Promise.all([api("/api/eee-taxi/mis?" + misQuery()),
-      api("/api/eee-taxi/mis?pipeline=true&date_from=" + misIstToday() + (company ? "&company=" + encodeURIComponent(company) : ""))]);
+    const params = misQuery();
+    params.set("view", _mis.view);
+    params.set("page", _mis.page);
+    params.set("page_size", _mis.pageSize);
+    const data = await api("/api/eee-taxi/mis?" + params);
     if (request !== _mis.loadSeq) return;
-    _mis.trips = data.trips;
-    _mis.pipeline = pipe.trips.slice().sort((a, b) => (a.date + a.pickup_time).localeCompare(b.date + b.pickup_time));
-    _mis.truncated = data.truncated;
-    _mis.limit = MIS_PAGE;
+    const pages = Math.max(1, Math.ceil(data.total / _mis.pageSize));
+    // The last trip of the last page was deleted or closed: show the page that is left.
+    if (_mis.page > pages) { _mis.page = pages; await misLoad(); return; }
+    Object.assign(_mis, { trips: data.trips, total: data.total, sum: data.summary });
     const t = data.trips, zones = (_mis.lookups && _mis.lookups.zones) || [];
-    misOptions("#misZones", [...zones, ...t.flatMap(x => [x.pickup_zone, x.drop_zone])]);
-    misOptions("#misPackages", ["City to Airport", "Airport to City", ...t.map(x => x.package)]);
-    misOptions("#misGuests", t.map(x => x.guest_name));
-    misOptions("#misPickups", t.map(x => x.pickup_address));
-    misOptions("#misDrops", t.map(x => x.drop_location));
-    misOptions("#misDispatchers", [misMe(), ...t.map(x => x.dispatcher_name)]);
-    misOptions("#misHubs", ["Vasant Kunj", "Mall Of India", "Select City", "Decathlon", "Huda City Center", ...t.map(x => x.hub_out)]);
-    misOptions("#misHubIns", ["20km hub to hub", ...t.map(x => x.hub_in)]);
+    misRemember("#misZones", [...zones, ...t.flatMap(x => [x.pickup_zone, x.drop_zone])]);
+    misRemember("#misPackages", ["City to Airport", "Airport to City", ...t.map(x => x.package)]);
+    misRemember("#misGuests", t.map(x => x.guest_name));
+    misRemember("#misPickups", t.map(x => x.pickup_address));
+    misRemember("#misDrops", t.map(x => x.drop_location));
+    misRemember("#misDispatchers", [misMe(), ...t.map(x => x.dispatcher_name)]);
+    misRemember("#misHubs", ["Vasant Kunj", "Mall Of India", "Select City", "Decathlon", "Huda City Center", ...t.map(x => x.hub_out)]);
+    misRemember("#misHubIns", ["20km hub to hub", ...t.map(x => x.hub_in)]);
     misRender();
+    if (_mis.summary) misLoadSummary();
   } catch (error) { misMessage("Could not load trips: " + error.message); }
+}
+// The latest open duty of the dates, client and search chosen, wherever in the pages it is.
+async function misNextOpen() {
+  if (!_mis.sum.open) return null;
+  const params = misQuery();
+  params.set("view", "open");
+  params.set("page_size", 1);
+  try { return (await api("/api/eee-taxi/mis?" + params)).trips[0] || null; }
+  catch (_) { return null; }
+}
+// A changed filter starts again from the first page.
+function misRefilter() { _mis.page = 1; return misLoad(); }
+// After trips are added, changed or deleted the dashboard numbers move too.
+function misReload() { return Promise.all([misLoad(), misLoadDash()]); }
+
+// ── dashboard: totals of the year and month chosen ──
+function misSetDash() {
+  _mis.dashYear = $("#misDashYear").value;
+  _mis.dashMonth = $("#misDashMonth").value;
+  misLoadDash();
+}
+function misDashLabel() {
+  const month = _mis.dashMonth ? MIS_MONTHS[_mis.dashMonth - 1] : "";
+  if (month) return _mis.dashYear ? `${month} ${_mis.dashYear}` : `Every ${month}`;
+  return _mis.dashYear ? `Year ${_mis.dashYear}` : "All trips so far";
+}
+function misDashCards(d) {
+  const perKm = d.total_kms ? "₹" + (d.trip_fare / d.total_kms).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "–";
+  return [
+    ["lead", "Total trips", misCount(d.trips), `${misCount(d.closed)} closed · ${misCount(d.open)} open`],
+    ["km", "Total kms", misCount(d.total_kms), d.closed ? `${misCount(d.total_kms / d.closed)} km per closed trip` : "No closed trips yet"],
+    ["fare", "Fare", misMoney(d.trip_fare), "Trip Fare, before GST, MCD, parking and toll"],
+    ["rate", "Fare per km", perKm, "Fare divided by total kms"],
+    ["avg", "Average fare per trip", d.closed ? misMoney(d.trip_fare / d.closed) : "–", "Fare divided by closed trips"],
+    ["billed", "Total billed", misMoney(d.total_trip_fare), "Fare with GST, MCD, parking and toll"],
+  ].map(([tone, label, value, note]) => `<div class="mis-card ${tone}"><span>${label}</span><b>${value}</b><small>${note}</small></div>`).join("");
+}
+async function misLoadDash() {
+  const request = _mis.dashSeq = (_mis.dashSeq || 0) + 1;
+  $("#misDashTitle").textContent = misDashLabel();
+  $("#misCards").classList.add("loading");
+  if (!$("#misCards").children.length) $("#misCards").innerHTML = '<div class="mis-card lead"><span>Total trips</span><b>…</b><small>Adding up</small></div>';
+  try {
+    const params = new URLSearchParams();
+    if (_mis.dashYear) params.set("year", _mis.dashYear);
+    if (_mis.dashMonth) params.set("month", _mis.dashMonth);
+    const data = await api("/api/eee-taxi/mis/dashboard?" + params);
+    if (request !== _mis.dashSeq) return;
+    const years = [...new Set([...data.years, Number(_mis.dashYear)].filter(Boolean))].sort((a, b) => b - a);
+    $("#misDashYear").innerHTML = '<option value="">All years</option>' + years.map(year => `<option>${year}</option>`).join("");
+    $("#misDashYear").value = _mis.dashYear;
+    $("#misDashMonth").value = _mis.dashMonth;
+    $("#misCards").innerHTML = misDashCards(data);
+  } catch (error) { misMessage("Could not load the dashboard numbers: " + error.message); }
+  finally { if (request === _mis.dashSeq) $("#misCards").classList.remove("loading"); }
 }
 
 // ── date range ──
-function misSetRange(from, to) { $("#misFrom").value = from; $("#misTo").value = to; misLoad(); }
+function misSetRange(from, to) { $("#misFrom").value = from; $("#misTo").value = to; misRefilter(); }
 function misPreset(name) {
   const today = misIstToday(), monthStart = today.slice(0, 8) + "01";
   if (name === "today") misSetRange(today, today);
@@ -135,63 +207,54 @@ function misRangeLabel() {
   return `${from ? misDay(from) : "Start"} to ${to ? misDay(to) : "latest"}`;
 }
 
-// ── filtering and rendering ──
-function misSource(view = _mis.view) { return view === "pipeline" ? _mis.pipeline : _mis.trips; }
-function misSearched(view = _mis.view) {
-  const query = $("#misSearch").value.trim().toLowerCase(), source = misSource(view);
-  if (!query) return source;
-  return source.filter(t => [t.guest_name, t.driver_name, t.driver_id, t.cab_no, t.route_no, t.pickup_address, t.drop_location, t.dispatcher_name, t.pickup_zone, t.drop_zone, t.company_other].join(" ").toLowerCase().includes(query));
-}
-function misInView(trip, view) {
-  return view === "open" ? trip.status === "Open" : view === "closed" ? trip.status === "Closed" : view === "fix" ? trip.issues.length > 0 : true;
-}
-function misVisible() { return misSearched().filter(t => misInView(t, _mis.view)); }
+// ── rendering ──
 function misFare(trip) { return misNum(trip.total_trip_fare || trip.trip_fare); }
 
 function misRender() {
-  const searched = misSearched(), trips = searched.filter(t => misInView(t, _mis.view));
+  const trips = _mis.trips, sum = _mis.sum;
   const shown = new Set(trips.map(t => t.id));
   _mis.selected = new Set([..._mis.selected].filter(id => shown.has(id)));
-  const count = view => misSearched(view).filter(t => misInView(t, view)).length;
+  const counts = { all: sum.trips, open: sum.open, closed: sum.closed, fix: sum.need_fixing, pipeline: sum.pipeline };
   $("#misRange").textContent = misRangeLabel();
-  $("#misViews").innerHTML = MIS_VIEWS.map(([id, label]) => `<button class="seg-btn${_mis.view === id ? " active" : ""}" onclick="misSetView('${id}')">${label} <span class="mis-n${id === "open" || id === "fix" ? " warn" : ""}">${count(id)}</span></button>`).join("");
+  $("#misViews").innerHTML = MIS_VIEWS.map(([id, label]) => `<button class="mis-tab${_mis.view === id ? " active" : ""}${(id === "open" || id === "fix") && counts[id] ? " warn" : ""}" role="tab" aria-selected="${_mis.view === id}" onclick="misSetView('${id}')"><span>${label}</span><b>${misCount(counts[id])}</b></button>`).join("");
   $$("#misLayout .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.layout === _mis.layout));
-  misRenderStats(searched);
-  misRenderSummary(trips);
-  $("#misCount").textContent = `${misPlural(trips.length, "trip")}` + (trips.length !== misSource().length ? ` of ${misSource().length} loaded` : "") +
-    (_mis.truncated ? ". Only the latest 8000 are loaded; narrow the dates." : "");
+  misRenderSummary();
+  const first = (_mis.page - 1) * _mis.pageSize + 1;
+  $("#misCount").textContent = (_mis.total ? `Showing ${misCount(first)} to ${misCount(first + trips.length - 1)} of ${misCount(_mis.total)} ${_mis.total === 1 ? "trip" : "trips"}` : "No trips to show") +
+    (_mis.view === "pipeline" || !sum.trips ? "" : ` · all ${misCount(sum.trips)} in these dates: ${misCount(sum.total_kms)} km, ${misMoney(sum.total_trip_fare)} total fare`);
   const piped = _mis.view === "pipeline", desk = _mis.layout === "desk" || piped;
   const oneDay = !piped && $("#misFrom").value && $("#misFrom").value === $("#misTo").value;
-  $("#misHead").innerHTML = `<th><input type="checkbox" id="misAll" aria-label="Select all shown trips" onchange="misSelectAll(this.checked)"></th><th>Status</th>` +
+  $("#misHead").innerHTML = `<th><input type="checkbox" id="misAll" aria-label="Select all trips on this page" onchange="misSelectAll(this.checked)"></th><th>Status</th>` +
     (desk ? (oneDay ? "" : "<th>Date</th>") + "<th>Pick up</th><th>Client</th><th>Guest</th><th>Route</th><th>Driver and cab</th><th>Drop</th><th class='num'>Kms</th><th class='num'>Fare</th><th>Check</th><th class='mis-act'></th>"
       : MIS_SHEET.map(([, label, kind]) => `<th${kind === "num" ? ' class="num"' : ""}>${rcEsc(label)}</th>`).join("") + "<th>Check</th>");
-  const page = trips.slice(0, _mis.limit);
-  $("#misRows").innerHTML = page.map(t => desk ? misDeskRow(t, oneDay) : misSheetRow(t)).join("") ||
+  $("#misRows").innerHTML = trips.map(t => desk ? misDeskRow(t, oneDay) : misSheetRow(t)).join("") ||
     `<tr><td colspan="${desk ? 13 : MIS_SHEET.length + 3}" class="mis-empty">${misEmptyText()}</td></tr>`;
-  $("#misMore").classList.toggle("hidden", trips.length <= _mis.limit);
-  $("#misMore").textContent = `Show ${Math.min(MIS_PAGE, trips.length - _mis.limit)} more (${trips.length - _mis.limit} not shown)`;
+  misRenderPager();
   misUpdateSelection();
 }
 function misEmptyText() {
   if (_mis.view === "pipeline") return "Nothing in the pipeline from today onward. For a future booking, open New trip and choose Add to pipeline.";
-  if (!_mis.trips.length) return "No trips booked for these dates. Add a trip, or upload the MMT file.";
-  if (_mis.view === "open") return "Nothing open here. Every duty in this view is closed.";
+  if ($("#misSearch").value.trim()) return "No trips match the search.";
+  if (!_mis.sum.trips) return "No trips booked for these dates. Add a trip, or upload the MMT file.";
+  if (_mis.view === "open") return "Nothing open here. Every duty in these dates is closed.";
   if (_mis.view === "fix") return "Every driver and cab here matches the masters.";
-  return "No trips match the search.";
+  return "No trips to show.";
 }
-function misRenderStats(trips) {
-  const open = trips.filter(t => t.status === "Open").length, closed = trips.length - open;
-  const fix = trips.filter(t => t.issues.length).length;
-  const fare = trips.reduce((s, t) => s + misFare(t), 0), kms = trips.reduce((s, t) => s + misNum(t.total_kms), 0);
-  const pct = trips.length ? Math.round(closed * 100 / trips.length) : 0;
-  $("#misStats").innerHTML = `
-    <div class="mis-stat"><b>${trips.length.toLocaleString("en-IN")}</b><span>${trips.length === 1 ? "trip" : "trips"}</span></div>
-    <div class="mis-stat grow"><b>${closed.toLocaleString("en-IN")} <small>closed</small> · <em class="${open ? "warn" : "ok"}">${open.toLocaleString("en-IN")}</em> <small>open</small></b>
-      <div class="mis-progress" role="img" aria-label="${pct}% of duties closed"><i style="width:${pct}%"></i></div><span>${pct}% of duties closed</span></div>
-    <div class="mis-stat"><b>${misMoney(fare)}</b><span>total fare of closed duties</span></div>
-    <div class="mis-stat"><b>${Math.round(kms).toLocaleString("en-IN")}</b><span>km run</span></div>
-    <div class="mis-stat ${fix ? "warn" : "ok"}"><b>${fix || "OK"}</b><span>${fix ? "driver or cab not in masters" : "drivers and cabs match masters"}</span></div>`;
+function misRenderPager() {
+  const pages = Math.max(1, Math.ceil(_mis.total / _mis.pageSize)), page = _mis.page;
+  const go = (to, text, label, off) => `<button class="btn secondary sm" onclick="misGoPage(${to})" aria-label="${label}"${off ? " disabled" : ""}>${text}</button>`;
+  const html = go(1, "« First", "First page", page <= 1) + go(page - 1, "‹ Previous", "Previous page", page <= 1) +
+    `<span>Page <b>${misCount(page)}</b> of <b>${misCount(pages)}</b></span>` +
+    go(page + 1, "Next ›", "Next page", page >= pages) + go(pages, "Last »", "Last page", page >= pages) +
+    `<label>Trips per page <select onchange="misSetPageSize(this.value)">${MIS_PAGE_SIZES.map(size => `<option${size === _mis.pageSize ? " selected" : ""}>${size}</option>`).join("")}</select></label>`;
+  $$(".mis-pager").forEach(pager => { pager.innerHTML = html; });
 }
+async function misGoPage(page) {
+  _mis.page = Math.max(1, page);
+  await misLoad();
+  $("#pane-eee-mis .ed-table-wrap").scrollTop = 0;
+}
+function misSetPageSize(size) { _mis.pageSize = Number(size); misSavePrefs(); misRefilter(); }
 function misStatusCell(t) {
   if (t.status === "Closed") return '<td><span class="badge generated">Closed</span></td>';
   const short = { "Trip Fare": "fare", "Drop Time": "drop time", "Total kms": "km" };
@@ -222,32 +285,38 @@ function misSheetRow(t) {
   }).join("");
   return `<tr data-id="${rcEsc(t.id)}" class="${t.issues.length ? "mis-flag" : ""}">${misPick(t)}${misStatusCell(t)}${cells}${misCheckCell(t)}</tr>`;
 }
-function misSetView(view) { _mis.view = view; _mis.limit = MIS_PAGE; misRender(); }
+function misSetView(view) { _mis.view = view; misRefilter(); }
 function misSetLayout(layout) { _mis.layout = layout; misSavePrefs(); misRender(); }
-function misShowMore() { _mis.limit += MIS_PAGE; misRender(); }
-function misOnSearch() { _mis.limit = MIS_PAGE; misRender(); }
+// The search runs on the server, so wait for a pause in the typing.
+function misOnSearch() { clearTimeout(_mis.searchTimer); _mis.searchTimer = setTimeout(misRefilter, MIS_SEARCH_DELAY); }
 
-// ── summary: the same trips grouped by client, date, dispatcher... ──
-function misToggleSummary() { _mis.summary = !_mis.summary; misSavePrefs(); misRender(); }
-function misSetGroup(key) { _mis.groupBy = key; misSavePrefs(); misRender(); }
-function misRenderSummary(trips) {
+// ── summary: the trips of the chosen tab added up by client, date, dispatcher... ──
+function misToggleSummary() { _mis.summary = !_mis.summary; misSavePrefs(); misRenderSummary(); if (_mis.summary) misLoadSummary(); }
+function misSetGroup(key) { _mis.groupBy = key; misSavePrefs(); misLoadSummary(); }
+async function misLoadSummary() {
+  const request = _mis.groupSeq = (_mis.groupSeq || 0) + 1;
+  try {
+    const params = misQuery();
+    params.set("view", _mis.view);
+    params.set("group", _mis.groupBy);
+    const data = await api("/api/eee-taxi/mis/summary?" + params);
+    if (request !== _mis.groupSeq) return;
+    _mis.groups = data.groups;
+    misRenderSummary();
+  } catch (error) { misMessage("Could not load the summary: " + error.message); }
+}
+function misRenderSummary() {
   $("#misSummary").classList.toggle("hidden", !_mis.summary);
   $("#misSummaryBtn").classList.toggle("active", _mis.summary);
   if (!_mis.summary) return;
   $("#misGroups").innerHTML = MIS_GROUPS.map(([key, label]) => `<button class="seg-btn${_mis.groupBy === key ? " active" : ""}" onclick="misSetGroup('${key}')">${label}</button>`).join("");
-  const groups = new Map();
-  trips.forEach(t => {
-    const name = t[_mis.groupBy] || "(blank)";
-    const g = groups.get(name) || { name, trips: 0, open: 0, kms: 0, fare: 0 };
-    g.trips += 1; g.open += t.status === "Open" ? 1 : 0; g.kms += misNum(t.total_kms); g.fare += misFare(t);
-    groups.set(name, g);
-  });
   const byDate = _mis.groupBy === "date";
-  const rows = [...groups.values()].sort((a, b) => byDate ? a.name.localeCompare(b.name) : b.trips - a.trips);
+  const rows = _mis.groups.map(g => ({ name: g.name || "(blank)", trips: g.trips, open: g.open, kms: g.total_kms, fare: g.total_trip_fare }));
   const top = rows.slice(0, 40), most = Math.max(1, ...top.map(g => g.trips));
-  const total = { trips: trips.length, open: trips.filter(t => t.status === "Open").length, kms: rows.reduce((s, g) => s + g.kms, 0), fare: rows.reduce((s, g) => s + g.fare, 0) };
-  const line = (g, name, attrs = "") => `<tr${attrs}><td>${name}</td><td class="num">${g.trips}</td>
-    <td class="num">${g.open ? `<span class="mis-n warn">${g.open}</span>` : "0"}</td><td class="num">${Math.round(g.kms).toLocaleString("en-IN")}</td>
+  const add = key => rows.reduce((s, g) => s + g[key], 0);
+  const total = { trips: add("trips"), open: add("open"), kms: add("kms"), fare: add("fare") };
+  const line = (g, name, attrs = "") => `<tr${attrs}><td>${name}</td><td class="num">${misCount(g.trips)}</td>
+    <td class="num">${g.open ? `<span class="mis-n warn">${g.open}</span>` : "0"}</td><td class="num">${misCount(g.kms)}</td>
     <td class="num">${misMoney(g.fare)}</td><td class="num">${g.trips - g.open ? misMoney(g.fare / (g.trips - g.open)) : ""}</td>`;
   $("#misSummaryBody").innerHTML = top.map(g => line(g, `<div class="mis-bar-cell"><i style="width:${Math.round(g.trips * 100 / most)}%"></i><span>${rcEsc(byDate ? misDay(g.name) : g.name)}</span></div>`,
     ` data-group="${rcEsc(g.name)}" title="Click to show only these trips"`) + "</tr>").join("") +
@@ -258,9 +327,9 @@ function misSummaryClick(event) {
   const row = event.target.closest("tr[data-group]");
   if (!row || row.dataset.group === "(blank)") return;
   const value = row.dataset.group;
-  if (_mis.groupBy === "company_name") { $("#misCompany").value = value; misLoad(); }
+  if (_mis.groupBy === "company_name") { $("#misCompany").value = value; misRefilter(); }
   else if (_mis.groupBy === "date") misSetRange(value, value);
-  else { $("#misSearch").value = value; misOnSearch(); }
+  else { $("#misSearch").value = value; misRefilter(); }
 }
 
 // ── selection, delete, copy ──
@@ -276,7 +345,7 @@ function misRowClick(event) {
   if (unpipe) { misSetPipeline([unpipe.dataset.unpipe], false); return; }
   const row = event.target.closest("tr[data-id]");
   if (!row) return;
-  const trip = misSource().find(t => t.id === row.dataset.id);
+  const trip = _mis.trips.find(t => t.id === row.dataset.id);
   misOpenForm(trip, event.target.closest("[data-close]") ? "close" : "edit");
 }
 function misUpdateSelection() {
@@ -306,7 +375,7 @@ function misDeleteTrips(ids, after = () => {}) {
       const result = await misPost("/delete", { ids });
       _mis.selected.clear();
       after();
-      await misLoad();
+      await misReload();
       misMessage(`Deleted ${misPlural(result.deleted, "trip")}.`, true);
     } });
 }
@@ -322,7 +391,8 @@ function misCopySelected() {
       const result = await misPost("/copy", { ids, date });
       _mis.selected.clear();
       $("#misFrom").value = $("#misTo").value = date;
-      await misLoad();
+      _mis.page = 1;
+      await misReload();
       misMessage(`Booked ${misPlural(result.added, "trip")} on ${misDmy(date)}.` + (result.skipped_existing ? ` ${result.skipped_existing} were already there.` : ""), true);
     } });
 }
@@ -348,7 +418,8 @@ async function misUpload(input, kind = "mmt") {
     if (result.first_date && (!$("#misFrom").value || result.first_date < $("#misFrom").value)) $("#misFrom").value = result.first_date;
     if (result.last_date && $("#misTo").value && result.last_date > $("#misTo").value) $("#misTo").value = result.last_date;
     if ((result.added || result.updated) && !["", client].includes($("#misCompany").value)) $("#misCompany").value = "";
-    await misLoad();
+    _mis.page = 1;
+    await misReload();
     const parts = [`Added ${misPlural(result.added, "trip")} from ${file.name}.`];
     if (result.updated) parts.push(`${misPlural(result.updated, "open trip")} already in the MIS ${result.updated === 1 ? "was" : "were"} completed from the file.`);
     if (result.skipped_existing) parts.push(`${result.skipped_existing} already in the MIS were skipped.`);
@@ -361,7 +432,6 @@ async function misUpload(input, kind = "mmt") {
 }
 async function misExport() {
   const params = misQuery();
-  if ($("#misSearch").value.trim()) params.set("q", $("#misSearch").value.trim());
   if (_mis.view === "open") params.set("status", "Open");
   if (_mis.view === "closed") params.set("status", "Closed");
   const button = $("#misExport");
@@ -491,14 +561,20 @@ function misFillDriver(form, changedKey) {
   form.querySelector('[data-m="driver_contact"]').value = misDigits(driver.mobile);
 }
 // A returning guest usually takes the same run: fill the empty route fields from their last trip.
-function misFillGuest(form) {
-  const values = misFormValues(form), name = values.guest_name.toLowerCase();
-  const last = name && _mis.trips.find(t => t.guest_name.toLowerCase() === name && (!values.company_name || t.company_name === values.company_name));
-  if (!last) return;
+async function misFillGuest(form) {
+  const typed = misFormValues(form), name = typed.guest_name.toLowerCase();
+  if (!name) return;
+  const params = new URLSearchParams({ guest: typed.guest_name });
+  if (typed.company_name && typed.company_name !== "__new__") params.set("company", typed.company_name);
+  let last;
+  try { last = (await api("/api/eee-taxi/mis/guest-route?" + params)).route; }
+  catch (_) { return; }   // only a suggestion; the booking does not depend on it
+  if (!last || !form.isConnected) return;
   ["company_name", "pickup_address", "pickup_zone", "drop_location", "drop_zone"].forEach(key => {
     const input = form.querySelector(`[data-m="${key}"]`);
     if (input && !input.value) input.value = last[key];
   });
+  misRecalc(form, {});
 }
 function misContext(t) {
   return `<div class="mis-context"><div><b>${rcEsc(t.company_name)}</b> · ${rcEsc(t.guest_name || "No guest name")}${t.route_no ? ` · ${rcEsc(t.route_no)}` : ""}</div>
@@ -558,8 +634,8 @@ function misOpenForm(trip = null, mode = trip ? "edit" : "new", seed = null) {
       await api("/api/eee-taxi/mis" + (isNew ? (toPipeline ? "?pipeline=true" : "") : "/" + encodeURIComponent(base.id)),
         { method: isNew ? "POST" : "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (toPipeline && !isNew) await misPost("/pipeline", { ids: [base.id], in_pipeline: !base.in_pipeline });
-      const order = misVisible().map(t => t.id), at = order.indexOf(base.id);
-      await misLoad();
+      const order = _mis.trips.map(t => t.id), at = order.indexOf(base.id);
+      await misReload();
       misMessage(toPipeline ? (base.in_pipeline ? "Trip saved and removed from the pipeline." : "Trip saved in the MIS and added to the pipeline.") : isNew ? "Trip booked." : "Trip saved.", true);
       if (after === "again") {
         form.querySelectorAll("[data-m]").forEach(input => { if (!MIS_KEEP.includes(input.dataset.m)) input.value = ""; });
@@ -572,8 +648,9 @@ function misOpenForm(trip = null, mode = trip ? "edit" : "new", seed = null) {
       close();
       if (after === "next") {
         const open = _mis.trips.filter(t => t.status === "Open" && t.id !== base.id);
-        const next = order.slice(at + 1).map(id => open.find(t => t.id === id)).find(Boolean) || open[0];
-        if (next) misOpenForm(next, "close"); else misMessage("All duties in this view are closed.", true);
+        // The page holds 50 trips; when none of them is open, the next open duty is on another page.
+        const next = order.slice(at + 1).map(id => open.find(t => t.id === id)).find(Boolean) || open[0] || await misNextOpen();
+        if (next) misOpenForm(next, "close"); else misMessage("All duties in these dates are closed.", true);
       }
     } catch (error) { err.className = "text-err"; err.textContent = error.message; }
     finally { form.querySelectorAll("button").forEach(b => { b.disabled = false; }); }

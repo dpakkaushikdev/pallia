@@ -579,18 +579,47 @@
     .mis-me {display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);}
     .mis-me input {width:170px;}
     .mis-search {flex:1 1 240px;max-width:360px;}
-    .mis-stats {display:flex;flex-wrap:wrap;margin:0 0 14px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--panel);}
-    .mis-stat {flex:1 1 150px;padding:12px 18px;border-right:1px solid var(--border);}
-    .mis-stat.grow {flex:2 1 260px;}
-    .mis-stat:last-child {border-right:0;}
-    .mis-stat b {display:block;font-size:21px;font-weight:650;font-variant-numeric:tabular-nums;letter-spacing:-.01em;}
-    .mis-stat b small {font-size:12px;font-weight:500;color:var(--muted);}
-    .mis-stat b em {font-style:normal;}
-    .mis-stat span {font-size:12px;color:var(--muted);}
-    .mis-stat.warn b, .mis-stat em.warn {color:var(--warn);}
-    .mis-stat.ok b, .mis-stat em.ok {color:var(--ok);}
-    .mis-progress {height:6px;border-radius:999px;background:var(--warn-bg);overflow:hidden;margin:6px 0 4px;}
-    .mis-progress i {display:block;height:100%;background:var(--ok);border-radius:999px;transition:width .3s;}
+    .mis-eyebrow {display:block;font-size:11.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
+    .mis-dash {margin:0 0 16px;padding:18px 20px 20px;border:1px solid var(--border);border-radius:14px;background:linear-gradient(180deg,var(--panel),var(--panel-2));box-shadow:var(--shadow-md);}
+    .mis-dash-head {display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:16px;}
+    .mis-dash-head > div {margin-right:auto;}
+    .mis-dash-head h2 {font-size:24px;font-weight:700;margin:2px 0 0;letter-spacing:-.02em;}
+    .mis-pick {display:flex;flex-direction:column;gap:5px;font-size:11.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);}
+    .mis-pick select {height:42px;min-width:160px;width:auto;font-size:14.5px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--text);}
+    .mis-cards {display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;}
+    .mis-cards.loading b {opacity:.35;}
+    .mis-card {position:relative;padding:18px 16px 16px 21px;border:1px solid var(--border);border-radius:12px;background:var(--panel);overflow:hidden;}
+    .mis-card::before {content:"";position:absolute;inset:0 auto 0 0;width:5px;background:var(--tone);}
+    .mis-card span {display:block;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+    .mis-card b {display:block;margin:8px 0 6px;font-size:clamp(22px,1.45vw,30px);line-height:1.05;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap;transition:opacity .15s;}
+    .mis-card small {display:block;font-size:12.5px;color:var(--muted);}
+    .mis-card.lead {background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 8px 20px var(--accent-glow);}
+    .mis-card.lead::before {display:none;}
+    .mis-card.lead span, .mis-card.lead small {color:rgba(255,255,255,.85);}
+    .mis-card.km {--tone:#0d9488;} .mis-card.fare {--tone:var(--ok);} .mis-card.rate {--tone:#7c3aed;}
+    .mis-card.avg {--tone:var(--warn-line);} .mis-card.billed {--tone:#334155;}
+    .mis-filters {margin:0 0 14px;padding:16px 20px 18px;border:1px solid var(--border);border-radius:14px;background:var(--panel);}
+    .mis-filters .mis-bar {margin:10px 0 0;align-items:flex-end;}
+    .mis-filters .mis-range {padding-bottom:9px;}
+    .mis-filters .mis-chip {margin-bottom:3px;}
+    .mis-tabs {display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;}
+    .mis-tab {display:flex;flex-direction:column;align-items:flex-start;gap:2px;flex:1 1 150px;max-width:240px;padding:12px 18px 13px;border:1.5px solid var(--border-2);border-radius:12px;background:var(--panel);font:inherit;color:var(--text);text-align:left;cursor:pointer;transition:border-color .12s,background .12s,box-shadow .12s;}
+    .mis-tab span {font-size:13.5px;font-weight:600;color:var(--muted);}
+    .mis-tab b {font-size:24px;line-height:1.1;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums;}
+    .mis-tab:hover {border-color:var(--accent);}
+    .mis-tab.warn b {color:var(--warn);}
+    .mis-tab.active {border-color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 -4px 0 var(--accent);}
+    .mis-tab.active span {color:var(--accent-2);}
+    .mis-tab:focus-visible {outline:2px solid var(--accent);outline-offset:2px;}
+    .mis-do {padding:12px 16px;border:1px solid var(--border);border-radius:12px;background:var(--panel-2);}
+    .mis-do .btn {height:42px;padding:0 18px;font-size:14px;}
+    .mis-pager {display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;color:var(--muted);}
+    .mis-pager span {padding:0 6px;}
+    .mis-pager b {color:var(--text);font-variant-numeric:tabular-nums;}
+    .mis-pager label {display:flex;align-items:center;gap:6px;margin-left:10px;}
+    .mis-pager select {height:32px;width:auto;font-size:13px;}
+    #misPagerTop label {display:none;}
+    #misPagerBottom {justify-content:center;margin-top:12px;}
     .mis-n {display:inline-block;min-width:18px;padding:0 6px;margin-left:4px;border-radius:999px;background:var(--panel-3);color:var(--muted);font-size:11.5px;font-weight:600;text-align:center;font-variant-numeric:tabular-nums;}
     .mis-n.warn {background:var(--warn-bg);color:var(--warn);}
     #misSummaryBtn.active {color:var(--accent);border-color:var(--accent);background:var(--accent-soft);}
@@ -626,7 +655,6 @@
     .mis-zone {flex:0 0 auto;font-size:11px;font-weight:600;color:var(--muted);background:var(--panel-3);border-radius:4px;padding:0 6px;}
     .mis-issue {display:inline-block;font-size:11.5px;font-weight:500;color:var(--warn);background:var(--warn-bg);border-radius:4px;padding:1px 6px;margin:1px 3px 1px 0;}
     .mis-ok {font-size:12px;color:var(--ok);}
-    #misMore {display:block;margin:12px auto 0;}
     .modal.mis-form {max-width:1000px;padding:22px 24px;}
     .mis-form fieldset {border:0;border-top:1px solid var(--border);padding:12px 0 6px;margin:0;min-width:0;}
     .mis-form legend {font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding-right:8px;}
@@ -647,8 +675,10 @@
     .mis-state.closed {color:var(--ok);background:var(--ok-bg);}
     .mis-form .modal-actions {justify-content:flex-end;flex-wrap:wrap;}
     .mis-form .modal-actions .btn {flex:0 0 auto;}
-    @media(max-width:760px) {.mis-grid {grid-template-columns:repeat(2,minmax(0,1fr));} .mis-dates input {width:132px;} .mis-search {max-width:none;} .mis-me {display:none;}}
-    @media(prefers-reduced-motion:reduce) {.mis-progress i, .mis-chip {transition:none;}}
+    @media(max-width:1700px) {.mis-cards {grid-template-columns:repeat(3,minmax(0,1fr));} .mis-card b {font-size:30px;}}
+    @media(max-width:760px) {.mis-cards {grid-template-columns:repeat(2,minmax(0,1fr));} .mis-card b {font-size:22px;} .mis-grid {grid-template-columns:repeat(2,minmax(0,1fr));} .mis-dates input {width:132px;} .mis-search {max-width:none;} .mis-me {display:none;}}
+    @media(max-width:480px) {.mis-cards {grid-template-columns:1fr;}}
+    @media(prefers-reduced-motion:reduce) {.mis-card b, .mis-tab, .mis-chip {transition:none;}}
     #pane-eee-document-history .ed-table-wrap {max-height:680px;overflow:auto;border:1px solid var(--border);border-radius:8px;}
     #pane-eee-document-history thead th {position:sticky;top:0;z-index:1;background:var(--panel);}
     .ed-record-docs {display:grid;gap:6px;min-width:140px;padding:2px;}
@@ -1170,37 +1200,47 @@
           <h1>Trip MIS</h1>
           <p class="meta">Dispatchers book trips here; whoever closes the duty adds fare, drop time and kms. Click a trip to edit it.</p>
         </div>
-        <div class="mis-actions">
-          <button class="btn" onclick="misOpenForm()">New trip <kbd>N</kbd></button>
-          <button class="btn secondary" id="misUploadBtn" onclick="$('#misFile').click()" title="MMT portal export (.xlsx, sheet Trip Report). Trips already in the MIS are skipped.">Upload MMT file</button>
-          <button class="btn secondary" id="misExport" onclick="misExport()" title="The trips shown, in the same columns as the month sheet">Download Excel</button>
-          <button class="btn secondary" id="misMongoBtn" onclick="$('#misMongoFile').click()" title="MongoDB raw data report (.csv). Guests sharing a Trip ID become one trip, priced from the MongoDB rate list.">Upload MongoDB file</button>
-          <input type="file" id="misFile" accept=".xlsx" class="hidden" onchange="misUpload(this)">
-          <input type="file" id="misMongoFile" accept=".csv" class="hidden" onchange="misUpload(this, 'mongodb')">
-        </div>
       </div>
-      <div id="misMsg" class="hidden" aria-live="polite"></div>
-      <div class="mis-bar">
-        <div class="mis-dates">
-          <button class="btn secondary" onclick="misStep(-1)" aria-label="Earlier dates">&#8249;</button>
-          <input type="date" id="misFrom" onchange="misLoad()" aria-label="Trip date from">
-          <span class="meta">to</span>
-          <input type="date" id="misTo" onchange="misLoad()" aria-label="Trip date to">
-          <button class="btn secondary" onclick="misStep(1)" aria-label="Later dates">&#8250;</button>
+      <section class="mis-dash" aria-labelledby="misDashTitle">
+        <div class="mis-dash-head">
+          <div><span class="mis-eyebrow">Dashboard</span><h2 id="misDashTitle"></h2></div>
+          <label class="mis-pick">Year<select id="misDashYear" onchange="misSetDash()"><option value="">All years</option></select></label>
+          <label class="mis-pick">Month<select id="misDashMonth" onchange="misSetDash()"><option value="">All months</option></select></label>
         </div>
-        <span class="mis-range" id="misRange"></span>
-        <button class="mis-chip" onclick="misPreset('yesterday')">Yesterday</button>
-        <button class="mis-chip" onclick="misPreset('today')">Today</button>
-        <button class="mis-chip" onclick="misPreset('tomorrow')">Tomorrow</button>
-        <button class="mis-chip" onclick="misPreset('month')">This month</button>
-        <button class="mis-chip" onclick="misPreset('lastMonth')">Last month</button>
+        <div class="mis-cards" id="misCards" role="status"></div>
+      </section>
+      <section class="mis-filters" aria-label="Trips to show">
+        <span class="mis-eyebrow">Trips to show</span>
+        <div class="mis-bar">
+          <label class="mis-pick">Client<select id="misCompany" onchange="misRefilter()"><option value="">All clients</option></select></label>
+          <div class="mis-dates">
+            <button class="btn secondary" onclick="misStep(-1)" aria-label="Earlier dates">&#8249;</button>
+            <input type="date" id="misFrom" onchange="misRefilter()" aria-label="Trip date from">
+            <span class="meta">to</span>
+            <input type="date" id="misTo" onchange="misRefilter()" aria-label="Trip date to">
+            <button class="btn secondary" onclick="misStep(1)" aria-label="Later dates">&#8250;</button>
+          </div>
+          <span class="mis-range" id="misRange"></span>
+          <button class="mis-chip" onclick="misPreset('yesterday')">Yesterday</button>
+          <button class="mis-chip" onclick="misPreset('today')">Today</button>
+          <button class="mis-chip" onclick="misPreset('tomorrow')">Tomorrow</button>
+          <button class="mis-chip" onclick="misPreset('month')">This month</button>
+          <button class="mis-chip" onclick="misPreset('lastMonth')">Last month</button>
+        </div>
+        <div class="mis-tabs" id="misViews" role="tablist" aria-label="Trips to show"></div>
+      </section>
+      <div class="mis-bar mis-do">
+        <button class="btn" onclick="misOpenForm()">New trip <kbd>N</kbd></button>
+        <button class="btn secondary" id="misUploadBtn" onclick="$('#misFile').click()" title="MMT portal export (.xlsx, sheet Trip Report). Trips already in the MIS are skipped.">Upload MMT file</button>
+        <button class="btn secondary" id="misMongoBtn" onclick="$('#misMongoFile').click()" title="MongoDB raw data report (.csv). Guests sharing a Trip ID become one trip, priced from the MongoDB rate list.">Upload MongoDB file</button>
+        <button class="btn secondary" id="misExport" onclick="misExport()" title="Every trip of the dates, client and search chosen (not just this page), in the same columns as the month sheet">Download Excel</button>
+        <input type="file" id="misFile" accept=".xlsx" class="hidden" onchange="misUpload(this)">
+        <input type="file" id="misMongoFile" accept=".csv" class="hidden" onchange="misUpload(this, 'mongodb')">
         <span class="mis-spacer"></span>
         <label class="mis-me">Dispatcher<input type="text" id="misDispatcher" maxlength="120" placeholder="Your name" autocomplete="off"></label>
       </div>
-      <div class="mis-stats" id="misStats" role="status"></div>
+      <div id="misMsg" class="hidden" aria-live="polite"></div>
       <div class="mis-bar">
-        <div class="seg" id="misViews" aria-label="Trips to show"></div>
-        <select id="misCompany" onchange="misLoad()" aria-label="Client"><option value="">All clients</option></select>
         <input type="search" id="misSearch" class="mis-search" maxlength="120" placeholder="Search guest, driver, cab, route or place  ( / )" oninput="misOnSearch()" aria-label="Search trips">
         <span class="mis-spacer"></span>
         <button class="btn secondary sm" id="misSummaryBtn" onclick="misToggleSummary()">Summary</button>
@@ -1213,9 +1253,9 @@
         <div class="seg" id="misGroups" aria-label="Group trips by"></div>
         <table><thead><tr><th>Group</th><th class="num">Trips</th><th class="num">Open</th><th class="num">Km</th><th class="num">Total fare</th><th class="num">Avg per closed trip</th></tr></thead><tbody id="misSummaryBody"></tbody></table>
       </div>
-      <div class="ed-list-toolbar"><div class="meta" id="misCount"></div><div class="ed-bulk-tools"><span class="meta" id="misSelected"></span><button class="btn secondary sm" id="misCopy" onclick="misCopySelected()" disabled title="Book the selected trips again on another date">Copy to date</button><button class="btn danger sm" id="misDelete" onclick="misDeleteSelected()" disabled>Delete</button></div></div>
+      <div class="ed-list-toolbar"><div class="meta" id="misCount"></div><div class="mis-pager" id="misPagerTop"></div><div class="ed-bulk-tools"><span class="meta" id="misSelected"></span><button class="btn secondary sm" id="misCopy" onclick="misCopySelected()" disabled title="Book the selected trips again on another date">Copy to date</button><button class="btn danger sm" id="misDelete" onclick="misDeleteSelected()" disabled>Delete</button></div></div>
       <div class="ed-table-wrap"><table class="data-table"><thead><tr id="misHead"></tr></thead><tbody id="misRows"></tbody></table></div>
-      <button class="btn secondary sm hidden" id="misMore" onclick="misShowMore()"></button>
+      <div class="mis-pager" id="misPagerBottom"></div>
       <datalist id="misZones"></datalist><datalist id="misPackages"></datalist><datalist id="misDriverIds"></datalist>
       <datalist id="misDriverNames"></datalist><datalist id="misCabs"></datalist><datalist id="misGuests"></datalist>
       <datalist id="misPickups"></datalist><datalist id="misDrops"></datalist><datalist id="misDispatchers"></datalist>
@@ -1864,7 +1904,7 @@
   </div>
 </div>
 <script src="/static/eee_documents.js"></script>
-<script src="/static/eee_mis.js?v=20261125-2"></script>
+<script src="/static/eee_mis.js?v=20261125-3"></script>
 <script src="/static/pallia_verification.js?v=20261013-2"></script>
 
 <script>
