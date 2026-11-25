@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import re
 from datetime import date
+from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
@@ -136,6 +138,14 @@ def read_summary(group: Literal["company_name", "date", "dispatcher_name", "driv
     return {"groups": grouped(db, MasterIndex.build(db), chosen, group)}
 
 
+@lru_cache(maxsize=1)
+def _page_version() -> str:
+    """The MIS script version the server is serving; an open tab compares it with its own to see it is out of date."""
+    page = (Path(__file__).resolve().parents[1] / "static" / "index.html").read_text(encoding="utf-8")
+    found = re.search(r"eee_mis\.js\?v=([\w-]+)", page)
+    return found[1] if found else ""
+
+
 @router.get("/lookups")
 def lookups(_: User = Depends(_eee_user), db: Session = Depends(get_db)):
     """Choices for the trip form: drivers, cabs and companies."""
@@ -145,6 +155,7 @@ def lookups(_: User = Depends(_eee_user), db: Session = Depends(get_db)):
                     for d in get_driver_rows(db)],
         "cabs": sorted(row.vehicle_no for row in get_vehicle_rows(db)),
         "companies": list(all_companies()), "statuses": list(STATUSES), "zones": list(ZONES),
+        "page_version": _page_version(),
     }
 
 
@@ -284,18 +295,22 @@ def upload_mmt(file: UploadFile = File(...), dispatcher_name: str = Form("", max
     existing = {route for (route,) in db.query(EeeTaxiMisTrip.route_no)
                 .filter(EeeTaxiMisTrip.company_name == "MMT", EeeTaxiMisTrip.route_no.isnot(None))}
     index = MasterIndex.build(db)
-    added, skipped, fixes = [], 0, FixList(index)
+    added, skipped, repeated, in_file, fixes = [], 0, 0, set(), FixList(index)
     for trip in trips:
+        trip = index.fill(trip)
+        fixes.note(trip)   # the whole file is checked, so it can be corrected before anything is added
+        if trip.route_no and trip.route_no in in_file:
+            repeated += 1
+            continue
+        in_file.add(trip.route_no)
         if trip.route_no and trip.route_no in existing:
             skipped += 1
             continue
-        trip = index.fill(trip)
         db.add(store_trip(EeeTaxiMisTrip(source="mmt_upload", created_by=user.email), trip, user.email))
-        existing.add(trip.route_no)
         added.append(trip.date)
-        fixes.note(trip)
     db.rollback() if dry_run else db.commit()
-    return {"added": len(added), "skipped_existing": skipped, "errors": errors, "dry_run": dry_run, **fixes.report(),
+    return {"trips_in_file": len(trips), "added": len(added), "skipped_existing": skipped, "repeated_in_file": repeated,
+            "errors": errors, "dry_run": dry_run, **fixes.report(),
             "first_date": min(added, default=None), "last_date": max(added, default=None)}
 
 
@@ -323,9 +338,10 @@ def upload_mongodb(file: UploadFile = File(...), dispatcher_name: str = Form("",
     index = MasterIndex.build(db)
     dates, added, updated, skipped, still_open, fixes = [], 0, 0, 0, 0, FixList(index)
     for trip in trips:
+        trip = index.fill(trip)
+        fixes.note(trip)   # the whole file is checked, so it can be corrected before anything is added
         row = existing.get(trip.route_no)
         if row is None:
-            trip = index.fill(trip)
             row = store_trip(EeeTaxiMisTrip(source="mongodb", created_by=user.email), trip, user.email)
             db.add(row)
             existing[trip.route_no] = row
@@ -339,8 +355,8 @@ def upload_mongodb(file: UploadFile = File(...), dispatcher_name: str = Form("",
             continue
         dates.append(trip.date)
         still_open += trip.status == "Open"
-        fixes.note(trip)
     db.rollback() if dry_run else db.commit()
-    return {"added": added, "updated": updated, "skipped_existing": skipped, "still_open": still_open,
+    return {"trips_in_file": len(trips), "added": added, "updated": updated, "skipped_existing": skipped,
+            "repeated_in_file": 0, "still_open": still_open,
             "errors": messages, "dry_run": dry_run, **fixes.report(),
             "first_date": min(dates, default=None), "last_date": max(dates, default=None)}

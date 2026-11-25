@@ -401,9 +401,11 @@ class MasterIndex:
 
 @dataclass
 class FixList:
-    """What an upload would leave under Needs fixing: each driver and cab the masters do not know, with its trips."""
+    """Every driver and cab in an uploaded file that the masters do not know, with its trips."""
     index: MasterIndex
     trips: int = 0
+    driver_trips: int = 0
+    cab_trips: int = 0
     drivers: Counter = field(default_factory=Counter)
     cabs: Counter = field(default_factory=Counter)
 
@@ -414,10 +416,13 @@ class FixList:
         if cab:
             self.cabs[(trip.cab_no, cab)] += 1
         self.trips += bool(driver or cab)
+        self.driver_trips += bool(driver)
+        self.cab_trips += bool(cab)
 
     def report(self) -> dict:
         return {
-            "need_fixing": self.trips,
+            "need_fixing": self.trips, "drivers_to_fix": len(self.drivers), "driver_trips": self.driver_trips,
+            "cabs_to_fix": len(self.cabs), "cab_trips": self.cab_trips,
             "fix_drivers": [{"name": name, "mobile": mobile, "problem": problem, "trips": count}
                             for (name, mobile, problem), count in self.drivers.most_common(MAX_FIX_ROWS)],
             "fix_cabs": [{"cab_no": cab, "problem": problem, "trips": count}

@@ -134,6 +134,8 @@ function misRemember(sel, values) { misOptions(sel, [...values, ...[...$(sel).op
 async function misLoadLookups() {
   try {
     _mis.lookups = await api("/api/eee-taxi/mis/lookups");
+    const mine = ((document.querySelector('script[src*="eee_mis.js"]') || {}).src || "").match(/v=([\w-]+)/);
+    $("#misStale").classList.toggle("hidden", !(mine && _mis.lookups.page_version && mine[1] !== _mis.lookups.page_version));
     $("#misDriverIds").innerHTML = _mis.lookups.drivers.filter(d => d.truein_id).map(d => `<option value="${rcEsc(d.truein_id)}">${rcEsc(d.name)}</option>`).join("");
     // The name list shows each driver with their ID; picking one fills the Driver ID.
     misOptions("#misDriverNames", _mis.lookups.drivers.map(misDriverLabel));
@@ -451,35 +453,43 @@ function misCopySelected() {
 }
 
 // ── client file uploads (MMT, MongoDB) and Excel download ──
-// Shown before an upload is taken: what the file would add, and which drivers and cabs would need fixing.
-function misConfirmUpload(fileName, check, kind) {
-  const changes = check.added + (check.updated || 0);
-  const table = (title, head, rows) => rows.length ? `<h4>${title}</h4><div class="mis-check"><table class="data-table"><thead><tr>${head.map(h => `<th>${h}</th>`).join("")}</tr></thead>
-    <tbody>${rows.map(cells => `<tr>${cells.map((c, i) => `<td${i === cells.length - 1 ? ' class="num"' : ""}>${rcEsc(String(c))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : "";
-  const lines = [`<b>${misPlural(check.added, "new trip")}</b> will be added.`];
-  if (check.updated) lines.push(`${misPlural(check.updated, "open trip")} already in the MIS will be completed from the file.`);
-  if (check.skipped_existing) lines.push(`${check.skipped_existing} already in the MIS (same DS no/Route No) will be skipped, not added again.`);
-  if (check.errors.length) lines.push(`${misPlural(check.errors.length, kind === "mmt" ? "row" : "trip")} ${kind === "mmt" ? "cannot be read and will be left out" : "need a look"}: ${rcEsc(check.errors.slice(0, 3).join(" | "))}${check.errors.length > 3 ? " …" : ""}`);
-  const verdict = !changes ? "" : check.need_fixing
-    ? `<p class="mis-check-warn"><b>${check.need_fixing} of these ${changes === 1 ? "trip" : "trips"}</b> will go under Needs fixing: the driver or the cab does not match the masters.</p>`
-    : `<p class="mis-check-ok">Every driver and cab in these trips matches the masters.</p>`;
+// The upload pop-up. Before the upload (done = false) it is a check that has saved nothing: the user
+// can cancel, correct the Excel and upload again. After it (done = true) it says what was added.
+function misUploadDialog(fileName, report, kind, done = false) {
+  const changes = report.added + (report.updated || 0), repeats = report.skipped_existing + (report.repeated_in_file || 0);
+  const table = (title, head, rows, more) => rows.length ? `<h4>${title}</h4><div class="mis-check"><table class="data-table"><thead><tr>${head.map(h => `<th>${h}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map(cells => `<tr>${cells.map((c, i) => `<td${i === cells.length - 1 ? ' class="num"' : ""}>${rcEsc(String(c))}</td>`).join("")}</tr>`).join("")}
+    ${more > 0 ? `<tr><td colspan="${head.length}" class="meta">${more} more not shown</td></tr>` : ""}</tbody></table></div>` : "";
+  const tile = (value, label, note, warn) => `<div class="mis-check-tile${warn && value ? " warn" : ""}"><b>${misCount(value)}</b><span>${label}</span><small>${note}</small></div>`;
+  const tiles = tile(report.trips_in_file, "Trips in the file", kind === "mongodb" ? "one per Trip ID" : "one per row read")
+    + tile(report.added, done ? "New trips added" : "New trips to add", report.updated ? `plus ${report.updated} open ${report.updated === 1 ? "trip" : "trips"} completed` : "not in the MIS yet")
+    + tile(repeats, "Duplicate DS no/Route No", report.repeated_in_file ? `${report.skipped_existing} already in the MIS, ${report.repeated_in_file} repeated in the file` : "already in the MIS; skipped, not added again", true)
+    + tile(report.drivers_to_fix, "Drivers not found in master", `on ${misPlural(report.driver_trips, "trip")}`, true)
+    + tile(report.cabs_to_fix, "Cab Nos not found in master", `on ${misPlural(report.cab_trips, "trip")}`, true);
+  const problems = report.drivers_to_fix || report.cabs_to_fix || report.errors.length;
+  const advice = done ? (changes ? "The trips with a driver or cab problem are under Needs fixing." : "Nothing was added: every trip in the file was already in the MIS.")
+    : problems ? "To correct these first, close this box, fix the Excel and upload it again. Nothing has been added yet."
+    : "Every driver and cab in the file matches the masters. Nothing has been added yet.";
   return new Promise(resolve => {
     const wrap = document.createElement("div");
     wrap.className = "modal-backdrop";
-    wrap.innerHTML = `<div class="modal mis-form" role="dialog" aria-modal="true" aria-labelledby="misCheckTitle">
-        <h3 id="misCheckTitle">Check before uploading</h3><p class="modal-sub">${rcEsc(fileName)}. Nothing has been added yet.</p>
-        <ul class="mis-check-list">${lines.map(line => `<li>${line}</li>`).join("")}</ul>${verdict}
-        ${table("Drivers to fix", ["Driver name in file", "Mobile in file", "Problem", "Trips"], check.fix_drivers.map(d => [d.name || "(blank)", d.mobile || "(blank)", d.problem, d.trips]))}
-        ${table("Cabs to fix", ["Cab No in file", "Problem", "Trips"], check.fix_cabs.map(c => [c.cab_no || "(blank)", c.problem, c.trips]))}
-        <div class="modal-actions"><button type="button" class="btn secondary" data-cancel>${changes ? "Cancel, add nothing" : "Close"}</button>
-          ${changes ? `<button type="button" class="btn" data-ok>Upload ${misPlural(changes, "trip")}</button>` : ""}</div>
+    wrap.innerHTML = `<div class="modal mis-form mis-upload" role="dialog" aria-modal="true" aria-labelledby="misCheckTitle">
+        <button type="button" class="mis-x" data-cancel aria-label="Close">&times;</button>
+        <h3 id="misCheckTitle">${done ? "Upload finished" : "Check before uploading"}</h3><p class="modal-sub">${rcEsc(fileName)}</p>
+        <div class="mis-check-tiles">${tiles}</div>
+        <p class="${problems && !done ? "mis-check-warn" : "mis-check-ok"}">${advice}</p>
+        ${table("Drivers not found in master", ["Driver name in file", "Mobile in file", "Problem", "Trips"], report.fix_drivers.map(d => [d.name || "(blank)", d.mobile || "(blank)", d.problem, d.trips]), report.drivers_to_fix - report.fix_drivers.length)}
+        ${table("Cab Nos not found in master", ["Cab No in file", "Problem", "Trips"], report.fix_cabs.map(c => [c.cab_no || "(blank)", c.problem, c.trips]), report.cabs_to_fix - report.fix_cabs.length)}
+        ${table(kind === "mmt" ? "Rows that could not be read" : "Trips that need a look", ["Detail", ""], report.errors.slice(0, 50).map(e => [e, ""]), report.errors.length - 50)}
+        <div class="modal-actions">${done || !changes ? '<button type="button" class="btn" data-cancel>Close</button>'
+          : `<button type="button" class="btn secondary" data-cancel>Cancel, add nothing</button><button type="button" class="btn" data-ok>Upload ${misPlural(changes, "trip")}</button>`}</div>
       </div>`;
     document.body.appendChild(wrap);
-    const done = answer => { wrap.remove(); resolve(answer); };
-    wrap.querySelector("[data-cancel]").onclick = () => done(false);
-    if (changes) wrap.querySelector("[data-ok]").onclick = () => done(true);
-    wrap.addEventListener("keydown", event => { if (event.key === "Escape") done(false); });
-    (wrap.querySelector("[data-ok]") || wrap.querySelector("[data-cancel]")).focus();
+    const finish = answer => { wrap.remove(); resolve(answer); };
+    wrap.querySelectorAll("[data-cancel]").forEach(button => { button.onclick = () => finish(false); });
+    if (wrap.querySelector("[data-ok]")) wrap.querySelector("[data-ok]").onclick = () => finish(true);
+    wrap.addEventListener("keydown", event => { if (event.key === "Escape") finish(false); });
+    (wrap.querySelector("[data-ok]") || wrap.querySelector(".modal-actions [data-cancel]")).focus();
   });
 }
 async function misUpload(input, kind = "mmt") {
@@ -502,7 +512,7 @@ async function misUpload(input, kind = "mmt") {
   button.textContent = "Checking…";
   try {
     // First a check that saves nothing; the trips go in only after the user has seen what needs fixing.
-    if (!await misConfirmUpload(file.name, await send(true), kind)) { misMessage("Upload cancelled. Nothing was added.", true); return; }
+    if (!await misUploadDialog(file.name, await send(true), kind)) { misMessage("Nothing was added from " + file.name + ".", true); return; }
     button.textContent = "Uploading…";
     const result = await send(false);
     // Move the filters so the uploaded trips are on screen.
@@ -511,13 +521,9 @@ async function misUpload(input, kind = "mmt") {
     if ((result.added || result.updated) && !["", client].includes($("#misCompany").value)) $("#misCompany").value = "";
     _mis.page = 1;
     await misReload();
-    const parts = [`Added ${misPlural(result.added, "trip")} from ${file.name}.`];
-    if (result.updated) parts.push(`${misPlural(result.updated, "open trip")} already in the MIS ${result.updated === 1 ? "was" : "were"} completed from the file.`);
-    if (result.skipped_existing) parts.push(`${result.skipped_existing} already in the MIS were skipped.`);
-    if (result.still_open) parts.push(`${result.still_open} came in Open with no fare because nobody had boarded; upload the report again after the shift to complete them.`);
-    if (result.need_fixing) parts.push(`${result.need_fixing} are under Needs fixing: driver or cab does not match the masters.`);
-    if (result.errors.length) parts.push(`${misPlural(result.errors.length, kind === "mmt" ? "row" : "trip")} ${kind === "mmt" ? "could not be read" : "need a look"}: ${result.errors.slice(0, 5).join(" | ")}${result.errors.length > 5 ? " …" : ""}`);
-    misMessage(parts.join(" "), !result.errors.length);
+    misMessage(`Added ${misPlural(result.added, "trip")} from ${file.name}.` + (result.updated ? ` Completed ${misPlural(result.updated, "open trip")}.` : "") +
+      (result.still_open ? ` ${result.still_open} came in Open with no fare because nobody had boarded; upload the report again after the shift to complete them.` : ""), true);
+    await misUploadDialog(file.name, result, kind, true);
   } catch (error) { misMessage("Upload failed: " + error.message); }
   finally { button.disabled = false; button.textContent = buttonText; }
 }

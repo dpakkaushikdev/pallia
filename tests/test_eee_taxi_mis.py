@@ -87,8 +87,9 @@ def test_mis_requires_login(client):
 def test_upload_maps_mmt_columns_and_fills_driver_from_master(client, headers):
     result = _upload(client, headers, [_mmt_row("NC1")])
     assert result.status_code == 200, result.text
-    assert result.json() == {"added": 1, "skipped_existing": 0, "need_fixing": 0, "errors": [], "dry_run": False,
-                             "fix_drivers": [], "fix_cabs": [], "first_date": "2026-11-02", "last_date": "2026-11-02"}
+    assert result.json() == {"trips_in_file": 1, "added": 1, "skipped_existing": 0, "repeated_in_file": 0, "errors": [],
+                             "dry_run": False, "need_fixing": 0, "drivers_to_fix": 0, "driver_trips": 0, "cabs_to_fix": 0,
+                             "cab_trips": 0, "fix_drivers": [], "fix_cabs": [], "first_date": "2026-11-02", "last_date": "2026-11-02"}
     trip = client.get(ENDPOINT, headers=headers).json()["trips"][0]
     assert trip["date"] == "2026-11-02" and trip["route_no"] == "NC1" and trip["company_name"] == "MMT"
     assert trip["pickup_time"] == "06:15"          # scheduled, not actual start
@@ -447,7 +448,8 @@ def test_upload_check_lists_drivers_and_cabs_to_fix_and_adds_nothing(client, hea
             dict(_mmt_row("NC4", plate="DL01AA0001"), **{"Driver Name": "New Person", "Driver Phone": "+917000000000"})]
     files = {"file": ("mmt.xlsx", _mmt_file(rows), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
     check = client.post(f"{ENDPOINT}/upload-mmt", files=files, data={"dispatcher_name": "Desk One", "dry_run": "true"}, headers=headers).json()
-    assert (check["dry_run"], check["added"], check["need_fixing"]) == (True, 4, 3)
+    assert (check["dry_run"], check["trips_in_file"], check["added"], check["need_fixing"]) == (True, 4, 4, 3)
+    assert (check["drivers_to_fix"], check["driver_trips"], check["cabs_to_fix"], check["cab_trips"]) == (2, 3, 1, 1)
     assert check["fix_drivers"] == [
         {"name": "Test Driver", "mobile": "8000000000", "problem": "Driver TEST DRIVER is in the master with a different mobile", "trips": 2},
         {"name": "New Person", "mobile": "7000000000", "problem": "Driver not in driver master", "trips": 1}]
@@ -455,4 +457,9 @@ def test_upload_check_lists_drivers_and_cabs_to_fix_and_adds_nothing(client, hea
     assert client.get(ENDPOINT, headers=headers).json()["summary"]["trips"] == 0          # the check saved nothing
     assert _upload(client, headers, rows).json()["added"] == 4
     again = client.post(f"{ENDPOINT}/upload-mmt", files=files, data={"dispatcher_name": "Desk One", "dry_run": "true"}, headers=headers).json()
-    assert (again["added"], again["skipped_existing"], again["need_fixing"]) == (0, 4, 0)   # a DS no is never added twice
+    assert (again["added"], again["skipped_existing"]) == (0, 4)       # a DS no already in the MIS is never added twice
+    assert (again["drivers_to_fix"], again["cabs_to_fix"]) == (2, 1)   # the file's own problems are still listed
+    twice = {"file": ("mmt.xlsx", _mmt_file([_mmt_row("NC9"), _mmt_row("NC9")]), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    doubled = client.post(f"{ENDPOINT}/upload-mmt", files=twice, data={"dispatcher_name": "Desk One"}, headers=headers).json()
+    assert (doubled["added"], doubled["repeated_in_file"], doubled["skipped_existing"]) == (1, 1, 0)
+    assert client.get(f"{ENDPOINT}/lookups", headers=headers).json()["page_version"].startswith("20")
