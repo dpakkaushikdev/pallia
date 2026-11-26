@@ -27,7 +27,7 @@ const MIS_SEARCH_DELAY = 350;
 const MIS_CALENDAR_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
 
 // trips is one page of the chosen tab; sum is the counts and totals of the dates on screen.
-let _mis = { trips: [], total: 0, sum: {}, groups: [], lookups: null, selected: new Set(), started: false,
+let _mis = { trips: [], total: 0, sum: {}, groups: [], lookups: null, selected: new Set(), started: false, from: "", to: "",
   view: "all", layout: "desk", summary: false, groupBy: "company_name", page: 1, pageSize: MIS_PAGE_SIZES[0], dashYear: "", dashMonth: "" };
 
 // ── small helpers ──
@@ -92,10 +92,11 @@ function misWrapDate(input) {
   });
 }
 // After the page itself changes a date (Today, the arrows, an upload), show it in the typed box.
-function misSyncDates(root) {
+// The box being typed in is left alone, unless the page has just changed that date itself (all).
+function misSyncDates(root, all = false) {
   root.querySelectorAll(".mis-date").forEach(box => {
     const text = box.querySelector(".mis-date-text");
-    if (document.activeElement === text) return;
+    if (!all && document.activeElement === text) return;
     text.value = misDmy(box.querySelector('input[type="date"]').value);
     text.classList.remove("bad");
   });
@@ -113,8 +114,10 @@ async function misInit() {
     _mis.dashYear = today.slice(0, 4);
     _mis.dashMonth = String(Number(today.slice(5, 7)));
     $("#misDashMonth").innerHTML = '<option value="">All months</option>' + MIS_MONTHS.map((month, i) => `<option value="${i + 1}">${month}</option>`).join("");
-    $("#misFrom").value = $("#misTo").value = today;
+    misUseDates(today, today);
     [$("#misFrom"), $("#misTo")].forEach(misWrapDate);
+    // Enter in a date box is the same as pressing Get data (keyup: the box has taken the typed date by then).
+    $("#misFrom").closest(".mis-dates").addEventListener("keyup", event => { if (event.key === "Enter" && event.target.classList.contains("mis-date-text")) misApplyDates(); });
     $("#misDispatcher").value = misStore("misDispatcher") || (currentUser && currentUser.full_name) || "";
     $("#misDispatcher").addEventListener("change", e => misStore("misDispatcher", e.target.value.trim()));
     $("#misRows").addEventListener("click", misRowClick);
@@ -152,7 +155,8 @@ async function misLoadLookups() {
 // Dates, client and search text: what every tab, the summary and the Excel download share.
 function misQuery() {
   const params = new URLSearchParams();
-  [["date_from", "#misFrom"], ["date_to", "#misTo"], ["company", "#misCompany"]].forEach(([key, sel]) => { if ($(sel).value) params.set(key, $(sel).value); });
+  // The dates are the ones last asked for with Get data, not whatever is typed in the boxes.
+  [["date_from", _mis.from], ["date_to", _mis.to], ["company", $("#misCompany").value]].forEach(([key, value]) => { if (value) params.set(key, value); });
   const search = $("#misSearch").value.trim();
   if (search) params.set("q", search);
   return params;
@@ -161,6 +165,7 @@ function misQuery() {
 async function misLoad() {
   // A slow reply to an earlier request must not replace a newer one.
   const request = _mis.loadSeq = (_mis.loadSeq || 0) + 1;
+  misBusy(true);
   try {
     const params = misQuery();
     params.set("view", _mis.view);
@@ -180,6 +185,13 @@ async function misLoad() {
     misRender();
     if (_mis.summary) misLoadSummary();
   } catch (error) { misMessage("Could not load trips: " + error.message); }
+  finally { if (request === _mis.loadSeq) misBusy(false); }
+}
+// Shows the driving cab over the table and fades the old numbers until the new ones are in.
+function misBusy(on) {
+  $("#pane-eee-mis").classList.toggle("mis-loading", on);
+  $("#misTableBox").setAttribute("aria-busy", on ? "true" : "false");
+  $("#misLoaderText").textContent = on ? "Getting trips…" : "";
 }
 // The latest open duty of the dates, client and search chosen, wherever in the pages it is.
 async function misNextOpen() {
@@ -238,7 +250,30 @@ async function misLoadDash() {
 }
 
 // ── date range ──
-function misSetRange(from, to) { $("#misFrom").value = from; $("#misTo").value = to; misRefilter(); }
+// The dates on screen (_mis.from, _mis.to) change only here; the boxes can hold dates not asked for yet.
+function misUseDates(from, to) {
+  $("#misFrom").value = _mis.from = from;
+  $("#misTo").value = _mis.to = to;
+}
+function misSetRange(from, to) { misUseDates(from, to); misShowDates(); misRefilter(); }
+function misDatesPending() { return $("#misFrom").value !== _mis.from || $("#misTo").value !== _mis.to; }
+// Says which dates the table is showing, and lights up Get data when the boxes hold other dates.
+function misShowDates() {
+  const pending = misDatesPending();
+  $("#misRange").textContent = (pending ? "Showing " : "") + misRangeLabel();
+  $("#misGet").classList.toggle("secondary", !pending);
+  $("#misGet").title = pending ? "The dates were changed. Press to get the trips of the new dates." : "Get the latest trips of these dates";
+}
+// Get data: nothing is read from the server while the dates are still being chosen.
+function misApplyDates() {
+  if ($("#misFrom").closest(".mis-dates").querySelector(".mis-date-text.bad")) { misMessage("Type the date as DD/MM/YYYY, then press Get data."); return; }
+  const from = $("#misFrom").value, to = $("#misTo").value;
+  misMessage("");
+  // A range typed backwards is read the right way round.
+  if (from && to && from > to) misSetRange(to, from);
+  else misSetRange(from, to);
+  misSyncDates($("#misFrom").closest(".mis-dates"), true);
+}
 function misPreset(name) {
   const today = misIstToday(), monthStart = today.slice(0, 8) + "01";
   if (name === "today") misSetRange(today, today);
@@ -249,12 +284,12 @@ function misPreset(name) {
 }
 // Step the whole range back or forward by its own length (one day when it is a single day).
 function misStep(direction) {
-  const from = $("#misFrom").value || misIstToday(), to = $("#misTo").value || from;
+  const from = _mis.from || misIstToday(), to = _mis.to || from;
   const days = Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
   misSetRange(misShift(from, direction * days), misShift(to, direction * days));
 }
 function misRangeLabel() {
-  const from = $("#misFrom").value, to = $("#misTo").value, today = misIstToday();
+  const from = _mis.from, to = _mis.to, today = misIstToday();
   if (from && from === to) return (from === today ? "Today, " : "") + misDay(from);
   return `${from ? misDay(from) : "Start"} to ${to ? misDay(to) : "latest"}`;
 }
@@ -267,9 +302,9 @@ function misRender() {
   const shown = new Set(trips.map(t => t.id));
   _mis.selected = new Set([..._mis.selected].filter(id => shown.has(id)));
   const counts = { all: sum.trips, open: sum.open, closed: sum.closed, fix: sum.need_fixing, pipeline: sum.pipeline };
-  $("#misRange").textContent = misRangeLabel();
+  misShowDates();
   misSyncDates($("#pane-eee-mis"));
-  $("#misViews").innerHTML = MIS_VIEWS.map(([id, label]) => `<button class="mis-tab${_mis.view === id ? " active" : ""}${(id === "open" || id === "fix") && counts[id] ? " warn" : ""}" role="tab" aria-selected="${_mis.view === id}" onclick="misSetView('${id}')"><span>${label}</span><b>${misCount(counts[id])}</b></button>`).join("");
+  $("#misViews").innerHTML = MIS_VIEWS.map(([id, label]) => `<button class="mis-tab${_mis.view === id ? " active" : ""}${(id === "open" || id === "fix") && counts[id] ? " warn" : ""}" role="tab" data-view="${id}" aria-selected="${_mis.view === id}" onclick="misSetView('${id}')"><span>${label}</span><b>${misCount(counts[id])}</b></button>`).join("");
   // Money of every trip in the dates, client and search chosen, whichever tab is open.
   $("#misMoney").innerHTML = `<div class="mis-sum fare" title="Trip Fare of every trip in these dates, before GST, MCD, parking and toll"><span>Fare</span><b>${misMoney(sum.trip_fare)}</b></div>
     <div class="mis-sum revenue" title="Total Trip Fare of every trip in these dates: fare with GST, MCD, parking and toll"><span>Revenue</span><b>${misMoney(sum.total_trip_fare)}</b></div>`;
@@ -348,7 +383,15 @@ function misSheetRow(t, sr) {
   }).join("");
   return `<tr data-id="${rcEsc(t.id)}" class="${t.issues.length ? "mis-flag" : ""}"><td class="num mis-sr">${sr}</td>${misPick(t)}${misStatusCell(t)}${cells}${misCheckCell(t)}</tr>`;
 }
-function misSetView(view) { _mis.view = view; misRefilter(); }
+// The tab lights up on the click; its trips follow when the server has answered.
+function misSetView(view) {
+  _mis.view = view;
+  $$("#misViews .mis-tab").forEach(tab => {
+    tab.classList.toggle("active", tab.dataset.view === view);
+    tab.setAttribute("aria-selected", tab.dataset.view === view);
+  });
+  misRefilter();
+}
 function misSetLayout(layout) { _mis.layout = layout; misSavePrefs(); misRender(); }
 // The search runs on the server, so wait for a pause in the typing.
 function misOnSearch() { clearTimeout(_mis.searchTimer); _mis.searchTimer = setTimeout(misRefilter, MIS_SEARCH_DELAY); }
@@ -448,12 +491,12 @@ function misCopySelected() {
   const ids = [..._mis.selected];
   rcModal({ title: `Book ${misPlural(ids.length, "trip")} again on another date`,
     sub: "Copies the client, guest, route, driver and cab as new open trips. Fare, kms and times of the old trip are not copied.",
-    okText: "Copy trips", fields: [{ id: "date", label: "New date", type: "date", value: misShift($("#misTo").value || misIstToday(), 1) }],
+    okText: "Copy trips", fields: [{ id: "date", label: "New date", type: "date", value: misShift(_mis.to || misIstToday(), 1) }],
     onOk: async ({ date }) => {
       if (!date) throw new Error("Choose the new date.");
       const result = await misPost("/copy", { ids, date });
       _mis.selected.clear();
-      $("#misFrom").value = $("#misTo").value = date;
+      misUseDates(date, date);
       _mis.page = 1;
       await misReload();
       misMessage(`Booked ${misPlural(result.added, "trip")} on ${misDmy(date)}.` + (result.skipped_existing ? ` ${result.skipped_existing} were already there.` : ""), true);
@@ -524,8 +567,8 @@ async function misUpload(input, kind = "mmt") {
     button.textContent = "Uploading…";
     const result = await send(false);
     // Move the filters so the uploaded trips are on screen.
-    if (result.first_date && (!$("#misFrom").value || result.first_date < $("#misFrom").value)) $("#misFrom").value = result.first_date;
-    if (result.last_date && $("#misTo").value && result.last_date > $("#misTo").value) $("#misTo").value = result.last_date;
+    misUseDates(result.first_date && (!_mis.from || result.first_date < _mis.from) ? result.first_date : _mis.from,
+      result.last_date && _mis.to && result.last_date > _mis.to ? result.last_date : _mis.to);
     if ((result.added || result.updated) && !["", client].includes($("#misCompany").value)) $("#misCompany").value = "";
     _mis.page = 1;
     await misReload();
@@ -711,8 +754,8 @@ function misContext(t) {
 function misOpenForm(trip = null, mode = trip ? "edit" : "new", seed = null) {
   if (!trip && mode !== "new") return;
   const isNew = mode === "new", closing = mode === "close";
-  const company = $("#misCompany").value, from = $("#misFrom").value;
-  const base = trip || { date: from && from === $("#misTo").value ? from : misIstToday(), company_name: company, dispatcher_name: misMe(), ...(seed || {}) };
+  const company = $("#misCompany").value, from = _mis.from;
+  const base = trip || { date: from && from === _mis.to ? from : misIstToday(), company_name: company, dispatcher_name: misMe(), ...(seed || {}) };
   const values = closing && !base.duty_closed_by ? { ...base, duty_closed_by: misMe() } : base;
   const sections = MIS_SECTIONS.filter(([part, , fields]) => !closing || part === "closing").map(([part, title, fields]) => {
     const shown = fields.filter(([key]) => !key.startsWith("mmt_") || values.company_name === "MMT")

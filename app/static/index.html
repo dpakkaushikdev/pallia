@@ -579,6 +579,8 @@
     .mis-grid .mis-date {display:flex;}
     .mis-dates .btn {height:38px;width:38px;padding:0;font-size:18px;line-height:1;}
     .mis-range {font-size:15px;font-weight:600;min-width:150px;}
+    #misGet {height:38px;padding:0 16px;font-size:13.5px;white-space:nowrap;}
+    #misGet:not(.secondary) {box-shadow:0 0 0 4px var(--accent-glow);}
     .mis-chip {border:1px solid var(--border);background:var(--panel);color:var(--muted);border-radius:999px;padding:6px 12px;font:inherit;font-size:12.5px;font-weight:500;cursor:pointer;transition:color .12s,border-color .12s,background .12s;}
     .mis-chip:hover {color:var(--accent);border-color:var(--accent);background:var(--accent-soft);}
     .mis-chip:focus-visible {outline:2px solid var(--accent);outline-offset:2px;}
@@ -660,6 +662,16 @@
     #misRows .cut {max-width:170px;overflow:hidden;text-overflow:ellipsis;}
     #misRows tr.mis-flag td:first-child {box-shadow:inset 3px 0 0 var(--warn);}
     #misRows .mis-empty {padding:36px 18px;text-align:center;color:var(--muted);font-size:14px;cursor:default;}
+    .mis-tablebox {position:relative;}
+    .mis-loader {position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;align-items:center;gap:12px;padding-top:96px;border-radius:10px;background:rgba(255,255,255,.82);font-size:14px;font-weight:600;color:var(--muted);opacity:0;visibility:hidden;transition:opacity .16s,visibility 0s .16s;}
+    /* A reply that comes at once never shows the loader: it waits a moment before fading in. */
+    .mis-loading .mis-loader {opacity:1;visibility:visible;transition:opacity .16s .15s,visibility 0s .15s;}
+    .mis-road {position:relative;width:300px;max-width:80%;height:38px;overflow:hidden;border-bottom:2px dashed var(--border-2);}
+    .mis-cab {position:absolute;left:0;bottom:0;width:56px;height:28px;}
+    .mis-loading .mis-cab {animation:misDrive 1.4s linear infinite;}
+    @keyframes misDrive {from {transform:translateX(-60px);} to {transform:translateX(304px);}}
+    .mis-tab b, .mis-sum b, #misCount, .mis-pager {transition:opacity .15s;}
+    .mis-loading .mis-tab b, .mis-loading .mis-sum b, .mis-loading #misCount, .mis-loading .mis-pager {opacity:.35;}
     .mis-time {font-variant-numeric:tabular-nums;font-weight:600;}
     #misRows td.mis-sr {color:var(--muted);font-weight:600;min-width:34px;}
     .mis-miss {font-size:11.5px;color:var(--warn);margin-top:3px;}
@@ -1251,11 +1263,12 @@
           <label class="mis-pick">Client<select id="misCompany" onchange="misRefilter()"><option value="">All clients</option></select></label>
           <div class="mis-dates">
             <button class="btn secondary" onclick="misStep(-1)" aria-label="Earlier dates">&#8249;</button>
-            <input type="date" id="misFrom" onchange="misRefilter()" aria-label="Trip date from">
+            <input type="date" id="misFrom" onchange="misShowDates()" aria-label="Trip date from">
             <span class="meta">to</span>
-            <input type="date" id="misTo" onchange="misRefilter()" aria-label="Trip date to">
+            <input type="date" id="misTo" onchange="misShowDates()" aria-label="Trip date to">
             <button class="btn secondary" onclick="misStep(1)" aria-label="Later dates">&#8250;</button>
           </div>
+          <button class="btn secondary" id="misGet" onclick="misApplyDates()">Get data</button>
           <span class="mis-range" id="misRange"></span>
           <button class="mis-chip" onclick="misPreset('yesterday')">Yesterday</button>
           <button class="mis-chip" onclick="misPreset('today')">Today</button>
@@ -1293,7 +1306,10 @@
         <table><thead><tr><th>Group</th><th class="num">Trips</th><th class="num">Open</th><th class="num">Km</th><th class="num">Total fare</th><th class="num">Avg per closed trip</th></tr></thead><tbody id="misSummaryBody"></tbody></table>
       </div>
       <div class="ed-list-toolbar"><div class="meta" id="misCount"></div><div class="mis-pager" id="misPagerTop"></div><div class="ed-bulk-tools"><span class="meta" id="misSelected"></span><button class="btn secondary sm" id="misCopy" onclick="misCopySelected()" disabled title="Book the selected trips again on another date">Copy to date</button><button class="btn danger sm" id="misDelete" onclick="misDeleteSelected()" disabled>Delete</button></div></div>
-      <div class="ed-table-wrap"><table class="data-table"><thead><tr id="misHead"></tr></thead><tbody id="misRows"></tbody></table></div>
+      <div class="mis-tablebox" id="misTableBox">
+        <div class="ed-table-wrap"><table class="data-table"><thead><tr id="misHead"></tr></thead><tbody id="misRows"></tbody></table></div>
+        <div class="mis-loader"><div class="mis-road"><svg class="mis-cab" viewBox="0 0 56 28" aria-hidden="true"><rect x="23" y="0.5" width="10" height="4" rx="1.2" fill="#1f2937"/><path d="M3 20.5v-5.2c0-1.4.9-2.3 2.3-2.6l7.4-1.5 5.2-6c.8-.9 1.8-1.4 3-1.4h13.6c1.3 0 2.4.5 3.2 1.5l4.9 6.1 7.6 1.7c1.7.4 2.8 1.6 2.8 3.3v4.1c0 1-.6 1.5-1.5 1.5h-47c-.9 0-1.5-.6-1.5-1.5z" fill="#f5b301"/><path d="M19.6 6.3h7.2v5.2H15.2z M29.6 6.3h5.3l4.2 5.2h-9.5z" fill="#fff" opacity=".92"/><rect x="3" y="15.6" width="50" height="2.2" fill="#1f2937" opacity=".85"/><circle cx="15" cy="22" r="4.6" fill="#1f2937"/><circle cx="15" cy="22" r="1.7" fill="#e5e7eb"/><circle cx="42" cy="22" r="4.6" fill="#1f2937"/><circle cx="42" cy="22" r="1.7" fill="#e5e7eb"/></svg></div><span id="misLoaderText" role="status"></span></div>
+      </div>
       <div class="mis-pager" id="misPagerBottom"></div>
       <datalist id="misZones"></datalist><datalist id="misPackages"></datalist><datalist id="misDriverIds"></datalist>
       <datalist id="misDriverNames"></datalist><datalist id="misCabs"></datalist>
@@ -1946,7 +1962,7 @@
   </div>
 </div>
 <script src="/static/eee_documents.js"></script>
-<script src="/static/eee_mis.js?v=20261126-11"></script>
+<script src="/static/eee_mis.js?v=20261126-12"></script>
 <script src="/static/pallia_verification.js?v=20261013-2"></script>
 
 <script>
