@@ -1,5 +1,6 @@
 """Driver master: a copy of Truein's staff list, with password-protected edits of the web app's own details."""
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import Field
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,7 @@ from app.models import EeeTaxiDriverMaster, User
 from app.services.auth import require_permission
 from app.services.eee_taxi_driver_sync import attendance_today, sync_drivers, sync_if_stale
 from app.services.eee_taxi_drivers import DriverRows, get_driver_rows, save_driver_rows
+from app.services.eee_taxi_master_excel import DRIVER_COLUMNS, XLSX_MEDIA_TYPE, build_master_workbook, download_name
 from app.services.eee_taxi_mis import id_key
 from app.services.truein import is_configured
 from app.services.eee_taxi_rates import get_edit_password_hash
@@ -41,6 +43,14 @@ def _response(db):
 def read(_: User = Depends(_eee_user), db: Session = Depends(get_db)):
     sync_if_stale(db)
     return _response(db)
+
+
+@router.get("/export")
+def export(_: User = Depends(_eee_user), db: Session = Depends(get_db)):
+    """The whole driver master as an Excel file, every detail of every driver."""
+    content = build_master_workbook("Drivers", DRIVER_COLUMNS, [row.model_dump() for row in get_driver_rows(db)])
+    return Response(content, media_type=XLSX_MEDIA_TYPE,
+                    headers={"Content-Disposition": f'attachment; filename="{download_name("Driver")}"'})
 
 
 @router.post("/sync")

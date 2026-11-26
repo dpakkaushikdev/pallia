@@ -1708,6 +1708,7 @@
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <input type="file" id="vmCsv" accept=".csv,text/csv" class="hidden" onchange="vmImport()">
             <button class="btn secondary sm" id="vmImportBtn" onclick="$('#vmCsv').click()">Import vehicle CSV</button>
+            <button class="btn secondary sm" id="vmDownload" onclick="mstDownload('vehicles', this, vmMessage)" title="Every vehicle in the master, with all its details">Download Excel</button>
             <button class="btn sm" id="vmEdit" onclick="vmStartEdit()">Edit vehicles</button>
             <button class="btn secondary sm hidden" id="vmAdd" onclick="vmAddRow()">Add vehicle</button>
             <button class="btn secondary sm hidden" id="vmCancel" onclick="vmCancel()">Cancel</button>
@@ -1733,6 +1734,7 @@
           <div class="meta" id="dmMeta">Loading...</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button class="btn secondary sm hidden" id="dmSync" onclick="dmSync()" title="The list is also refreshed by itself when this page or the MIS is opened and the last check is more than 30 minutes old">Sync from Truein now</button>
+            <button class="btn secondary sm" id="dmDownload" onclick="mstDownload('drivers', this, dmMessage)" title="Every driver in the master, with all their details">Download Excel</button>
             <button class="btn sm" id="dmEdit" onclick="dmStartEdit()">Edit drivers</button>
             <button class="btn secondary sm hidden" id="dmAdd" onclick="dmAddRow()">Add driver</button>
             <button class="btn secondary sm hidden" id="dmCancel" onclick="dmCancel()">Cancel</button>
@@ -5507,6 +5509,7 @@ function vmRender() {
   $("#vmActionsTh").classList.toggle("hidden", !_vm.editing);
   $("#vmAdd").classList.toggle("hidden", !_vm.editing);
   $("#vmEdit").classList.toggle("hidden", _vm.editing);
+  $("#vmDownload").classList.toggle("hidden", _vm.editing);
   $("#vmCancel").classList.toggle("hidden", !_vm.editing);
   $("#vmSave").classList.toggle("hidden", !_vm.editing);
 }
@@ -5635,6 +5638,22 @@ function mstExpiry(rows, key) {
   });
   return found;
 }
+// Saves the master as it is stored (not edits still unsaved, so the button is hidden while editing).
+async function mstDownload(master, button, message) {
+  button.disabled = true;
+  try {
+    const resp = await fetch(`/api/eee-taxi/${master}/export`, { headers: { Authorization: `Bearer ${authToken}` } });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.statusText);
+    const url = URL.createObjectURL(await resp.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = ((resp.headers.get("content-disposition") || "").match(/filename="([^"]+)"/) || [])[1] || master + ".xlsx";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    message("");
+  } catch (error) { message("Could not download the Excel: " + error.message); }
+  finally { button.disabled = false; }
+}
 function mstConfirmDelete(title, onDelete) {
   rcModal({ title, sub: "The row is removed when you save the master.", okText: "Delete", onOk: () => onDelete() });
 }
@@ -5688,6 +5707,7 @@ function dmRender() {
     ["rate", "Departments", new Set(active.map(d => d.department || "")).size, mstBreakdown(active, "department")],
   ]);
   $("#dmEdit").classList.toggle("hidden", _dm.editing);
+  $("#dmDownload").classList.toggle("hidden", _dm.editing);
   $("#dmSync").classList.toggle("hidden", !_dm.fromTruein || _dm.editing);
   $("#dmAdd").classList.toggle("hidden", !_dm.editing || _dm.fromTruein);
   ["#dmCancel", "#dmSave"].forEach(id => $(id).classList.toggle("hidden", !_dm.editing));

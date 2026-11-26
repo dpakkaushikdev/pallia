@@ -1,5 +1,6 @@
 """Vehicle master reads, CSV review, and password-protected replacement."""
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import Field
 from sqlalchemy.orm import Session
 
@@ -7,6 +8,7 @@ from app.api.eee_taxi_rates import check_edit_password
 from app.database import get_db
 from app.models import EeeTaxiVehicleMaster, User
 from app.services.auth import require_permission
+from app.services.eee_taxi_master_excel import VEHICLE_COLUMNS, XLSX_MEDIA_TYPE, build_master_workbook, download_name
 from app.services.eee_taxi_rates import get_edit_password_hash
 from app.services.eee_taxi_vehicles import VehicleRows, get_vehicle_rows, parse_vehicle_csv, save_vehicle_rows
 
@@ -31,6 +33,14 @@ def _response(db):
 @router.get("")
 def read(_: User = Depends(_eee_user), db: Session = Depends(get_db)):
     return _response(db)
+
+
+@router.get("/export")
+def export(_: User = Depends(_eee_user), db: Session = Depends(get_db)):
+    """The whole vehicle master as an Excel file, in the columns Import vehicle CSV reads."""
+    content = build_master_workbook("Vehicles", VEHICLE_COLUMNS, [row.model_dump() for row in get_vehicle_rows(db)])
+    return Response(content, media_type=XLSX_MEDIA_TYPE,
+                    headers={"Content-Disposition": f'attachment; filename="{download_name("Vehicle")}"'})
 
 
 @router.post("/import-csv")
