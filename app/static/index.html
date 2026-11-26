@@ -5659,13 +5659,13 @@ function mstConfirmDelete(title, onDelete) {
 }
 
 // Driver master: add, edit or delete one driver at a time, then save with the masters password.
-const DM_FIELDS = { name: "Name", truein_id: "Truein ID", mobile: "Mobile", alternate_mobile: "Alternate mobile", father_name: "Father name", email: "Email", status: "Status", availability: "Availability", branch: "Branch", department: "Department", date_of_joining: "Date of joining (DD/MM/YYYY)", dl_expiry: "DL expiry (DD/MM/YYYY)", emergency_contact_name: "Emergency contact name", emergency_contact_number: "Emergency contact number", emergency_contact_relationship: "Emergency contact relationship" };
-const DM_COLUMNS = ["name", "truein_id", "mobile", "status", "department", "branch", "dl_expiry"];
+const DM_FIELDS = { name: "Name", truein_id: "Truein ID", mobile: "Mobile", alternate_mobile: "Alternate mobile", father_name: "Father name", email: "Email", status: "Status", availability: "Availability", branch: "Branch", department: "Department", date_of_joining: "Date of joining (DD/MM/YYYY)", dl_number: "DL number", dl_expiry: "DL expiry (DD/MM/YYYY)", emergency_contact_name: "Emergency contact name", emergency_contact_number: "Emergency contact number", emergency_contact_relationship: "Emergency contact relationship" };
+const DM_COLUMNS = ["name", "truein_id", "mobile", "status", "department", "branch", "dl_number", "dl_expiry"];
 const DM_CHOICES = { status: ["Active", "Deactive"] };
 // With Truein connected the list is a copy of Truein's staff: nobody is added or deleted here, and only
 // the details Truein does not hold can be edited. attendance is today's clock-in per Truein ID.
 let _dm = { saved: [], rows: [], editing: false, password: null, fromTruein: false, attendance: {} };
-const DM_TRUEIN_FIELDS = ["name", "truein_id", "mobile", "father_name", "email", "status", "department", "date_of_joining"];
+const DM_TRUEIN_FIELDS = ["name", "truein_id", "mobile", "father_name", "email", "status", "department", "date_of_joining", "dl_number"];
 const DM_TRUEIN_SECTIONS = [
   ["From Truein (change these in Truein)", DM_TRUEIN_FIELDS],
   ["Kept in the web app", ["alternate_mobile", "availability", "branch", "dl_expiry"]],
@@ -5737,7 +5737,7 @@ function dmCancel() {
 const DM_SECTIONS = [
   ["Personal details", ["name", "father_name", "mobile", "alternate_mobile", "email"]],
   ["Work details", ["truein_id", "status", "availability", "branch", "department", "date_of_joining"]],
-  ["Licence", ["dl_expiry"]],
+  ["Licence", ["dl_number", "dl_expiry"]],
   ["Emergency contact", ["emergency_contact_name", "emergency_contact_number", "emergency_contact_relationship"]],
 ];
 function dmEditRow(index) {

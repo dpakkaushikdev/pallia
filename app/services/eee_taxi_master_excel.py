@@ -19,7 +19,7 @@ DRIVER_COLUMNS = [
     ("name", "Name"), ("truein_id", "Truein ID"), ("mobile", "Mobile"), ("alternate_mobile", "Alternate mobile"),
     ("father_name", "Father name"), ("email", "Email"), ("status", "Status"), ("availability", "Availability"),
     ("branch", "Branch"), ("department", "Department"), ("date_of_joining", "Date of joining"),
-    ("dl_expiry", "DL expiry"), ("emergency_contact_name", "Emergency contact name"),
+    ("dl_number", "DL number"), ("dl_expiry", "DL expiry"), ("emergency_contact_name", "Emergency contact name"),
     ("emergency_contact_number", "Emergency contact number"),
     ("emergency_contact_relationship", "Emergency contact relationship"),
 ]

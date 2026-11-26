@@ -16,7 +16,7 @@ DRIVERS = "/api/eee-taxi/drivers"
 VEHICLES = "/api/eee-taxi/vehicles"
 PASSWORD = "MasterEdit1"
 DRIVER = {"name": "TEST DRIVER", "truein_id": "EEED/VK/9999", "mobile": "09000000001", "status": "Active",
-          "dl_expiry": "05/11/2027"}
+          "dl_number": "DL0420110000001", "dl_expiry": "05/11/2027"}
 VEHICLE = {"vehicle_no": "HR55AX3523", "make": "TIGOR-EV", "availability": "Available", "pollution_expiry": "01/02/2027"}
 
 
@@ -60,9 +60,10 @@ def test_driver_master_downloads_every_driver_with_every_detail(client, headers)
     assert response.status_code == 200, response.text
     assert response.headers["content-disposition"].startswith('attachment; filename="Driver_Master_')
     header, first, second = _rows(response.content)
-    assert header[:3] == ("Name", "Truein ID", "Mobile") and "DL expiry" in header and len(header) == 15
+    assert header[:3] == ("Name", "Truein ID", "Mobile") and "DL expiry" in header and len(header) == 16
     assert first[:3] == ("TEST DRIVER", "EEED/VK/9999", "09000000001")    # a mobile keeps its leading zero
     assert first[header.index("DL expiry")] == "05/11/2027"
+    assert first[header.index("DL number")] == "DL0420110000001"
     assert second[0] == "Second Driver" and second[1] is None
 
 

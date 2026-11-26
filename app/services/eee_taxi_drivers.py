@@ -31,6 +31,7 @@ class DriverRow(BaseModel):
     branch: str = Field(default="", max_length=80)
     department: str = Field(default="", max_length=80)
     date_of_joining: str = Field(default="", max_length=20)
+    dl_number: str = Field(default="", max_length=40)
     dl_expiry: str = Field(default="", max_length=20)
     emergency_contact_name: str = Field(default="", max_length=120)
     emergency_contact_number: str = Field(default="", max_length=20)

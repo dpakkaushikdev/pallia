@@ -14,8 +14,10 @@ from tests.test_eee_taxi_mis import ENDPOINT, _book, _index, client, headers  # 
 
 STAFF = [
     {"empId": "EEED/VK/9001", "name": "Test  Driver", "mobile": "+91 90000 00001", "status": "active",
-     "father_name": "FATHER ONE", "email": "one@example.com", "department": "ETS", "joining_date": "2024-02-05"},
-    {"empId": "EEED/TP/9002", "name": "LEFT DRIVER", "mobile": "9000000002", "status": "inactive", "joining_date": ""},
+     "father_name": "FATHER ONE", "email": "one@example.com", "department": "ETS", "joining_date": "2024-02-05",
+     "id_type": "Driving License", "id_number": "dl04 20110000001"},
+    {"empId": "EEED/TP/9002", "name": "LEFT DRIVER", "mobile": "9000000002", "status": "inactive", "joining_date": "",
+     "id_type": "aadhaar", "id_number": "999900009999"},
     {"empId": "EEED/VK/9003", "name": "RETYPED ID", "mobile": "9000000003", "status": "active"},
     {"empId": "", "name": "No Id"}, {"empId": "EEED/VK/9001", "name": "Listed Twice"},
 ]
@@ -66,6 +68,8 @@ def test_truein_staff_become_master_rows_and_keep_the_web_apps_own_details():
     assert (one.father_name, one.email, one.department, one.date_of_joining) == ("FATHER ONE", "one@example.com", "ETS", "05/02/2024")
     assert (one.dl_expiry, one.alternate_mobile, one.branch, one.emergency_contact_name) == ("01/02/2030", "9222222222", "Vasant Kunj", "KIN ONE")
     assert rows["EEED/TP/9002"].status == "Deactive" and rows["EEED/TP/9002"].dl_expiry == ""
+    # Truein's ID number is copied only when it is a driving licence, never an Aadhaar or PAN.
+    assert (one.dl_number, rows["EEED/TP/9002"].dl_number, rows["EEED/VK/9003"].dl_number) == ("DL0420110000001", "", "")
     retyped = rows["EEED/VK/9003"]                                              # same mobile and name, mistyped ID before
     assert (retyped.driver_id, retyped.dl_expiry) == ("d3", "05/06/2031")
     respelled = DriverRow(driver_id="d4", name="Mohd Respelled", truein_id="EEED/NIPS/0904", mobile="9000000004", dl_expiry="07/08/2032")

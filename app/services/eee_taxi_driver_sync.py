@@ -25,6 +25,7 @@ SYNC_EVERY = timedelta(minutes=30)
 ATTENDANCE_EVERY = timedelta(minutes=10)   # Truein allows one punches call every 40 seconds, shared with AppSheet
 IST_OFFSET = timedelta(minutes=330)
 EDITOR = "Truein sync"
+LICENCE_ID_TYPES = ("driving license", "driving licence")
 KEPT_FIELDS = ("alternate_mobile", "availability", "branch", "dl_expiry", "emergency_contact_name",
                "emergency_contact_number", "emergency_contact_relationship")
 
@@ -52,6 +53,13 @@ def _id_number(truein_id: str) -> str:
     return (re.findall(r"\d+", truein_id or "") or [""])[-1].lstrip("0")
 
 
+def _licence_number(person: dict) -> str:
+    """Truein keeps one ID per person; it is copied only when that ID is the driving licence."""
+    if str(person.get("id_type") or "").strip().lower() not in LICENCE_ID_TYPES:
+        return ""
+    return re.sub(r"[\s-]+", "", str(person.get("id_number") or "")).upper()[:40]
+
+
 def rows_from_truein(staff: list[dict], old_rows: list[DriverRow]) -> list[DriverRow]:
     """One master row per person in Truein, with the web app's own details kept from their old row."""
     by_id = {id_key(row.truein_id): row for row in old_rows if id_key(row.truein_id)}
@@ -76,6 +84,7 @@ def rows_from_truein(staff: list[dict], old_rows: list[DriverRow]) -> list[Drive
             father_name=_text(person.get("father_name"), 120), email=_text(person.get("email"), 254),
             status="Active" if str(person.get("status") or "").strip().lower() == "active" else "Deactive",
             department=_text(person.get("department"), 80), date_of_joining=_date(person.get("joining_date")),
+            dl_number=_licence_number(person),
             **({field: getattr(old, field) for field in KEPT_FIELDS} if old else {}),
         ))
     return rows

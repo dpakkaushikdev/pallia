@@ -119,7 +119,7 @@ def test_master_workbook_keeps_useful_driver_details_only():
         "driver_id": "abc12345", "name": "TEST DRIVER", "truein_id": "EEED/VK/9999",
         "mobile": "9000000001", "alternate_mobile": "", "father_name": "TEST FATHER", "email": "a@b.com",
         "status": "Active", "availability": "Available", "branch": "Test Branch", "department": "Ad-hoc",
-        "date_of_joining": "09/03/2026", "dl_expiry": "19/02/2038", "emergency_contact_name": "Test Contact",
+        "date_of_joining": "09/03/2026", "dl_number": "", "dl_expiry": "19/02/2038", "emergency_contact_name": "Test Contact",
         "emergency_contact_number": "9000000002", "emergency_contact_relationship": "Parent",
     }
 
