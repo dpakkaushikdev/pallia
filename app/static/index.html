@@ -1716,13 +1716,14 @@
         <div class="sec-hd">
           <div class="meta" id="dmMeta">Loading...</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn secondary sm hidden" id="dmSync" onclick="dmSync()" title="The list is also refreshed by itself when this page or the MIS is opened and the last check is more than 30 minutes old">Sync from Truein now</button>
             <button class="btn sm" id="dmEdit" onclick="dmStartEdit()">Edit drivers</button>
             <button class="btn secondary sm hidden" id="dmAdd" onclick="dmAddRow()">Add driver</button>
             <button class="btn secondary sm hidden" id="dmCancel" onclick="dmCancel()">Cancel</button>
             <button class="btn sm hidden" id="dmSave" onclick="dmSave()">Save driver master</button>
           </div>
         </div>
-        <p class="meta">EEE-Taxi drivers with their Truein ID and contact details. Unlock with the masters password to add, edit or delete a driver, then save.</p>
+        <p class="meta" id="dmHelp">EEE-Taxi drivers with their Truein ID and contact details. Unlock with the masters password to add, edit or delete a driver, then save.</p>
         <div id="dmMsg" class="hidden" style="margin-bottom:12px;" aria-live="polite"></div>
         <div class="mis-cards mst-cards" id="dmCards" role="status" aria-label="Driver master totals"></div>
         <div class="card" style="overflow:auto;">
@@ -1945,7 +1946,7 @@
   </div>
 </div>
 <script src="/static/eee_documents.js"></script>
-<script src="/static/eee_mis.js?v=20261126-9"></script>
+<script src="/static/eee_mis.js?v=20261126-10"></script>
 <script src="/static/pallia_verification.js?v=20261013-2"></script>
 
 <script>
@@ -5576,8 +5577,8 @@ function mstRowActions(prefix, index) {
   return `<td style="white-space:nowrap;"><button class="btn secondary sm" onclick="${prefix}EditRow(${index})">Edit</button> <button class="btn secondary sm" onclick="${prefix}DeleteRow(${index})">Delete</button></td>`;
 }
 // One row's form: a wide dialog with the fields side by side under headings, so nothing needs scrolling.
-function mstRowForm(title, fields, row, onSave, choices = {}, sections = [["Details", Object.keys(fields)]]) {
-  const control = id => choices[id]
+function mstRowForm(title, fields, row, onSave, choices = {}, sections = [["Details", Object.keys(fields)]], locked = []) {
+  const control = id => locked.includes(id) ? `<input type="text" data-f="${id}" value="${rcEsc(row[id] || "")}" readonly tabindex="-1">` : choices[id]
     ? `<select data-f="${id}">${choices[id].map(o => `<option${o === row[id] ? " selected" : ""}>${rcEsc(o)}</option>`).join("")}</select>`
     : `<input type="text" data-f="${id}" value="${rcEsc(row[id] || "")}" autocomplete="off">`;
   const wrap = document.createElement("div");
@@ -5597,7 +5598,7 @@ function mstRowForm(title, fields, row, onSave, choices = {}, sections = [["Deta
     try { onSave(values); close(); } catch (error) { wrap.querySelector("[data-err]").textContent = error.message; }
   });
   wrap.addEventListener("keydown", event => { if (event.key === "Escape") close(); });
-  wrap.querySelector("[data-f]").focus();
+  (wrap.querySelector("[data-f]:not([readonly])") || wrap.querySelector("[data-cancel]")).focus();
 }
 // Totals shown above a master's table: [tone, label, value, note] per card.
 function mstCards(selector, cards) {
@@ -5626,7 +5627,20 @@ function mstConfirmDelete(title, onDelete) {
 const DM_FIELDS = { name: "Name", truein_id: "Truein ID", mobile: "Mobile", alternate_mobile: "Alternate mobile", father_name: "Father name", email: "Email", status: "Status", availability: "Availability", branch: "Branch", department: "Department", date_of_joining: "Date of joining (DD/MM/YYYY)", dl_expiry: "DL expiry (DD/MM/YYYY)", emergency_contact_name: "Emergency contact name", emergency_contact_number: "Emergency contact number", emergency_contact_relationship: "Emergency contact relationship" };
 const DM_COLUMNS = ["name", "truein_id", "mobile", "status", "department", "branch", "dl_expiry"];
 const DM_CHOICES = { status: ["Active", "Deactive"] };
-let _dm = { saved: [], rows: [], editing: false, password: null };
+// With Truein connected the list is a copy of Truein's staff: nobody is added or deleted here, and only
+// the details Truein does not hold can be edited. attendance is today's clock-in per Truein ID.
+let _dm = { saved: [], rows: [], editing: false, password: null, fromTruein: false, attendance: {} };
+const DM_TRUEIN_FIELDS = ["name", "truein_id", "mobile", "father_name", "email", "status", "department", "date_of_joining"];
+const DM_TRUEIN_SECTIONS = [
+  ["From Truein (change these in Truein)", DM_TRUEIN_FIELDS],
+  ["Kept in the web app", ["alternate_mobile", "availability", "branch", "dl_expiry"]],
+  ["Emergency contact", ["emergency_contact_name", "emergency_contact_number", "emergency_contact_relationship"]],
+];
+function dmToday(row) {
+  const punch = _dm.attendance[row.truein_id];
+  if (!punch || !punch.in) return row.status === "Deactive" ? "" : '<span class="meta">Not in</span>';
+  return punch.out ? `<span class="meta">Out ${rcEsc(punch.out)}</span>` : `<span class="badge generated">In since ${rcEsc(punch.in)}</span>`;
+}
 function dmMessage(text, ok = false) {
   $("#dmMsg").className = text ? "extraction-note " + (ok ? "ok" : "err") : "hidden";
   $("#dmMsg").textContent = text;
@@ -5634,32 +5648,43 @@ function dmMessage(text, ok = false) {
 function dmRender() {
   const query = $("#dmSearch").value.trim().toLowerCase();
   const filters = { status: mstFillFilter("#dmFilterStatus", _dm.rows, "status"), department: mstFillFilter("#dmFilterDepartment", _dm.rows, "department"), branch: mstFillFilter("#dmFilterBranch", _dm.rows, "branch") };
-  $("#dmTable thead tr").innerHTML = DM_COLUMNS.map(key => `<th>${rcEsc(DM_FIELDS[key].replace(/ \(.*\)$/, ""))}</th>`).join("") + (_dm.editing ? "<th>Actions</th>" : "");
+  const heading = key => `<th>${rcEsc(DM_FIELDS[key].replace(/ \(.*\)$/, ""))}</th>` + (key === "status" && _dm.fromTruein ? "<th>Today</th>" : "");
+  const cell = (row, key) => `<td>${rcEsc(row[key] || "")}</td>` + (key === "status" && _dm.fromTruein ? `<td>${dmToday(row)}</td>` : "");
+  // A list copied from Truein has no Delete: the next sync would bring the driver back.
+  const actions = index => _dm.fromTruein ? `<td><button class="btn secondary sm" onclick="dmEditRow(${index})">Edit</button></td>` : mstRowActions("dm", index);
+  $("#dmTable thead tr").innerHTML = DM_COLUMNS.map(heading).join("") + (_dm.editing ? "<th>Actions</th>" : "");
   $("#dmTable tbody").innerHTML = _dm.rows.map((row, index) => {
     if (query && !`${row.name} ${row.truein_id} ${row.mobile}`.toLowerCase().includes(query)) return "";
     if (Object.entries(filters).some(([key, value]) => value && (row[key] || "").trim() !== value)) return "";
-    return `<tr>${DM_COLUMNS.map(key => `<td>${rcEsc(row[key] || "")}</td>`).join("")}${_dm.editing ? mstRowActions("dm", index) : ""}</tr>`;
-  }).join("") || `<tr><td colspan="${DM_COLUMNS.length + 1}" class="meta">${_dm.rows.length ? "No matching drivers." : "No drivers."}</td></tr>`;
+    return `<tr>${DM_COLUMNS.map(key => cell(row, key)).join("")}${_dm.editing ? actions(index) : ""}</tr>`;
+  }).join("") || `<tr><td colspan="${DM_COLUMNS.length + 2}" class="meta">${_dm.rows.length ? "No matching drivers." : "No drivers."}</td></tr>`;
   const active = _dm.rows.filter(d => d.status !== "Deactive"), licence = mstExpiry(active, "dl_expiry");
   const free = active.filter(d => d.availability === "Available").length;
+  const punches = _dm.rows.map(d => _dm.attendance[d.truein_id]).filter(p => p && p.in), onDuty = punches.filter(p => !p.out).length;
   mstCards("#dmCards", [
     ["lead", "Total drivers", _dm.rows.length, `${active.length} active · ${_dm.rows.length - active.length} deactive`],
-    ["fare", "Active drivers", active.length, `${free} available · ${active.length - free} not available`],
-    ["billed", "Deactive drivers", _dm.rows.length - active.length, "Kept in the master, flagged if used on a trip"],
-    ["rate", "Active without Truein ID", active.filter(d => !d.truein_id).length, "The MIS cannot match these by Driver ID"],
+    _dm.fromTruein ? ["fare", "On duty now", onDuty, `Clocked in on Truein today · ${punches.length - onDuty} clocked out`]
+      : ["fare", "Active drivers", active.length, `${free} available · ${active.length - free} not available`],
+    _dm.fromTruein ? ["km", "Active drivers", active.length, "Active in Truein"]
+      : ["rate", "Active without Truein ID", active.filter(d => !d.truein_id).length, "The MIS cannot match these by Driver ID"],
+    ["billed", "Deactive drivers", _dm.rows.length - active.length, "Flagged only on a trip still to be run"],
     ["avg", "Licence expired", licence.expired, `Active drivers · ${licence.due} more expire within 30 days`],
-    ["km", "Departments", new Set(active.map(d => d.department || "")).size, mstBreakdown(active, "department")],
+    ["rate", "Departments", new Set(active.map(d => d.department || "")).size, mstBreakdown(active, "department")],
   ]);
   $("#dmEdit").classList.toggle("hidden", _dm.editing);
-  ["#dmAdd", "#dmCancel", "#dmSave"].forEach(id => $(id).classList.toggle("hidden", !_dm.editing));
+  $("#dmSync").classList.toggle("hidden", !_dm.fromTruein || _dm.editing);
+  $("#dmAdd").classList.toggle("hidden", !_dm.editing || _dm.fromTruein);
+  ["#dmCancel", "#dmSave"].forEach(id => $(id).classList.toggle("hidden", !_dm.editing));
 }
 async function dmLoad() {
   try {
     const data = await api("/api/eee-taxi/drivers");
-    _dm = { saved: data.rows, rows: structuredClone(data.rows), editing: false, password: null };
+    _dm = { saved: data.rows, rows: structuredClone(data.rows), editing: false, password: null, fromTruein: !!data.from_truein, attendance: data.attendance || {} };
     _mstHasPassword = data.has_edit_password;
-    $("#dmMeta").textContent = `${data.rows.length} drivers` + (data.updated_by ? `; last saved by ${data.updated_by}` : "");
-    dmMessage("");
+    const checked = data.synced_at ? new Date(data.synced_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "not yet";
+    $("#dmMeta").textContent = `${data.rows.length} drivers` + (data.from_truein ? `; copied from Truein, last checked ${checked}` : data.updated_by ? `; last saved by ${data.updated_by}` : "");
+    if (data.from_truein) $("#dmHelp").textContent = "This list is a copy of the staff in Truein and keeps itself up to date: a driver added or made inactive in Truein shows here by itself. Edit drivers only changes the details Truein does not hold (licence expiry, alternate mobile, availability, branch, emergency contact).";
+    dmMessage(data.sync_error ? "The last check with Truein did not work, so the list is as it was before: " + data.sync_error : "");
     dmRender();
   } catch (error) { dmMessage("Could not load driver master: " + error.message); }
 }
@@ -5684,7 +5709,19 @@ function dmEditRow(index) {
     if (!values.name) throw new Error("Name is required.");
     _dm.rows[index] = { ..._dm.rows[index], ...values };
     dmRender(); dmMessage("Driver updated. Click Save driver master to keep the change.", true);
-  }, DM_CHOICES, DM_SECTIONS);
+  }, DM_CHOICES, _dm.fromTruein ? DM_TRUEIN_SECTIONS : DM_SECTIONS, _dm.fromTruein ? DM_TRUEIN_FIELDS : []);
+}
+async function dmSync() {
+  const button = $("#dmSync");
+  button.disabled = true;
+  button.textContent = "Asking Truein…";
+  try {
+    const data = await api("/api/eee-taxi/drivers/sync", { method: "POST" });
+    await dmLoad();
+    const s = data.sync;
+    dmMessage(s.added || s.removed || s.changed ? `Copied from Truein: ${s.drivers} drivers. ${s.added} added, ${s.changed} updated, ${s.removed} removed.` : `Checked with Truein: all ${s.drivers} drivers are already up to date.`, true);
+  } catch (error) { dmMessage(error.message); }
+  finally { button.disabled = false; button.textContent = "Sync from Truein now"; }
 }
 function dmAddRow() {
   mstRowForm("Add driver", DM_FIELDS, {}, values => {

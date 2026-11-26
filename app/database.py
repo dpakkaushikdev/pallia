@@ -192,6 +192,15 @@ def _migrate_existing_db() -> None:
                     conn.execute(text(f"ALTER TABLE eee_taxi_document_entries ADD COLUMN {column} {definition}"))
             conn.commit()
 
+        if "eee_taxi_driver_master" in inspector.get_table_names():
+            existing = {c["name"] for c in inspector.get_columns("eee_taxi_driver_master")}
+            datetime_type = DateTime().compile(dialect=engine.dialect)
+            for column, kind in (("synced_at", datetime_type), ("sync_error", "VARCHAR(255)"),
+                                 ("attendance", JSON().compile(dialect=engine.dialect)), ("attendance_at", datetime_type)):
+                if column not in existing:
+                    conn.execute(text(f"ALTER TABLE eee_taxi_driver_master ADD COLUMN {column} {kind}"))
+            conn.commit()
+
         if "eee_taxi_mis_trips" in inspector.get_table_names():
             existing = {c["name"] for c in inspector.get_columns("eee_taxi_mis_trips")}
             if "in_pipeline" not in existing:

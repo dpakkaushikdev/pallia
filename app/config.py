@@ -49,6 +49,8 @@ class Settings(BaseSettings):
 
     # --- Gemini ---
     gemini_api_key: str = ""
+    # Truein (attendance system) "API Access Key"; the EEE-Taxi driver master is copied from its staff list.
+    truein_subscription_key: str = ""
     gemini_model: str = "gemini-2.0-flash"
 
     # --- TMS ---

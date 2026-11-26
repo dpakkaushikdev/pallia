@@ -23,7 +23,7 @@ GROUP_KEYS = ("company_name", "date", "dispatcher_name", "driver_name", "cab_no"
 SEARCH_KEYS = ("guest_name", "driver_name", "driver_id", "cab_no", "route_no", "pickup_address", "drop_location",
                "dispatcher_name", "pickup_zone", "drop_zone", "company_other")
 # What decides a driver problem and a cab problem; "hired" is in both because a hired cab or driver is never one.
-DRIVER_KEYS = ("driver_id", "driver_name", "driver_contact", "hired")
+DRIVER_KEYS = ("driver_id", "driver_name", "driver_contact", "hired", "still_open")
 CAB_KEYS = ("cab_no", "hired")
 MAX_GROUPS = 500
 IST_OFFSET = timedelta(minutes=330)
@@ -47,6 +47,11 @@ def ist_today() -> date:
 def field(key: str) -> ColumnElement:
     """One MIS column as text ('' when empty)."""
     return func.coalesce(Trip.data[key].as_string(), "")
+
+
+def _crew_column(key: str) -> ColumnElement:
+    """A ``Crew`` field as the database sees it; ``still_open`` is worked out, the rest are MIS columns."""
+    return case((_closed(), ""), else_="Yes") if key == "still_open" else field(key)
 
 
 def _amount(key: str) -> ColumnElement:
@@ -97,7 +102,7 @@ def _crew_check(db: Session, conditions: list[ColumnElement], index: MasterIndex
     The masters are matched in Python (Truein ID, then phone, then name), so the
     distinct driver and cab values are read, not the trips themselves.
     """
-    columns = [field(key).label(key) for key in Crew._fields]
+    columns = [_crew_column(key).label(key) for key in Crew._fields]
     rows = db.query(*columns, func.count(Trip.id)).filter(*conditions).group_by(*Crew._fields)
     flagged, bad_drivers, bad_cabs = 0, set(), set()
     for *values, count in rows:
@@ -108,7 +113,7 @@ def _crew_check(db: Session, conditions: list[ColumnElement], index: MasterIndex
         if cab_bad:
             bad_cabs.add(tuple(getattr(crew, key) for key in CAB_KEYS))
         flagged += count if driver_bad or cab_bad else 0
-    by_driver = tuple_(*(field(key) for key in DRIVER_KEYS)).in_(bad_drivers) if bad_drivers else false()
+    by_driver = tuple_(*(_crew_column(key) for key in DRIVER_KEYS)).in_(bad_drivers) if bad_drivers else false()
     by_cab = tuple_(*(field(key) for key in CAB_KEYS)).in_(bad_cabs) if bad_cabs else false()
     return flagged, or_(by_driver, by_cab)
 

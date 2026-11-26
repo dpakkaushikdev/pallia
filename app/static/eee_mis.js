@@ -138,7 +138,9 @@ async function misLoadLookups() {
     $("#misStale").classList.toggle("hidden", !(mine && _mis.lookups.page_version && mine[1] !== _mis.lookups.page_version));
     $("#misDriverIds").innerHTML = _mis.lookups.drivers.filter(d => d.truein_id).map(d => `<option value="${rcEsc(d.truein_id)}">${rcEsc(d.name)}</option>`).join("");
     // The name list shows each driver with their ID; picking one fills the Driver ID.
-    misOptions("#misDriverNames", _mis.lookups.drivers.map(misDriverLabel));
+    // Drivers who have left are not offered; those clocked in today (from Truein) come first.
+    const working = _mis.lookups.drivers.filter(d => d.status !== "Deactive");
+    misOptions("#misDriverNames", [...working.filter(misOnDuty), ...working.filter(d => !misOnDuty(d))].map(misDriverLabel));
     // Zones come from the fixed list only: the old sheets hold mistyped zones such as "8/80".
     misOptions("#misZones", _mis.lookups.zones);
     misOptions("#misCabs", _mis.lookups.cabs);
@@ -680,8 +682,9 @@ function misRecalc(form, base, changed = "") {
   state.className = "mis-state " + (missing.length ? "open" : "closed");
   state.textContent = missing.length ? `Will stay Open: needs ${missing.join(", ")}` : "Will be saved as Closed";
 }
-// How a driver reads in the Driver Name list: "NAME (EEED/VK/0044)", or just the name when there is no ID.
-function misDriverLabel(driver) { return driver.truein_id ? `${driver.name} (${driver.truein_id})` : driver.name; }
+// How a driver reads in the Driver Name list: "NAME (EEED/VK/0044)", with " - In" when clocked in today.
+function misOnDuty(driver) { return !!(driver.today && driver.today.in && !driver.today.out); }
+function misDriverLabel(driver) { return (driver.truein_id ? `${driver.name} (${driver.truein_id})` : driver.name) + (misOnDuty(driver) ? " - In" : ""); }
 function misFillDriver(form, changedKey) {
   const values = misFormValues(form);
   if (values.hired === "Yes") return;

@@ -168,6 +168,11 @@ class MisTrip(BaseModel):
     def status(self) -> str:
         return "Open" if self.missing else "Closed"
 
+    @property
+    def still_open(self) -> str:
+        """'Yes' while the duty is not closed (text, so a grouped database read can carry the same flag)."""
+        return "Yes" if self.missing else ""
+
     @model_validator(mode="after")
     def derived_values(self):
         if self.company_name != OTHERS:
@@ -261,6 +266,7 @@ class Crew(NamedTuple):
     driver_contact: str
     cab_no: str
     hired: str = ""
+    still_open: str = "Yes"
 
 
 def name_key(name: str) -> str:
@@ -388,7 +394,8 @@ class MasterIndex:
             return f"Driver ID {trip.driver_id} not in driver master{hint}"
         if driver is None:
             return self._half_match(trip)
-        return "Driver is Deactive in the master" if driver.status == "Deactive" else ""
+        # Someone who has since left drove their closed trips rightly; only a trip still to run is a problem.
+        return "Driver is Deactive in the master" if driver.status == "Deactive" and trip.still_open else ""
 
     def cab_issue(self, trip: MisTrip | Crew) -> str:
         if not trip.cab_no:

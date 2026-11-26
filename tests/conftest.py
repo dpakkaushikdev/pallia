@@ -14,3 +14,5 @@ os.environ["AUTH_JWT_SECRET"] = "test-secret"
 os.environ["SUPABASE_DB_URL"] = ""
 os.environ["SUPABASE_URL"] = ""
 os.environ["SUPABASE_KEY"] = ""
+# Nor Truein: with the real key the driver master would be replaced from the live staff list.
+os.environ["TRUEIN_SUBSCRIPTION_KEY"] = ""

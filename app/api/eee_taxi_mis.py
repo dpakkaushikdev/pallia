@@ -16,9 +16,10 @@ from app.database import get_db
 from app.models import EeeTaxiMisClient, EeeTaxiMisTrip, User
 from app.api.eee_taxi_rates import check_edit_password
 from app.services.auth import require_permission
+from app.services.eee_taxi_driver_sync import attendance_today, sync_if_stale
 from app.services.eee_taxi_drivers import get_driver_rows
 from app.services.eee_taxi_mis import (
-    STATUSES, FixList, MasterIndex, MisTrip, copy_for_date, find_duplicate, list_trips, parse_trip, stamp_closer,
+    STATUSES, FixList, MasterIndex, MisTrip, copy_for_date, id_key, find_duplicate, list_trips, parse_trip, stamp_closer,
     store_trip, trip_response,
 )
 from app.services.eee_taxi_mis_excel import build_mis_workbook, parse_mmt_export
@@ -148,10 +149,12 @@ def _page_version() -> str:
 
 @router.get("/lookups")
 def lookups(_: User = Depends(_eee_user), db: Session = Depends(get_db)):
-    """Choices for the trip form: drivers, cabs and companies."""
+    """Choices for the trip form: drivers (with today's clock-in from Truein), cabs and companies."""
+    sync_if_stale(db)
+    today = attendance_today(db)
     return {
         "drivers": [{"name": d.name, "truein_id": d.truein_id, "mobile": d.mobile,
-                     "alternate_mobile": d.alternate_mobile, "status": d.status}
+                     "alternate_mobile": d.alternate_mobile, "status": d.status, "today": today.get(id_key(d.truein_id))}
                     for d in get_driver_rows(db)],
         "cabs": sorted(row.vehicle_no for row in get_vehicle_rows(db)),
         "companies": list(all_companies()), "statuses": list(STATUSES), "zones": list(ZONES),

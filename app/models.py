@@ -437,6 +437,12 @@ class EeeTaxiDriverMaster(Base):
     rows: Mapped[list] = mapped_column(JSON, default=list)
     updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Copied from Truein (see app.services.eee_taxi_driver_sync): when it was last tried and what went wrong.
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    sync_error: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Today's clock-ins from Truein, kept between page loads: {"day": "YYYY-MM-DD", "staff": {id: {"in", "out"}}}.
+    attendance: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    attendance_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class EeeTaxiMisTrip(Base):
