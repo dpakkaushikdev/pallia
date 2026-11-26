@@ -280,14 +280,14 @@ function misRender() {
     (_mis.view === "pipeline" || !sum.trips ? "" : ` · all ${misCount(sum.trips)} in these dates ran ${misCount(sum.total_kms)} km`);
   const piped = _mis.view === "pipeline", desk = _mis.layout === "desk" || piped;
   const pick = `<th><input type="checkbox" id="misAll" aria-label="Select all trips on this page" onchange="misSelectAll(this.checked)"></th>`;
-  // Desk order asked for by the team: Sr no, date, time, driver, company, guest, pick-up, then the rest.
+  // Desk order asked for by the team: Sr no, date, time, driver, cab, DS no/Route No, company, guest, pick-up, then the rest.
   $("#misHead").innerHTML = `<th class="num">Sr</th>${pick}` +
-    (desk ? "<th>Date</th><th>Time</th><th>Driver name / ID</th><th>Company</th><th>Client name / contact</th><th>Pickup location</th><th>Drop location</th><th>Cab No</th><th>Status</th><th>Drop</th><th class='num'>Kms</th><th class='num'>Fare</th><th>Check</th><th class='mis-act'></th>"
+    (desk ? "<th>Date</th><th>Time</th><th>Driver name / ID</th><th>Cab No</th><th>DS no/Route No</th><th>Company</th><th>Client name</th><th>Pickup location</th><th>Drop location</th><th>Status</th><th>Drop</th><th class='num'>Kms</th><th class='num'>Fare</th><th>Check</th><th class='mis-act'></th>"
       : "<th>Status</th>" + MIS_SHEET.map(([, label, kind]) => `<th${kind === "num" ? ' class="num"' : ""}>${rcEsc(label)}</th>`).join("") + "<th>Check</th>");
   // The serial number runs on across the pages: page 2 of 50-a-page starts at 51.
   const firstSr = (_mis.page - 1) * _mis.pageSize + 1;
   $("#misRows").innerHTML = trips.map((t, i) => desk ? misDeskRow(t, firstSr + i) : misSheetRow(t, firstSr + i)).join("") ||
-    `<tr><td colspan="${desk ? 16 : MIS_SHEET.length + 4}" class="mis-empty">${misEmptyText()}</td></tr>`;
+    `<tr><td colspan="${desk ? 17 : MIS_SHEET.length + 4}" class="mis-empty">${misEmptyText()}</td></tr>`;
   misRenderPager();
   misUpdateSelection();
 }
@@ -330,10 +330,11 @@ function misDeskRow(t, sr) {
   return `<tr data-id="${rcEsc(t.id)}" class="${t.issues.length ? "mis-flag" : ""}"><td class="num mis-sr">${sr}</td>${misPick(t)}
     <td>${rcEsc(today + misDay(t.date))}</td><td class="mis-time">${rcEsc(t.pickup_time || "–")}</td>
     <td>${rcEsc(t.driver_name || "–")}<div class="meta">${rcEsc(t.driver_id || (t.hired ? "Hired" : ""))}</div></td>
+    <td>${rcEsc(t.cab_no || "–")}</td><td>${rcEsc(t.route_no || "–")}</td>
     <td><b>${rcEsc(t.company_name)}</b>${t.company_other ? `<div class="meta">${rcEsc(t.company_other)}</div>` : ""}</td>
-    <td><div class="cut" title="${rcEsc(t.guest_name)}">${rcEsc(t.guest_name || "–")}</div><div class="meta">${rcEsc(t.route_no)}</div></td>
+    <td><div class="cut" title="${rcEsc(t.guest_name)}">${rcEsc(t.guest_name || "–")}</div></td>
     <td>${place(t.pickup_address, t.pickup_zone)}</td><td>${place(t.drop_location, t.drop_zone)}</td>
-    <td>${rcEsc(t.cab_no || "–")}</td>${misStatusCell(t)}
+    ${misStatusCell(t)}
     <td class="mis-time">${rcEsc(t.drop_time)}<div class="meta">${rcEsc(t.trip_duration && t.drop_time ? t.trip_duration + " h" : "")}</div></td>
     <td class="num">${rcEsc(t.total_kms)}</td><td class="num">${t.trip_fare ? misMoney(misFare(t)) : ""}</td>${misCheckCell(t)}
     <td class="mis-act">${_mis.view === "pipeline" ? `<button class="btn secondary sm" data-unpipe="${rcEsc(t.id)}" title="The trip stays in the MIS">Remove from pipeline</button>`
