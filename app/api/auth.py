@@ -23,6 +23,14 @@ PALLIA_MODULES = {"billing", "tracking", "accounts", "others", "api_dashboard"}
 EEE_MODULES = {"eee_taxi"}
 
 
+def _checked_password(password: str) -> str:
+    """A password is saved exactly as typed, so a space nobody sees at either end would lock the user out."""
+    if password != password.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="The password cannot start or end with a space. Type it again.")
+    return password
+
+
 @router.get("/needs-setup")
 def needs_setup(db: Session = Depends(get_db)):
     """Returns true when zero users exist — lets the login page show first-run setup."""
@@ -67,7 +75,7 @@ def register_user(
     user = User(
         email=email,
         full_name=body.full_name,
-        hashed_password=get_password_hash(body.password),
+        hashed_password=get_password_hash(_checked_password(body.password)),
         role=UserRole(role),
         permissions=permissions,
     )
@@ -127,7 +135,7 @@ def update_user(
         if not user.permissions:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one module for the chosen business.")
     if body.password:
-        user.hashed_password = get_password_hash(body.password)
+        user.hashed_password = get_password_hash(_checked_password(body.password))
     user.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(user)

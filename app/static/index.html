@@ -528,6 +528,8 @@
     .perm-check { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--input-border); border-radius: var(--radius-sm); padding: 8px 12px; cursor: pointer; transition: border-color .12s; }
     .perm-check:hover { border-color: var(--accent); }
     .perm-check input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--accent); cursor: pointer; }
+    .um-show { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+    .um-show input { width: auto; margin: 0; accent-color: var(--accent); cursor: pointer; }
     .perm-check span { font-size: 13px; font-weight: 500; text-transform: capitalize; }
     .user-perms { display: flex; flex-wrap: wrap; gap: 4px; }
 
@@ -1922,7 +1924,7 @@
     <div class="grid-2" style="gap:12px;margin-bottom:14px;">
       <div>
         <label class="field">Email</label>
-        <input type="email" id="umEmail" placeholder="user@example.com" />
+        <input type="email" id="umEmail" placeholder="user@example.com" autocomplete="off" />
       </div>
       <div>
         <label class="field">Full Name</label>
@@ -1932,7 +1934,9 @@
     <div class="grid-2" style="gap:12px;margin-bottom:14px;">
       <div>
         <label class="field">Password <span id="umPwdHint" style="font-size:10px;color:var(--muted);text-transform:none;">(leave blank to keep)</span></label>
-        <input type="password" id="umPassword" placeholder="••••••••" />
+        <!-- new-password: the browser must not drop the admin's own saved password into this box. -->
+        <input type="password" id="umPassword" placeholder="••••••••" autocomplete="new-password" />
+        <label class="um-show"><input type="checkbox" id="umShowPwd" onchange="umShowPassword(this.checked)" /> Show password</label>
       </div>
       <div>
         <label class="field">Role</label>
@@ -2540,7 +2544,13 @@ function getSelectedPerms(containerId) {
   return [...$$(`#${containerId} input[type="checkbox"]:checked`)].map(el => el.value);
 }
 
+function umShowPassword(show) {
+  $("#umShowPwd").checked = show;
+  $("#umPassword").type = show ? "text" : "password";
+}
+
 function openCreateUserModal() {
+  umShowPassword(false);
   $("#userModalId").value = "";
   $("#userModalTitle").textContent = "Add User";
   $("#userModalSub").textContent = "Create a new user account and assign module access.";
@@ -2556,6 +2566,7 @@ function openCreateUserModal() {
 }
 
 function openEditUserModal(u) {
+  umShowPassword(false);
   $("#userModalId").value = u.id;
   $("#userModalTitle").textContent = "Edit User";
   $("#userModalSub").textContent = "Update permissions, name, or password.";
