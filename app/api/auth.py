@@ -24,10 +24,11 @@ EEE_MODULES = {"eee_taxi"}
 
 
 def _checked_password(password: str) -> str:
-    """A password is saved exactly as typed, so a space nobody sees at either end would lock the user out."""
-    if password != password.strip():
+    """A password is saved exactly as typed, so a space in it (a mobile number typed '90000 00001', or one copied
+    along at the end) locks the user out when it is not typed again at sign-in."""
+    if any(char.isspace() for char in password):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="The password cannot start or end with a space. Type it again.")
+                            detail="The password cannot have a space in it. Type it without spaces.")
     return password
 
 

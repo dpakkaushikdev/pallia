@@ -91,6 +91,8 @@
     .login-box .login-sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
     .login-box label { display: block; font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 6px; }
     .login-box input { margin-bottom: 16px; }
+    .login-box label.pw-show { display: flex; align-items: center; gap: 6px; margin: -8px 0 14px; font-weight: 400; color: var(--muted); cursor: pointer; }
+    .login-box .pw-show input { width: auto; margin: 0; accent-color: var(--accent); cursor: pointer; }
     #loginError, #setupError { min-height: 20px; font-size: 13px; color: var(--err); margin-bottom: 12px; }
     .login-footer { font-size: 12px; color: var(--muted); margin-top: 20px; text-align: center; }
 
@@ -775,6 +777,7 @@
     <input type="email" id="loginEmail" placeholder="you@example.com" autocomplete="username" onkeydown="if(event.key==='Enter')$('#loginPassword').focus()" />
     <label>Password</label>
     <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()" />
+    <label class="pw-show"><input type="checkbox" id="loginShowPwd" onchange="loginShowPassword(this.checked)" /> Show password</label>
     <div id="loginError"></div>
     <button class="btn" style="width:100%;justify-content:center;" onclick="doLogin()">Sign in</button>
   </div>
@@ -2113,6 +2116,11 @@ function unlockLRCard(lrId) {
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
+function loginShowPassword(show) {
+  $("#loginShowPwd").checked = show;
+  $("#loginPassword").type = show ? "text" : "password";
+}
+
 function doLogin() {
   const email = $("#loginEmail").value.trim();
   const password = $("#loginPassword").value;
@@ -2126,6 +2134,7 @@ function doLogin() {
   .then(result => {
     authToken = result.access_token;
     localStorage.setItem("authToken", authToken);
+    loginShowPassword(false);
     loadCurrentUser();
   })
   .catch(err => { $("#loginError").textContent = err.message; });
@@ -2139,6 +2148,7 @@ function logout() {
   $("#appShell").classList.remove("visible");
   $("#loginPage").style.display = "";
   $("#loginPassword").value = "";
+  loginShowPassword(false);
   $("#loginError").textContent = "";
 }
 

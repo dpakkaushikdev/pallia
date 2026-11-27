@@ -62,9 +62,17 @@ def test_editing_a_user_keeps_the_password_unless_a_new_one_is_given(client, adm
     assert _login(client, "Welcome@123").status_code == 401
 
 
-@pytest.mark.parametrize("password", ["Welcome@123 ", " Welcome@123", "Welcome@123\t", "   "])
-def test_a_password_with_a_space_at_either_end_is_refused(client, admin, password):
-    """Copied from a chat or a sheet, a password often carries a space nobody sees: nobody could then sign in."""
+def test_a_password_of_numbers_only_works(client, admin):
+    created = client.post("/api/auth/register", json={**NEW_USER, "password": "9000000001"}, headers=admin)
+
+    assert created.status_code == 201, created.text
+    assert _login(client, "9000000001").status_code == 200
+
+
+@pytest.mark.parametrize("password", ["Welcome@123 ", " Welcome@123", "Welcome@123\t", "   ", "90000 00001"])
+def test_a_password_with_a_space_in_it_is_refused(client, admin, password):
+    """A mobile number typed as '90000 00001', or a password copied with a space nobody sees, locks the user out:
+    behind the dots nobody can tell whether the space was typed again at sign-in."""
     refused = client.post("/api/auth/register", json={**NEW_USER, "password": password}, headers=admin)
 
     assert refused.status_code == 400, refused.text
