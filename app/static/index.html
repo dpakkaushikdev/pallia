@@ -1938,7 +1938,7 @@
       <div>
         <label class="field">Password <span id="umPwdHint" style="font-size:10px;color:var(--muted);text-transform:none;">(leave blank to keep)</span></label>
         <!-- new-password: the browser must not drop the admin's own saved password into this box. -->
-        <input type="password" id="umPassword" placeholder="••••••••" autocomplete="new-password" />
+        <input type="password" id="umPassword" placeholder="Type a password" autocomplete="new-password" />
         <label class="um-show"><input type="checkbox" id="umShowPwd" onchange="umShowPassword(this.checked)" /> Show password</label>
       </div>
       <div>
@@ -2567,6 +2567,7 @@ function openCreateUserModal() {
   $("#umEmail").value = ""; $("#umEmail").disabled = false;
   $("#umFullName").value = "";
   $("#umPassword").value = "";
+  $("#umPassword").placeholder = "Type a password";
   $("#umPwdHint").style.display = "none";
   $("#umRole").value = "user";
   $("#umBusiness").value = ""; $("#umBusiness").disabled = false; $("#umBusinessBoth").hidden = true;
@@ -2583,6 +2584,8 @@ function openEditUserModal(u) {
   $("#umEmail").value = u.email; $("#umEmail").disabled = true;
   $("#umFullName").value = u.full_name || "";
   $("#umPassword").value = "";
+  // The saved password is stored scrambled and cannot be shown: the box is empty, and says so (it used to show dots).
+  $("#umPassword").placeholder = "Saved one is hidden";
   $("#umPwdHint").style.display = "";
   $("#umRole").value = u.role;
   const business = u.role === "admin" ? "both" : (u.business || ((u.permissions || []).includes("eee_taxi") ? "eee_taxi" : "pallia"));
