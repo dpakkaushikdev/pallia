@@ -530,6 +530,7 @@
     .perm-check { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--input-border); border-radius: var(--radius-sm); padding: 8px 12px; cursor: pointer; transition: border-color .12s; }
     .perm-check:hover { border-color: var(--accent); }
     .perm-check input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--accent); cursor: pointer; }
+    .users-msg { background: var(--ok-bg); color: var(--ok); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; font-weight: 500; }
     .um-show { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
     .um-show input { width: auto; margin: 0; accent-color: var(--accent); cursor: pointer; }
     .perm-check span { font-size: 13px; font-weight: 500; text-transform: capitalize; }
@@ -1847,6 +1848,7 @@
         <h1>User Management</h1>
         <button class="btn" onclick="openCreateUserModal()">+ Add User</button>
       </div>
+      <div id="usersMessage" class="users-msg" role="status" style="display:none;"></div>
 
       <div class="card" style="padding:0;overflow:hidden;">
         <table class="data-table" id="usersTable">
@@ -2554,6 +2556,12 @@ function getSelectedPerms(containerId) {
   return [...$$(`#${containerId} input[type="checkbox"]:checked`)].map(el => el.value);
 }
 
+// What the last save did, above the user list: a pop-up that just closes leaves the admin guessing.
+function usersSay(text) {
+  $("#usersMessage").textContent = text;
+  $("#usersMessage").style.display = text ? "" : "none";
+}
+
 function umShowPassword(show) {
   $("#umShowPwd").checked = show;
   $("#umPassword").type = show ? "text" : "password";
@@ -2622,6 +2630,9 @@ async function saveUserModal() {
       await api("/api/auth/register", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ email, full_name: fullName || null, password, role, permissions, business }) });
     }
     closeUserModal();
+    usersSay(!isEdit ? `User ${email} is created and can sign in now with the password you typed.`
+      : password ? `Saved. ${email} now signs in with the new password you typed.`
+      : `Saved. The password of ${email} was not changed.`);
     refreshUsers();
   } catch(e) { $("#userModalError").textContent = e.message; }
 }
